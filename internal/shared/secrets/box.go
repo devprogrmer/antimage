@@ -67,6 +67,14 @@ func LoadKey(path string) ([]byte, error) {
 }
 
 // LoadOrCreateKey reads the key, generating one at 0600 on first run.
+//
+// Key creation uses an exclusive create (O_EXCL) rather than an unconditional
+// write, so that two processes racing to initialize a fresh install cannot
+// silently clobber each other's key: whichever process wins the create keeps
+// its generated key, and the loser discards its generated key and reads back
+// whatever the winner wrote. Without this, the loser's key would be lost and
+// anything already sealed under the winner's key would become permanently
+// unreadable with no error at any point.
 func LoadOrCreateKey(path string) ([]byte, error) {
 	key, err := LoadKey(path)
 	if err == nil {
@@ -84,7 +92,21 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 		return nil, fmt.Errorf("create key directory: %w", err)
 	}
 	encoded := base64.StdEncoding.EncodeToString(key)
-	if err := os.WriteFile(path, []byte(encoded), 0o600); err != nil {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		// Another process won the race and created the file first. Discard
+		// the key we generated and read back whatever the winner wrote, so
+		// both processes agree on one key.
+		return LoadKey(path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create master key file: %w", err)
+	}
+	if _, err := f.Write([]byte(encoded)); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("write master key: %w", err)
+	}
+	if err := f.Close(); err != nil {
 		return nil, fmt.Errorf("write master key: %w", err)
 	}
 	return key, nil
