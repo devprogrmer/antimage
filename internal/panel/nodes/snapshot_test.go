@@ -96,6 +96,12 @@ func TestSnapshotIsDeterministicAcrossCalls(t *testing.T) {
 	}
 }
 
+// TestServicesAreSortedByIDNotInsertionOrder exercises the end-to-end
+// outcome, but it cannot detect a removed ORDER BY on this schema: services.id
+// aliases SQLite's rowid, so a bare table scan happens to come back sorted
+// regardless of insertion order or query clauses. TestSortServicesOrdersByID
+// is what actually guards the ordering invariant, by feeding sortServices
+// scrambled input no SQL query on this table could ever produce.
 func TestServicesAreSortedByIDNotInsertionOrder(t *testing.T) {
 	s, nodeID := newNodeFixture(t)
 	ctx := context.Background()
@@ -124,6 +130,22 @@ func TestServicesAreSortedByIDNotInsertionOrder(t *testing.T) {
 		if snap.Document.Services[i].ID != want {
 			t.Errorf("service[%d].ID = %d, want %d — arrays must sort by a stable key",
 				i, snap.Document.Services[i].ID, want)
+		}
+	}
+}
+
+// TestSortServicesOrdersByID feeds sortServices deliberately scrambled input
+// directly, bypassing SQLite entirely — unlike TestServicesAreSortedByIDNotInsertionOrder,
+// this can construct row order that a query on this table could never produce,
+// so it actually discriminates a broken or removed sort.
+func TestSortServicesOrdersByID(t *testing.T) {
+	services := []Service{
+		{ID: 30}, {ID: 10}, {ID: 20},
+	}
+	sortServices(services)
+	for i, want := range []int64{10, 20, 30} {
+		if services[i].ID != want {
+			t.Errorf("services[%d].ID = %d, want %d", i, services[i].ID, want)
 		}
 	}
 }

@@ -5,9 +5,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/amyrm/antimage/internal/shared/canonical"
 )
+
+// sortServices orders services by ID so the canonical document is byte-identical
+// across builds. This does not rely on SQL row order: services.id aliases
+// SQLite's rowid today, so a bare SELECT happens to return sorted rows, but
+// that is incidental and SQLite does not guarantee scan order without ORDER BY.
+func sortServices(services []Service) {
+	sort.Slice(services, func(i, j int) bool { return services[i].ID < services[j].ID })
+}
 
 // BuildDesiredSnapshot is the one authoritative reader of desired state
 // (invariant 5).
@@ -50,6 +59,7 @@ func BuildDesiredSnapshot(ctx context.Context, tx *sql.Tx, nodeID int64) (*Snaps
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate services: %w", err)
 	}
+	sortServices(services)
 
 	doc := Document{
 		SchemaVersion: DocumentSchemaVersion,
