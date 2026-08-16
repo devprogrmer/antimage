@@ -73,6 +73,11 @@ func (s *Store) Read() *sql.DB { return s.read }
 // It commits when fn returns nil and rolls back otherwise. If fn panics,
 // the transaction is rolled back before the panic propagates, so the sole
 // write connection is never left permanently checked out.
+//
+// Warning: fn must not call Write (directly, or indirectly through
+// something like audit.BestEffort) on this same Store — the single write
+// connection is already checked out, so the nested call would block
+// waiting for it and, absent a bounded context, could hang forever.
 func (s *Store) Write(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := s.write.BeginTx(ctx, nil)
 	if err != nil {

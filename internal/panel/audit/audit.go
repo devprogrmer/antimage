@@ -15,6 +15,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -51,9 +52,13 @@ type Record struct {
 	Action     string
 	TargetType string
 	TargetID   sql.NullInt64
-	Before     any
-	After      any
-	Result     string // "ok", "denied", or "failed"
+	// Before and After are marshaled to JSON verbatim. Callers must not put
+	// credentials, tokens, session identifiers, or other secrets in either
+	// field — build the snapshot from a copy with secret-bearing fields
+	// stripped, rather than diffing the raw struct.
+	Before any
+	After  any
+	Result string // "ok", "denied", or "failed"
 }
 
 func encode(v any) (sql.NullString, error) {
@@ -106,18 +111,43 @@ func InTx(ctx context.Context, tx *sql.Tx, requestID string, a Actor, r Record) 
 	return nil
 }
 
+// bestEffortWriteTimeout bounds BestEffort's own store.Write call. It
+// defends against a deadlock: BestEffort opens a transaction on the store's
+// single write connection, so calling it while the caller already holds
+// that connection (i.e. from inside a store.Write callback) would otherwise
+// block forever with no deadline. Bounding it turns that mistake into a
+// logged, recognizable timeout instead of a wedged panel.
+const bestEffortWriteTimeout = 5 * time.Second
+
 // BestEffort records an attempt that deliberately never commits: a failed
 // login, an authorization denial, a validation rejection, a failed apply.
 // It writes outside any caller transaction so those records survive
 // rollback. It cannot fail the caller, so a storage error is logged rather
 // than returned.
+//
+// Do not call BestEffort while already inside a store.Write callback on the
+// same *store.Store: it needs the store's single write connection, which
+// the outer transaction is holding. BestEffort bounds its own write with
+// bestEffortWriteTimeout, so that mistake surfaces as a logged timeout
+// rather than a hang — but the audit record is still lost either way.
 func BestEffort(ctx context.Context, s *store.Store, requestID string, a Actor, r Record) {
+	ctx, cancel := context.WithTimeout(ctx, bestEffortWriteTimeout)
+	defer cancel()
+
 	err := s.Write(ctx, func(tx *sql.Tx) error {
 		return InTx(ctx, tx, requestID, a, r)
 	})
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to write best-effort audit record",
-			"action", r.Action, "target_type", r.TargetType, "result", r.Result,
-			"request_id", requestID, "actor_type", a.Type, "error", err)
+	if err == nil {
+		return
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		slog.ErrorContext(ctx, "best-effort audit write timed out waiting for the store's write connection; "+
+			"BestEffort was likely called from inside an in-progress store.Write on the same store",
+			"action", r.Action, "target_type", r.TargetType, "result", r.Result,
+			"request_id", requestID, "actor_type", a.Type, "timeout", bestEffortWriteTimeout, "error", err)
+		return
+	}
+	slog.ErrorContext(ctx, "failed to write best-effort audit record",
+		"action", r.Action, "target_type", r.TargetType, "result", r.Result,
+		"request_id", requestID, "actor_type", a.Type, "error", err)
 }

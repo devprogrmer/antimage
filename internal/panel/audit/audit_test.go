@@ -127,10 +127,47 @@ func TestAdminActorWithoutIDIsRejected(t *testing.T) {
 	}
 }
 
+// TestBestEffortDoesNotHangInsideWrite proves BestEffort returns (rather
+// than deadlocking forever) when called from inside a store.Write callback
+// on the same store — the store's write connection is capped at one, so
+// without BestEffort's own bounded context this would block forever on the
+// connection the outer Write is already holding.
+func TestBestEffortDoesNotHangInsideWrite(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Write(ctx, func(tx *sql.Tx) error {
+			BestEffort(ctx, s, "req-5", SystemActor("test"), Record{
+				Action: "denied.attempt", TargetType: "admin", Result: "denied",
+			})
+			return nil
+		})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("outer Write: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("outer Write did not return within 10s — BestEffort likely deadlocked " +
+			"on the store's single write connection instead of timing out")
+	}
+}
+
 // TestAuditLogIsAppendOnly scans audit.go's actual source for mutation
 // paths, rather than relying on a hardcoded switch that can never fail.
 // It must genuinely fail if someone adds an Update, Delete, or Purge
-// function, or an UPDATE/DELETE statement against audit_log.
+// function or method, or an UPDATE/DELETE statement against audit_log.
+//
+// This is a syntactic source scan, not a structural guarantee: it matches
+// free functions and methods with a `func Name` / `func (recv) Name`
+// declaration, but it cannot see a mutation that reaches the database
+// through an equivalently-named helper, nor SQL text assembled through
+// fmt.Sprintf or string concatenation instead of appearing as a literal
+// "UPDATE "/"DELETE " token on the same line as "AUDIT_LOG".
 func TestAuditLogIsAppendOnly(t *testing.T) {
 	src, err := os.ReadFile("audit.go")
 	if err != nil {
@@ -139,7 +176,9 @@ func TestAuditLogIsAppendOnly(t *testing.T) {
 	text := string(src)
 
 	for _, banned := range []string{"Update", "Delete", "Purge"} {
-		re := regexp.MustCompile(`func ` + banned + `\b`)
+		// Matches both a free function ("func Delete(") and a method with a
+		// receiver ("func (a *Auditor) Delete(").
+		re := regexp.MustCompile(`func\s+(\([^)]*\)\s*)?` + banned + `\b`)
 		if re.MatchString(text) {
 			t.Errorf("audit.go declares func %s; the log must be append-only", banned)
 		}
