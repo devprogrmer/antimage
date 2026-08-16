@@ -108,9 +108,7 @@ func (s *Sessions) Lookup(ctx context.Context, token string) (*Session, error) {
 		return nil, ErrSessionInvalid
 	}
 	// Absolute lifetime: fixed at Create time, never extended by activity.
-	// Strictly greater-than so a session stays valid through the full
-	// AbsoluteLifetime window and expires only once it is exceeded.
-	if now.Unix() > expiresAt {
+	if now.Unix() >= expiresAt {
 		return nil, ErrSessionInvalid
 	}
 	// Idle timeout: measured from the last successful lookup, so continuous

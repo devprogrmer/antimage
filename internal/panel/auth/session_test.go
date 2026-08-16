@@ -98,16 +98,18 @@ func TestAbsoluteLifetimeExpiresActiveSession(t *testing.T) {
 	ctx := context.Background()
 	token, _ := sess.Create(ctx, adminID, "10.0.0.1", "curl/8")
 
-	// Stay active: look up every hour so idle never trips.
-	for elapsed := time.Duration(0); elapsed < AbsoluteLifetime; elapsed += time.Hour {
+	// Stay active up to one hour short of the absolute lifetime.
+	for elapsed := time.Hour; elapsed < AbsoluteLifetime; elapsed += time.Hour {
 		clk.advance(time.Hour)
 		if _, err := sess.Lookup(ctx, token); err != nil {
-			t.Fatalf("session died at %v: %v", elapsed, err)
+			t.Fatalf("session died early at %v: %v", elapsed, err)
 		}
 	}
+
+	// One more hour puts the clock exactly at expires_at, where it must be dead.
 	clk.advance(time.Hour)
 	if _, err := sess.Lookup(ctx, token); err == nil {
-		t.Fatal("session outlived AbsoluteLifetime despite continuous activity")
+		t.Fatal("session still valid at exactly expires_at; expiry must be inclusive")
 	}
 }
 
