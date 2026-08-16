@@ -9,6 +9,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/pressly/goose/v3"
@@ -69,12 +70,20 @@ func (s *Store) migrate() error {
 func (s *Store) Read() *sql.DB { return s.read }
 
 // Write runs fn inside a transaction on the single write connection.
-// It commits when fn returns nil and rolls back otherwise.
+// It commits when fn returns nil and rolls back otherwise. If fn panics,
+// the transaction is rolled back before the panic propagates, so the sole
+// write connection is never left permanently checked out.
 func (s *Store) Write(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := s.write.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		}
+	}()
 	if err := fn(tx); err != nil {
 		_ = tx.Rollback()
 		return err
@@ -85,11 +94,10 @@ func (s *Store) Write(ctx context.Context, fn func(*sql.Tx) error) error {
 	return nil
 }
 
+// Close closes both handles unconditionally and joins any errors from
+// either, so a double-fault on shutdown does not lose diagnostics.
 func (s *Store) Close() error {
 	rerr := s.read.Close()
 	werr := s.write.Close()
-	if werr != nil {
-		return werr
-	}
-	return rerr
+	return errors.Join(rerr, werr)
 }
