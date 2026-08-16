@@ -1,0 +1,8 @@
+bin/
+*.db
+*.db-wal
+*.db-shm
+master.key
+web/node_modules/
+web/dist/
+.env
