@@ -96,19 +96,30 @@ func (l *Limiter) RecordFailure(ctx context.Context, username, ip string) error 
 	})
 }
 
-// Reset clears counters after a successful login, and opportunistically
-// prunes rows that have aged out of the window.
+// Reset clears the account's failure counter after a successful login, and
+// opportunistically prunes rows that have aged out of the window.
+//
+// It deliberately does NOT clear kind='ip' rows. A successful authentication
+// proves that one account's credentials were correct; it says nothing about
+// whether the source IP is benign. login_attempts has no per-(ip, username)
+// pairing, so an IP-wide delete here would wipe every other username's
+// contribution to that IP's failure count too. That is exactly the attack
+// the IP limit exists to stop: spray 20 usernames from one IP to trip the
+// limit, then use a correct guess among them (or any other successful login
+// from that IP, including an unrelated user behind the same NAT) to clear
+// the bucket and resume the spray. Do not add an IP delete back here.
+//
+// The accepted cost: a legitimate user behind a shared NAT that has
+// genuinely accumulated IPFailureLimit failures in the window will still
+// have to wait out the window after authenticating successfully. IP
+// failures decay by time alone. That is the correct trade for a
+// deliberately coarse, shared-fate control.
 func (l *Limiter) Reset(ctx context.Context, username, ip string) error {
 	cutoff := l.now().UTC().Add(-Window).Unix()
 	return l.store.Write(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM login_attempts WHERE kind = 'account' AND subject = ?`,
 			strings.ToLower(username)); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM login_attempts WHERE kind = 'ip' AND subject = ?`,
-			strings.ToLower(ip)); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
