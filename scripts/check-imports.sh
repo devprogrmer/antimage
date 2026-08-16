@@ -2,9 +2,14 @@
 # Enforces the adapter/panel boundary from the design spec section 3.
 set -euo pipefail
 
-violations=$(go list -deps -f '{{.ImportPath}}' \
-  github.com/amyrm/antimage/internal/node/adapter/... \
-  | grep 'github.com/amyrm/antimage/internal/panel' || true)
+if ! deps=$(go list -deps -f '{{.ImportPath}}' \
+  github.com/amyrm/antimage/internal/node/adapter/... 2>&1); then
+  echo "FAIL: go list failed while resolving internal/node/adapter dependencies."
+  echo "$deps"
+  exit 1
+fi
+
+violations=$(printf '%s\n' "$deps" | grep 'github.com/amyrm/antimage/internal/panel' || true)
 
 if [ -n "$violations" ]; then
   echo "FAIL: internal/node/adapter must not depend on internal/panel."
