@@ -87,3 +87,18 @@ func TestNilActorIsDenied(t *testing.T) {
 		t.Error("nil actor was not denied")
 	}
 }
+
+func TestSuperAdminStillNeedsThePermission(t *testing.T) {
+	// The super flag bypasses scope only, never the permission check. A
+	// super admin assigned a custom role stripped of a permission must
+	// still be denied it — otherwise Check's ordering is backwards.
+	a := actor("super_admin", true, []Permission{PermNodeRead})
+
+	if err := Check(a, PermNodeWrite, Target{Kind: TargetNone}); !errors.Is(err, ErrForbidden) {
+		t.Errorf("super admin without permission was granted a global action: err = %v, want ErrForbidden", err)
+	}
+
+	if err := Check(a, PermNodeWrite, Target{Kind: TargetNode, ID: 1}); !errors.Is(err, ErrForbidden) {
+		t.Errorf("super admin without permission was granted a scoped action: err = %v, want ErrForbidden", err)
+	}
+}
