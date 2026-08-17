@@ -6,11 +6,14 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
+	"encoding/hex"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -62,3 +65,24 @@ func enrolledNodeFixture(t *testing.T) (*store.Store, int64, []byte, string) {
 	}
 	return s, nodeID, certDER, fingerprint
 }
+
+func depsFor(t *testing.T, s *store.Store, now time.Time) Deps {
+	t.Helper()
+	box, _ := secrets.NewBox(bytes.Repeat([]byte{9}, secrets.KeySize))
+	ca, err := nodes.LoadOrCreateCA(context.Background(), s, box)
+	if err != nil {
+		t.Fatalf("LoadOrCreateCA: %v", err)
+	}
+	return Deps{
+		Store: s, CA: ca, Hub: NewHub(),
+		Now:         func() time.Time { return now },
+		DownloadURL: "https://panel.example/agent",
+	}
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func itoa64(i int64) string { return strconv.FormatInt(i, 10) }
