@@ -236,7 +236,21 @@ func (c *Client) runSession(
 
 		case msg, ok := <-incoming:
 			if !ok {
-				return errors.New("stream closed")
+				// The receive goroutine sends the real failure to recvErr
+				// before its deferred close of incoming, so whenever the
+				// stream died from a Recv error that error is already
+				// buffered here. Both channels are then ready at once, and a
+				// bare select would pick between them at random — losing the
+				// actual cause roughly half the time, precisely when the loop
+				// was busy reconciling rather than parked in the select. To an
+				// operator that is the difference between "certificate
+				// expired" and an unexplained reconnect loop.
+				select {
+				case err := <-recvErr:
+					return err
+				default:
+					return errors.New("stream closed")
+				}
 			}
 			switch msg.Payload.(type) {
 			case *pb.PanelMessage_RevisionBump, *pb.PanelMessage_FetchNow:

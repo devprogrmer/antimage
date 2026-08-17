@@ -300,3 +300,58 @@ func (s *chattyStream) Recv() (*pb.PanelMessage, error) {
 	// about goroutine lifetime rather than message handling.
 	return &pb.PanelMessage{}, nil
 }
+
+// When the stream dies while the session loop is busy reconciling rather than
+// parked in its select, the real failure and the closed incoming channel
+// become ready together. A bare select picks between them at random, so the
+// actual cause is lost roughly half the time — leaving an operator with an
+// unexplained reconnect loop instead of "certificate expired".
+func TestSessionReportsTheRealStreamFailure(t *testing.T) {
+	const runs = 300
+	lost := 0
+
+	for i := 0; i < runs; i++ {
+		cfg := &Config{
+			PanelURL: "panel.example:8443", CAFingerprint: "dead",
+			StateDir: t.TempDir(), NodeID: 1,
+		}
+		c := NewClient(cfg, stub.New(t.TempDir()),
+			NewFakeClock(time.Unix(1_700_000_000, 0).UTC()), tls.Certificate{}, nil)
+
+		err := c.runSession(context.Background(), &fakeControlClient{},
+			func(context.Context) (pb.Control_StreamClient, error) {
+				return &busyStream{}, nil
+			})
+		if err == nil || !strings.Contains(err.Error(), "certificate expired") {
+			lost++
+		}
+	}
+
+	if lost > 0 {
+		t.Errorf("the stream's real failure was replaced by a generic message in %d/%d runs; "+
+			"an operator loses the reason nodes are reconnecting", lost, runs)
+	}
+}
+
+// busyStream delivers one FetchNow, which sends the loop into reconcileOnce so
+// it is NOT parked in select, then fails Recv. Both recvErr and the closed
+// incoming channel are therefore ready when the loop returns to its select.
+type busyStream struct {
+	fakeStream
+	mu sync.Mutex
+	n  int
+}
+
+var _ pb.Control_StreamClient = (*busyStream)(nil)
+
+func (s *busyStream) Send(*pb.AgentMessage) error { return nil }
+
+func (s *busyStream) Recv() (*pb.PanelMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.n++
+	if s.n == 1 {
+		return &pb.PanelMessage{Payload: &pb.PanelMessage_FetchNow{FetchNow: &pb.FetchNow{}}}, nil
+	}
+	return nil, errors.New("certificate expired")
+}
