@@ -14,6 +14,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/shared/secrets"
 )
 
 type Deps struct {
@@ -22,7 +23,11 @@ type Deps struct {
 	Limiter  *auth.Limiter
 	Hub      *control.Hub
 	CA       *nodes.CA
-	Now      func() time.Time
+	// Box decrypts per-admin TOTP secrets. Nil means the master key is not
+	// loaded: handleLogin then DENIES any admin who has TOTP enrolled rather
+	// than admitting them on a password alone. Task 27's main.go populates it.
+	Box *secrets.Box
+	Now func() time.Time
 }
 
 func (d Deps) now() time.Time {

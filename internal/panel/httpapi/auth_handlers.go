@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -81,9 +82,11 @@ func (d Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		hash    string
 		status  string
 	)
+	var totpSecretEnc []byte
 	err = d.Store.Read().QueryRowContext(ctx,
-		`SELECT id, password_hash, status FROM admins WHERE username = ? COLLATE NOCASE`,
-		req.Username).Scan(&adminID, &hash, &status)
+		`SELECT id, password_hash, status, totp_secret_enc
+		   FROM admins WHERE username = ? COLLATE NOCASE`,
+		req.Username).Scan(&adminID, &hash, &status, &totpSecretEnc)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Hash anyway, so response timing does not reveal whether the user exists.
 		_, _ = auth.VerifyPassword(
@@ -101,6 +104,36 @@ func (d Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !ok || status != "active" {
 		deny()
 		return
+	}
+
+	// Second factor. An admin who enrolled TOTP has been told they are
+	// protected by it, so a password alone must never be enough. Every branch
+	// below denies rather than proceeding: a panel that cannot check the
+	// factor must not decide the factor passed.
+	if len(totpSecretEnc) > 0 {
+		if d.Box == nil {
+			// The master key is absent while an encrypted secret exists. This
+			// is the same fail-closed posture the store takes at startup;
+			// letting the login through would silently downgrade the account
+			// to single-factor exactly when the panel is misconfigured.
+			slog.ErrorContext(ctx, "admin has TOTP enrolled but no secret box is configured; denying login",
+				"admin_id", adminID, "request_id", RequestID(ctx))
+			deny()
+			return
+		}
+		secret, err := d.Box.Open(totpSecretEnc)
+		if err != nil {
+			slog.ErrorContext(ctx, "could not open TOTP secret; denying login",
+				"admin_id", adminID, "request_id", RequestID(ctx), "error", err)
+			deny()
+			return
+		}
+		if !auth.VerifyTOTP(string(secret), req.TOTP, d.now()) {
+			// deny() also records a rate-limiter failure, so the code space
+			// cannot be brute-forced any faster than the password can.
+			deny()
+			return
+		}
 	}
 
 	if err := d.Limiter.Reset(ctx, req.Username, ip); err != nil {
