@@ -53,11 +53,21 @@ func RecordApplyRun(ctx context.Context, s *store.Store, in ApplyRunInput) (Outc
 		err := tx.QueryRowContext(ctx,
 			`SELECT doc_sha256 FROM node_revisions WHERE node_id = ? AND revision = ?`,
 			in.NodeID, in.TargetRevision).Scan(&expectedSHA)
+		known := err == nil
 		if err != nil && err != sql.ErrNoRows {
 			return fmt.Errorf("read expected hash: %w", err)
 		}
 
-		integrity := in.Converged && expectedSHA != "" && in.DocSHA256 != expectedSHA
+		// Revision 0 is the pre-commit state: a node that has never had a
+		// desired document legitimately converges on nothing, and no
+		// node_revisions row exists for it (revision has CHECK (revision > 0)).
+		// Above 0, a missing row means the agent applied a revision this panel
+		// never issued — a restored backup, a pruned history, or a node talking
+		// to the wrong panel. Trusting it would advance applied_revision to a
+		// document whose hash was never verified against anything.
+		unissued := in.Converged && in.TargetRevision > 0 && !known
+		mismatch := in.Converged && known && in.DocSHA256 != expectedSHA
+		integrity := unissued || mismatch
 
 		var (
 			runOutcome string
@@ -124,11 +134,16 @@ func RecordApplyRun(ctx context.Context, s *store.Store, in ApplyRunInput) (Outc
 		}
 
 		if integrity {
+			reason := "hash_mismatch"
+			if unissued {
+				reason = "unissued_revision"
+			}
 			if err := audit.InTx(ctx, tx, "", audit.SystemActor("reconciler"), audit.Record{
 				Action:     "node.integrity_fault",
 				TargetType: "node",
 				TargetID:   sql.NullInt64{Int64: in.NodeID, Valid: true},
 				After: map[string]any{
+					"reason":   reason,
 					"revision": in.TargetRevision,
 					"expected": expectedSHA,
 					"reported": in.DocSHA256,
