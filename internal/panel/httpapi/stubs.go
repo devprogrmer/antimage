@@ -14,10 +14,5 @@ func notImplemented(w http.ResponseWriter, _ *http.Request) {
 	WriteError(w, http.StatusNotImplemented, "not_implemented", "not implemented yet")
 }
 
-// Task 25 (audit and sessions) replaces these three.
-func (d Deps) handleListAudit(w http.ResponseWriter, r *http.Request)     { notImplemented(w, r) }
-func (d Deps) handleListSessions(w http.ResponseWriter, r *http.Request)  { notImplemented(w, r) }
-func (d Deps) handleRevokeSession(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }
-
 // Task 26 (SSE live status) replaces this one.
 func (d Deps) handleEvents(w http.ResponseWriter, r *http.Request) { notImplemented(w, r) }

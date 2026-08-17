@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,8 @@ type testEnv struct {
 	store   *store.Store
 	handler http.Handler
 }
+
+func itoa64(i int64) string { return strconv.FormatInt(i, 10) }
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()

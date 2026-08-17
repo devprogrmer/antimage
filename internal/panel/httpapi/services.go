@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 )
@@ -47,6 +48,34 @@ func enabledOf(req serviceRequest) int {
 	return 1
 }
 
+// rejectInvalidService answers a schema violation with 422 and records it,
+// per spec invariant 9: a validation rejection deliberately never commits, so
+// there is no transaction for an audit row to ride along in, and it is one of
+// the three cases audit.BestEffort exists for.
+//
+// Only the adapter kind and the validator's own message are recorded. The
+// submitted params are not: an adapter is free to publish a schema with a
+// credential field, and an audit row is the wrong place to preserve one.
+//
+// The call is safe because both callers reject before opening a transaction —
+// BestEffort needs the store's single write connection, which a caller inside
+// store.Write would already be holding.
+func (d Deps) rejectInvalidService(w http.ResponseWriter, r *http.Request,
+	actor *rbac.Actor, action string, target rbac.Target, req serviceRequest, cause error) {
+	ctx := r.Context()
+	audit.BestEffort(ctx, d.Store, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
+		Action:     action,
+		TargetType: targetTypeName(target.Kind),
+		TargetID:   sql.NullInt64{Int64: target.ID, Valid: true},
+		Result:     "denied",
+		After: map[string]any{
+			"adapter_kind": req.AdapterKind,
+			"reason":       cause.Error(),
+		},
+	})
+	WriteError(w, http.StatusUnprocessableEntity, "validation", cause.Error())
+}
+
 func (d Deps) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireActor(w, r)
 	if !ok {
@@ -57,7 +86,7 @@ func (d Deps) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
 		return
 	}
-	if !authorize(w, actor, rbac.PermServiceWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
+	if !d.authorize(w, r, actor, rbac.PermServiceWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 	var req serviceRequest
@@ -66,7 +95,8 @@ func (d Deps) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateService(req); err != nil {
-		WriteError(w, http.StatusUnprocessableEntity, "validation", err.Error())
+		d.rejectInvalidService(w, r, actor, "service.create",
+			rbac.Target{Kind: rbac.TargetNode, ID: nodeID}, req, err)
 		return
 	}
 
@@ -118,7 +148,7 @@ func (d Deps) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !authorize(w, actor, rbac.PermServiceWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
+	if !d.authorize(w, r, actor, rbac.PermServiceWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 
@@ -128,7 +158,8 @@ func (d Deps) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateService(req); err != nil {
-		WriteError(w, http.StatusUnprocessableEntity, "validation", err.Error())
+		d.rejectInvalidService(w, r, actor, "service.update",
+			rbac.Target{Kind: rbac.TargetService, ID: serviceID}, req, err)
 		return
 	}
 
@@ -168,7 +199,7 @@ func (d Deps) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !authorize(w, actor, rbac.PermServiceWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
+	if !d.authorize(w, r, actor, rbac.PermServiceWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 

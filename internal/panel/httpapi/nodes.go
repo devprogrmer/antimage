@@ -31,15 +31,64 @@ func pathInt64(r *http.Request, key string) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, key), 10, 64)
 }
 
+// targetTypeName maps an authorization target onto the audit log's
+// target_type vocabulary. TargetNone has no subject, so it stays empty.
+func targetTypeName(k rbac.TargetKind) string {
+	switch k {
+	case rbac.TargetNode:
+		return "node"
+	case rbac.TargetService:
+		return "service"
+	default:
+		return ""
+	}
+}
+
 // authorize is the single chokepoint every handler calls. The denial message
 // is identical for "no permission" and "out of scope": distinguishing them
 // would let a reseller probe for the existence of another's node.
-func authorize(w http.ResponseWriter, a *rbac.Actor, p rbac.Permission, t rbac.Target) bool {
-	if err := rbac.Check(a, p, t); err != nil {
-		WriteError(w, http.StatusForbidden, "forbidden", "permission denied")
-		return false
+//
+// Every denial is recorded with audit.BestEffort per spec invariant 9: a
+// rejected attempt never commits, so it has no transaction to ride along in,
+// and it is precisely the event that must not be lost. Reads are otherwise
+// unaudited because successful reads are noise; a denied read is not a read,
+// it is a probe, so the permission involved does not change the decision to
+// record it.
+//
+// BestEffort takes the store's single write connection. Calling it from
+// inside a store.Write callback on the same store would deadlock until its
+// own timeout, so this must stay on the pre-write path — which it is: every
+// caller authorizes before it opens a transaction.
+func (d Deps) authorize(w http.ResponseWriter, r *http.Request,
+	a *rbac.Actor, p rbac.Permission, t rbac.Target) bool {
+	if err := rbac.Check(a, p, t); err == nil {
+		return true
 	}
-	return true
+	ctx := r.Context()
+	rec := audit.Record{
+		Action:     "authz.deny",
+		TargetType: targetTypeName(t.Kind),
+		Result:     "denied",
+		After: map[string]any{
+			"permission": string(p),
+			"method":     r.Method,
+			"path":       r.URL.Path,
+		},
+	}
+	if t.Kind != rbac.TargetNone {
+		rec.TargetID = sql.NullInt64{Int64: t.ID, Valid: true}
+	}
+	// rbac.Check also rejects a nil actor. Handlers use requireActor so that
+	// should be unreachable, but the audit row must not be the thing that
+	// panics if it ever is: actor_type 'admin' requires an admin id.
+	who := audit.Actor{Type: audit.ActorSystem, Label: "authz", IP: clientIP(r)}
+	if a != nil {
+		who = d.actorAudit(a, r)
+	}
+	audit.BestEffort(ctx, d.Store, RequestID(ctx), who, rec)
+
+	WriteError(w, http.StatusForbidden, "forbidden", "permission denied")
+	return false
 }
 
 // nodeSummary is the wire shape of a node row.
@@ -89,7 +138,7 @@ func (d Deps) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !authorize(w, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNone}) {
+	if !d.authorize(w, r, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
 
@@ -116,7 +165,7 @@ func (d Deps) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
 		return
 	}
-	if !authorize(w, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
+	if !d.authorize(w, r, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
 		return
 	}
 	node, err := d.Store.GetNode(r.Context(), rbac.ScopeOf(actor), id)
@@ -136,7 +185,7 @@ func (d Deps) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !authorize(w, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNone}) {
+	if !d.authorize(w, r, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
 	var req struct {
@@ -204,7 +253,7 @@ func (d Deps) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
 		return
 	}
-	if !authorize(w, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
+	if !d.authorize(w, r, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
 		return
 	}
 	ctx := r.Context()
@@ -237,7 +286,7 @@ func (d Deps) handleIssueEnrollToken(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
 		return
 	}
-	if !authorize(w, actor, rbac.PermNodeEnroll, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
+	if !d.authorize(w, r, actor, rbac.PermNodeEnroll, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
 		return
 	}
 	now := d.now()
@@ -270,7 +319,7 @@ func (d Deps) handleListRevisions(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
 		return
 	}
-	if !authorize(w, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
+	if !d.authorize(w, r, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
 		return
 	}
 	rows, err := d.Store.Read().QueryContext(r.Context(),
@@ -317,7 +366,7 @@ func (d Deps) handleListApplyRuns(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
 		return
 	}
-	if !authorize(w, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
+	if !d.authorize(w, r, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNode, ID: id}) {
 		return
 	}
 	rows, err := d.Store.Read().QueryContext(r.Context(),
