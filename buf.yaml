@@ -1,0 +1,24 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # SERVICE_SUFFIX would require Enrollment -> EnrollmentService, which the
+    # Go generator then turns into EnrollmentServiceClient/Server. The suffix
+    # is already carried by the generated type names; adding it here only
+    # stutters.
+    - SERVICE_SUFFIX
+    # RPC_REQUEST_STANDARD_NAME / RPC_RESPONSE_STANDARD_NAME want
+    # StreamRequest/StreamResponse for Control.Stream. That naming is actively
+    # wrong for a bidirectional stream: messages flow continuously in both
+    # directions and are not request/response pairs. AgentMessage and
+    # PanelMessage name the sender, which is what a reader needs to know.
+    # The same rules want GetDesiredSnapshotRequest; SnapshotRequest is
+    # clearer and the RPC it belongs to is unambiguous.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

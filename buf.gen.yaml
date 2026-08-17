@@ -1,0 +1,17 @@
+version: v2
+
+# `module` strips the Go module prefix from each file's go_package option, so
+# generated code lands at internal/shared/proto/antimage/v1/ rather than beside
+# the .proto sources or under a github.com/... directory tree.
+managed:
+  enabled: false
+
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: .
+    opt: module=github.com/amyrm/antimage
+  - remote: buf.build/grpc/go
+    out: .
+    opt:
+      - module=github.com/amyrm/antimage
+      - require_unimplemented_servers=false

@@ -2,10 +2,25 @@ GO      ?= go
 LDFLAGS := -X github.com/amyrm/antimage/internal/shared/version.Version=$(shell git describe --tags --always --dirty)
 BUILD   := CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)"
 
-.PHONY: test lint build check-imports clean
+.PHONY: test lint build check-imports proto proto-lint clean
+
+# buf is installed with `go install github.com/bufbuild/buf/cmd/buf@latest`,
+# which places it in $(go env GOPATH)/bin. Put that directory on PATH rather
+# than installing buf system-wide.
+BUF ?= buf
 
 test:
 	$(GO) test ./... -race -count=1
+
+proto-lint:
+	$(BUF) lint
+
+# Regenerates internal/shared/proto/**. The `module=` option in buf.gen.yaml
+# strips the Go module prefix from each go_package, so output lands next to
+# the rest of the internal tree rather than beside the .proto sources.
+# Generated files are committed: the build must not require buf.
+proto: proto-lint
+	$(BUF) generate
 
 lint:
 	$(GO) vet ./...
