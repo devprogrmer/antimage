@@ -215,7 +215,7 @@ func TestUnissuedRevisionIsIntegrityNotConvergence(t *testing.T) {
 	out, err := RecordApplyRun(ctx, s, ApplyRunInput{
 		NodeID: nodeID, TargetRevision: 2,
 		Converged: true, DocSHA256: "a-hash-this-panel-never-issued",
-		Now:       time.Unix(1_700_000_000, 0).UTC(),
+		Now: time.Unix(1_700_000_000, 0).UTC(),
 	})
 	if err != nil {
 		t.Fatalf("RecordApplyRun: %v", err)

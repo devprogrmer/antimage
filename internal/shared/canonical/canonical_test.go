@@ -116,7 +116,7 @@ func TestHashIsStableHex(t *testing.T) {
 func TestSupplementaryPlaneKeysUseUTF16Ordering(t *testing.T) {
 	m := map[string]any{
 		"\U0001F600": "emoji",
-		"￿":     "bmp-max",
+		"￿":          "bmp-max",
 	}
 	got, err := Marshal(m)
 	if err != nil {
