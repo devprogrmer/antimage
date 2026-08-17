@@ -173,6 +173,76 @@ func TestHandEditIsDetectedAsDrift(t *testing.T) {
 	}
 }
 
+// A desired service whose id collides with a pre-existing, unmanaged file
+// must never have that file overwritten — this is the guard in the write
+// loop (as opposed to TestUnmanagedFileIsNeverTouched, which only exercises
+// the removal loop's guard, since its foreign file has no matching desired
+// service).
+//
+// FINDING (reported, not fixed, per instruction): the current
+// implementation's write loop skips the colliding service entirely rather
+// than surfacing it as blocked work, so Plan converges to an empty plan
+// even though the desired state for that service was never satisfied. This
+// test pins the file-safety property and documents the observed
+// convergence behavior rather than asserting an aspiration.
+func TestUnmanagedFileWithCollidingIDIsNeverOverwritten(t *testing.T) {
+	root := t.TempDir()
+	foreign := filepath.Join(root, "service-10.conf")
+	original := "hand written, colliding id, no marker\n"
+	if err := os.WriteFile(foreign, []byte(original), 0o600); err != nil {
+		t.Fatalf("write foreign file: %v", err)
+	}
+
+	a := New(root)
+	ctx := context.Background()
+	d := desiredWith(svc(10, 443, true))
+
+	// Run several rounds by hand rather than via the converge helper: it
+	// t.Fatal's if it never reaches an empty plan, and — per the finding
+	// above — this scenario does reach one, just not because desired state
+	// was actually satisfied.
+	var lastPlan adapter.Plan
+	for round := 1; round <= 3; round++ {
+		obs, err := a.Observe(ctx)
+		if err != nil {
+			t.Fatalf("round %d Observe: %v", round, err)
+		}
+		plan, err := a.Plan(ctx, d, obs)
+		if err != nil {
+			t.Fatalf("round %d Plan: %v", round, err)
+		}
+		lastPlan = plan
+		for _, step := range plan.Steps {
+			res, err := a.Apply(ctx, step)
+			if err != nil {
+				t.Fatalf("round %d Apply step %d: %v", round, step.Seq, err)
+			}
+			if !res.OK {
+				t.Fatalf("round %d step %d failed: %s", round, step.Seq, res.Err)
+			}
+		}
+	}
+
+	body, err := os.ReadFile(foreign)
+	if err != nil {
+		t.Fatalf("foreign file was removed: %v", err)
+	}
+	if string(body) != original {
+		t.Errorf("foreign file was modified: %q", body)
+	}
+	if strings.HasPrefix(string(body), MarkerPrefix) {
+		t.Error("foreign file gained a marker; the adapter overwrote a file it did not create")
+	}
+
+	// Documents observed behavior: Plan silently converges to empty despite
+	// never having satisfied service 10's desired state, because the write
+	// loop's ownership guard skips the step outright instead of reporting
+	// it as outstanding. See the FINDING above.
+	if !lastPlan.IsEmpty() {
+		t.Errorf("expected the current (silent-convergence) behavior but got a non-empty plan: %+v", lastPlan.Steps)
+	}
+}
+
 // A file antimage did not write must never be touched.
 func TestUnmanagedFileIsNeverTouched(t *testing.T) {
 	root := t.TempDir()

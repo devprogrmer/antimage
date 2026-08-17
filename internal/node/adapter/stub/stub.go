@@ -224,8 +224,17 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 	return adapter.StepResult{Seq: step.Seq, OK: true}, nil
 }
 
-// atomicWrite writes to a temporary file in the same directory and renames,
-// so a crash mid-write can never leave a truncated config behind.
+// atomicWrite writes to a temporary file in the same directory and renames
+// it into place, so a crash mid-write can never leave a truncated config
+// behind.
+//
+// Durability: the temp file's contents are fsynced before the rename, so
+// the bytes are on disk by the time the rename is issued. After a
+// successful rename, the containing directory is fsynced too, on platforms
+// that support it, so the directory entry pointing at those bytes survives
+// a crash as well — without that second sync, a crash between rename and
+// the next directory metadata flush can, on some filesystems and journaling
+// modes, leave the rename undone even though the data itself is durable.
 func atomicWrite(path string, body []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".antimage-*")
@@ -253,6 +262,20 @@ func atomicWrite(path string, body []byte) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("rename into place: %w", err)
 	}
+
+	// Best effort: the write has already succeeded at this point. Opening
+	// or syncing a directory handle is not supported on Windows at all, and
+	// even on platforms that do support it, a failed directory sync does
+	// not invalidate the rename that already landed — it only widens the
+	// crash window for the directory entry, which the reconciler's next
+	// Observe/Plan/Apply cycle would self-heal regardless. So neither error
+	// here is allowed to turn a successful config write into a reported
+	// failure.
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+
 	return nil
 }
 
