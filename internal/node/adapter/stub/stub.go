@@ -155,7 +155,19 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 			}
 		}
 		if present && !obs.Managed {
-			// Never overwrite a file we did not create.
+			// Never overwrite a file we did not create — but say so. A
+			// silently-skipped step here would let this service's desired
+			// state go unapplied while the plan still reports converged,
+			// which is exactly the class of silent failure the Plan/Apply
+			// split exists to surface. Emitting a step that Apply then
+			// fails keeps this service's blockage visible and diagnosable
+			// without holding up any other service's convergence.
+			steps = append(steps, adapter.Step{
+				Seq:        next(),
+				Kind:       "blocked_unmanaged",
+				Disruption: adapter.DisruptNone, // nothing will be done at all
+				ServiceID:  svc.ID,
+			})
 			continue
 		}
 
@@ -216,6 +228,16 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		if err := os.Remove(a.path(step.ServiceID)); err != nil && !os.IsNotExist(err) {
 			return fail(fmt.Errorf("remove service %d: %w", step.ServiceID, err))
 		}
+
+	case "blocked_unmanaged":
+		// Never write here — the file at this path exists and was not
+		// created by antimage. Fail the step so the caller sees this
+		// service as unconverged, instead of silently doing nothing and
+		// letting the plan appear to have succeeded.
+		return fail(fmt.Errorf(
+			"service %d: refusing to write %s: file exists but was not created by antimage; "+
+				"remove it or adopt it (add the antimage marker) to let this service converge",
+			step.ServiceID, a.path(step.ServiceID)))
 
 	default:
 		return fail(fmt.Errorf("unknown step kind %q", step.Kind))

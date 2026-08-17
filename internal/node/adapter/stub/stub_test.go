@@ -179,12 +179,11 @@ func TestHandEditIsDetectedAsDrift(t *testing.T) {
 // the removal loop's guard, since its foreign file has no matching desired
 // service).
 //
-// FINDING (reported, not fixed, per instruction): the current
-// implementation's write loop skips the colliding service entirely rather
-// than surfacing it as blocked work, so Plan converges to an empty plan
-// even though the desired state for that service was never satisfied. This
-// test pins the file-safety property and documents the observed
-// convergence behavior rather than asserting an aspiration.
+// The refusal must also be visible: Plan emits a "blocked_unmanaged" step
+// for the colliding service instead of silently skipping it, and Apply
+// fails that step with a diagnosable error. A plan that silently converged
+// to empty here would let the reconciler report the node as in sync while
+// this service's desired state was never actually applied.
 func TestUnmanagedFileWithCollidingIDIsNeverOverwritten(t *testing.T) {
 	root := t.TempDir()
 	foreign := filepath.Join(root, "service-10.conf")
@@ -197,30 +196,34 @@ func TestUnmanagedFileWithCollidingIDIsNeverOverwritten(t *testing.T) {
 	ctx := context.Background()
 	d := desiredWith(svc(10, 443, true))
 
-	// Run several rounds by hand rather than via the converge helper: it
-	// t.Fatal's if it never reaches an empty plan, and — per the finding
-	// above — this scenario does reach one, just not because desired state
-	// was actually satisfied.
-	var lastPlan adapter.Plan
-	for round := 1; round <= 3; round++ {
-		obs, err := a.Observe(ctx)
-		if err != nil {
-			t.Fatalf("round %d Observe: %v", round, err)
-		}
-		plan, err := a.Plan(ctx, d, obs)
-		if err != nil {
-			t.Fatalf("round %d Plan: %v", round, err)
-		}
-		lastPlan = plan
-		for _, step := range plan.Steps {
-			res, err := a.Apply(ctx, step)
-			if err != nil {
-				t.Fatalf("round %d Apply step %d: %v", round, step.Seq, err)
-			}
-			if !res.OK {
-				t.Fatalf("round %d step %d failed: %s", round, step.Seq, res.Err)
-			}
-		}
+	obs, err := a.Observe(ctx)
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	plan, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Steps) != 1 {
+		t.Fatalf("plan has %d steps, want exactly 1 (the blocked service): %+v", len(plan.Steps), plan.Steps)
+	}
+	blocked := plan.Steps[0]
+	if blocked.Kind != "blocked_unmanaged" {
+		t.Errorf("step kind = %q, want %q", blocked.Kind, "blocked_unmanaged")
+	}
+	if blocked.ServiceID != 10 {
+		t.Errorf("step ServiceID = %d, want 10", blocked.ServiceID)
+	}
+
+	res, err := a.Apply(ctx, blocked)
+	if err == nil {
+		t.Error("Apply on a blocked_unmanaged step returned nil error, want a diagnosable failure")
+	}
+	if res.OK {
+		t.Error("StepResult.OK = true for a blocked step, want false")
+	}
+	if res.Err == "" {
+		t.Error("StepResult.Err is empty for a blocked step, want a diagnosable message")
 	}
 
 	body, err := os.ReadFile(foreign)
@@ -234,12 +237,103 @@ func TestUnmanagedFileWithCollidingIDIsNeverOverwritten(t *testing.T) {
 		t.Error("foreign file gained a marker; the adapter overwrote a file it did not create")
 	}
 
-	// Documents observed behavior: Plan silently converges to empty despite
-	// never having satisfied service 10's desired state, because the write
-	// loop's ownership guard skips the step outright instead of reporting
-	// it as outstanding. See the FINDING above.
-	if !lastPlan.IsEmpty() {
-		t.Errorf("expected the current (silent-convergence) behavior but got a non-empty plan: %+v", lastPlan.Steps)
+	// A converge cycle must not reach an empty plan: the blocked service's
+	// desired state genuinely was not applied, so reporting convergence
+	// would be dishonest.
+	obs, err = a.Observe(ctx)
+	if err != nil {
+		t.Fatalf("second Observe: %v", err)
+	}
+	final, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("second Plan: %v", err)
+	}
+	if final.IsEmpty() {
+		t.Error("plan converged to empty despite the collision; the blockage must stay visible as outstanding work")
+	}
+}
+
+// The blocked service must not hold up any other service: Plan/Apply's
+// per-step design means one refused step should not prevent an unrelated
+// service from converging normally. This is the property that justifies
+// signalling the collision via a failed step rather than an error from
+// Plan itself, which would have blocked the whole node.
+func TestBlockedServiceDoesNotPreventOthersConverging(t *testing.T) {
+	root := t.TempDir()
+	foreign := filepath.Join(root, "service-10.conf")
+	original := "hand written, colliding id, no marker\n"
+	if err := os.WriteFile(foreign, []byte(original), 0o600); err != nil {
+		t.Fatalf("write foreign file: %v", err)
+	}
+
+	a := New(root)
+	ctx := context.Background()
+	d := desiredWith(svc(10, 443, true), svc(11, 8443, true))
+
+	obs, err := a.Observe(ctx)
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	plan, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Steps) != 2 {
+		t.Fatalf("plan has %d steps, want 2 (one blocked, one write): %+v", len(plan.Steps), plan.Steps)
+	}
+	for _, step := range plan.Steps {
+		res, err := a.Apply(ctx, step)
+		switch step.ServiceID {
+		case 10:
+			if err == nil || res.OK {
+				t.Errorf("service 10 (blocked) step: err=%v res=%+v, want a failure", err, res)
+			}
+		case 11:
+			if err != nil || !res.OK {
+				t.Fatalf("service 11 (clean) step failed: err=%v res=%+v", err, res)
+			}
+		default:
+			t.Fatalf("unexpected step for service %d", step.ServiceID)
+		}
+	}
+
+	// The clean service converged: its file exists, is marked, and carries
+	// the right params.
+	cleanBody, err := os.ReadFile(filepath.Join(root, "service-11.conf"))
+	if err != nil {
+		t.Fatalf("service 11 file missing: %v", err)
+	}
+	if !strings.HasPrefix(string(cleanBody), MarkerPrefix) {
+		t.Errorf("service 11 file lacks the ownership marker:\n%s", cleanBody)
+	}
+	if !strings.Contains(string(cleanBody), `"port":8443`) {
+		t.Errorf("service 11 file missing params:\n%s", cleanBody)
+	}
+
+	// The blocked service's foreign file is still exactly as a human left
+	// it, untouched and unmarked.
+	blockedBody, err := os.ReadFile(foreign)
+	if err != nil {
+		t.Fatalf("foreign file was removed: %v", err)
+	}
+	if string(blockedBody) != original {
+		t.Errorf("foreign file was modified: %q", blockedBody)
+	}
+	if strings.HasPrefix(string(blockedBody), MarkerPrefix) {
+		t.Error("foreign file gained a marker; the adapter overwrote a file it did not create")
+	}
+
+	// Re-planning still reports service 10 as blocked, not silently done.
+	obs, err = a.Observe(ctx)
+	if err != nil {
+		t.Fatalf("second Observe: %v", err)
+	}
+	final, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("second Plan: %v", err)
+	}
+	if len(final.Steps) != 1 || final.Steps[0].Kind != "blocked_unmanaged" || final.Steps[0].ServiceID != 10 {
+		t.Errorf("second plan = %+v, want exactly one blocked_unmanaged step for service 10", final.Steps)
 	}
 }
 
