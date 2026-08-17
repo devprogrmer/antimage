@@ -1,0 +1,165 @@
+package httpapi
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/amyrm/antimage/internal/panel/audit"
+	"github.com/amyrm/antimage/internal/panel/auth"
+	"github.com/amyrm/antimage/internal/panel/rbac"
+)
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// requireActor returns the request's actor, or writes a 401 and reports false.
+//
+// authMiddleware always populates it, so nil here means a routing mistake put
+// a private handler on a public path. Failing closed with the same
+// unauthenticated envelope keeps that mistake a 401 rather than a panic.
+func requireActor(w http.ResponseWriter, r *http.Request) (*rbac.Actor, bool) {
+	actor := ActorFrom(r.Context())
+	if actor == nil {
+		WriteError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return nil, false
+	}
+	return actor, true
+}
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	TOTP     string `json:"totp"`
+}
+
+func (d Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ip := clientIP(r)
+
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "malformed request body")
+		return
+	}
+
+	wait, err := d.Limiter.Check(ctx, req.Username, ip)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "login unavailable")
+		return
+	}
+	if wait > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+		audit.BestEffort(ctx, d.Store, RequestID(ctx),
+			audit.Actor{Type: audit.ActorSystem, Label: "login", IP: ip},
+			audit.Record{Action: "auth.lockout", TargetType: "admin", Result: "denied"})
+		WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts; try again later")
+		return
+	}
+
+	deny := func() {
+		_ = d.Limiter.RecordFailure(ctx, req.Username, ip)
+		audit.BestEffort(ctx, d.Store, RequestID(ctx),
+			audit.Actor{Type: audit.ActorSystem, Label: "login", IP: ip},
+			audit.Record{Action: "auth.login", TargetType: "admin", Result: "denied"})
+		// One message for every failure mode: unknown user, wrong password,
+		// suspended account, bad TOTP.
+		WriteError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
+	}
+
+	var (
+		adminID int64
+		hash    string
+		status  string
+	)
+	err = d.Store.Read().QueryRowContext(ctx,
+		`SELECT id, password_hash, status FROM admins WHERE username = ? COLLATE NOCASE`,
+		req.Username).Scan(&adminID, &hash, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Hash anyway, so response timing does not reveal whether the user exists.
+		_, _ = auth.VerifyPassword(
+			"$argon2id$v=19$m=65536,t=3,p=4$YWFhYWFhYWFhYWFhYWFhYQ$"+
+				"YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE", req.Password)
+		deny()
+		return
+	}
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "login unavailable")
+		return
+	}
+
+	ok, err := auth.VerifyPassword(hash, req.Password)
+	if err != nil || !ok || status != "active" {
+		deny()
+		return
+	}
+
+	if err := d.Limiter.Reset(ctx, req.Username, ip); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "login unavailable")
+		return
+	}
+
+	token, err := d.Sessions.Create(ctx, adminID, ip, r.UserAgent())
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not start session")
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Expires:  d.now().Add(auth.AbsoluteLifetime),
+	})
+	audit.BestEffort(ctx, d.Store, RequestID(ctx),
+		audit.AdminActor(adminID, ip),
+		audit.Record{Action: "auth.login", TargetType: "admin",
+			TargetID: sql.NullInt64{Int64: adminID, Valid: true}, Result: "ok"})
+
+	WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (d Deps) handleLogout(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if id := sessionIDFrom(ctx); id != 0 {
+		if err := d.Sessions.Revoke(ctx, id); err != nil {
+			WriteError(w, http.StatusInternalServerError, "internal", "logout failed")
+			return
+		}
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: auth.CookieName, Value: "", Path: "/",
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
+		Expires: time.Unix(0, 0), MaxAge: -1,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d Deps) handleMe(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	perms := make([]string, 0, len(actor.Perms))
+	for p := range actor.Perms {
+		perms = append(perms, string(p))
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"admin_id":    actor.AdminID,
+		"role":        actor.RoleName,
+		"is_super":    actor.IsSuper,
+		"permissions": perms,
+	})
+}
