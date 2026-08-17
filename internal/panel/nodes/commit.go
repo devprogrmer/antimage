@@ -30,6 +30,12 @@ type CommitResult struct {
 //
 // Callers pass a mutate function that performs their writes on the supplied
 // transaction. They must not touch nodes.desired_revision or node_revisions.
+//
+// "No-op" means identical to the last established revision, not identical to
+// nothing. A node's first-ever commit therefore always creates revision 1,
+// even if mutate makes no semantic change: there is no revision 0 row to
+// compare against (node_revisions.revision has CHECK (revision > 0)), so the
+// first comparison is against the empty string and never matches.
 func CommitNodeChange(
 	ctx context.Context,
 	s *store.Store,

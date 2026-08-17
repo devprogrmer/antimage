@@ -165,6 +165,47 @@ func TestCommitWritesAuditRowInSameTransaction(t *testing.T) {
 	}
 }
 
+// TestStoredHashMatchesIndependentRecompute guards invariant 4 against a
+// regression the returned CommitResult cannot see: a bug that stores the
+// pre-bump snapshot's hash (describing revision N) under a row labelled N+1,
+// while still returning that same pre-bump hash from CommitNodeChange. Such a
+// bug is invisible to TestFirstChangeCreatesRevisionOne, because that test
+// only checks stored == res.SHA256, and a consistent substitution satisfies
+// that trivially. This test instead recomputes the hash independently, from
+// a fresh transaction that reads the already-bumped desired_revision straight
+// off the table, so it depends on neither the stored value nor res.SHA256.
+func TestStoredHashMatchesIndependentRecompute(t *testing.T) {
+	s, nodeID := newNodeFixture(t)
+	res := commit(t, s, nodeID, "add service", addService(443))
+
+	var stored string
+	if err := s.Read().QueryRow(
+		`SELECT doc_sha256 FROM node_revisions WHERE node_id = ? AND revision = ?`,
+		nodeID, res.Revision,
+	).Scan(&stored); err != nil {
+		t.Fatalf("read revision row: %v", err)
+	}
+
+	var recomputed string
+	err := s.Write(context.Background(), func(tx *sql.Tx) error {
+		snap, err := BuildDesiredSnapshot(context.Background(), tx, nodeID)
+		if err != nil {
+			return err
+		}
+		recomputed = snap.SHA256
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("independent recompute: %v", err)
+	}
+
+	if stored != recomputed {
+		t.Errorf("revision %d: stored hash %s != independently recomputed hash %s — "+
+			"stored doc_sha256 does not describe the document at its own revision",
+			res.Revision, stored, recomputed)
+	}
+}
+
 func TestMonotonicTriggerRejectsManualGap(t *testing.T) {
 	s, nodeID := newNodeFixture(t)
 	commit(t, s, nodeID, "add", addService(443))
