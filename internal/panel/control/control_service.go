@@ -153,17 +153,46 @@ func (s *ControlService) handle(
 	}
 }
 
-// Implemented in Task 21.
 func (s *ControlService) onHello(ctx context.Context, nodeID int64, h *pb.Hello, srv pb.Control_StreamServer) error {
-	return nil
+	adapters := make([]nodes.AdapterInfo, 0, len(h.Adapters))
+	for _, a := range h.Adapters {
+		adapters = append(adapters, nodes.AdapterInfo{Kind: a.Kind, Version: a.Version})
+	}
+	if err := nodes.RecordHello(ctx, s.deps.Store, nodeID, adapters,
+		h.AppliedRevision, h.DocSha256, s.deps.now()); err != nil {
+		return err
+	}
+	// Tell the agent to reconcile immediately after connecting, so a node
+	// that was offline during a change converges without waiting for a timer.
+	return srv.Send(&pb.PanelMessage{
+		Payload: &pb.PanelMessage_FetchNow{FetchNow: &pb.FetchNow{}},
+	})
 }
 
-// Implemented in Task 21.
 func (s *ControlService) onHeartbeat(ctx context.Context, nodeID int64, hb *pb.Heartbeat) error {
-	return nil
+	sample := nodes.HealthSample{
+		Load1: hb.Load1, MemUsed: hb.MemUsedBytes, UptimeS: hb.UptimeSeconds,
+	}
+	for _, a := range hb.AdapterHealth {
+		sample.Adapters = append(sample.Adapters, nodes.AdapterHealthSample{
+			Kind: a.Kind, OK: a.Ok, Detail: a.Detail,
+		})
+	}
+	return nodes.RecordHeartbeat(ctx, s.deps.Store, nodeID, sample, s.deps.now())
 }
 
-// Implemented in Task 21.
 func (s *ControlService) onApplyReport(ctx context.Context, nodeID int64, r *pb.ApplyReport) error {
-	return nil
+	in := nodes.ApplyRunInput{
+		NodeID: nodeID, TargetRevision: r.TargetRevision,
+		Converged: r.Converged, Deferred: r.Deferred,
+		Err: r.Error, DocSHA256: r.DocSha256, Now: s.deps.now(),
+	}
+	for _, st := range r.Steps {
+		in.Steps = append(in.Steps, nodes.StepOutcome{
+			Seq: st.Seq, Kind: st.Kind, Disruption: st.Disruption,
+			OK: st.Ok, Err: st.Error, DurationMS: st.DurationMs,
+		})
+	}
+	_, err := nodes.RecordApplyRun(ctx, s.deps.Store, in)
+	return err
 }
