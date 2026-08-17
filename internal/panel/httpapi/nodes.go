@@ -197,6 +197,16 @@ func (d Deps) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Address) == "" {
+		// Invariant 9 covers validation rejections, not only schema ones:
+		// an attempt that never commits still has to leave a record.
+		// This runs before any transaction opens, which BestEffort requires.
+		reqCtx := r.Context()
+		audit.BestEffort(reqCtx, d.Store, RequestID(reqCtx), d.actorAudit(actor, r), audit.Record{
+			Action:     "node.create",
+			TargetType: "node",
+			Result:     "denied",
+			After:      map[string]any{"reason": "name and address are required"},
+		})
 		WriteError(w, http.StatusUnprocessableEntity, "validation", "name and address are required")
 		return
 	}

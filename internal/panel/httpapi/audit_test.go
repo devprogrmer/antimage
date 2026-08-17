@@ -284,3 +284,35 @@ func TestUnknownSessionRevokeIsAlsoNotFound(t *testing.T) {
 		t.Errorf("status = %d, want 404", res.Code)
 	}
 }
+
+// Invariant 9 names validation rejections alongside authz denials: an attempt
+// that never commits must still leave a record. handleCreateNode's own
+// required-fields check is such an attempt, and it is not a schema rejection,
+// so services.go's path does not cover it.
+func TestCreateNodeValidationRejectionIsAudited(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "root", "pw", "super_admin")
+	token := env.login(t, "root", "pw")
+
+	res := env.post(t, "/api/v1/nodes", `{"name":"","address":""}`, token)
+	if res.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", res.Code)
+	}
+
+	var n int
+	if err := env.store.Read().QueryRow(
+		`SELECT count(*) FROM audit_log
+		  WHERE action = 'node.create' AND result = 'denied'`).Scan(&n); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("node.create/denied audit rows = %d, want 1: a rejected create left no trace", n)
+	}
+
+	// The node must not exist: a denial record is not a partial commit.
+	var nodes int
+	_ = env.store.Read().QueryRow(`SELECT count(*) FROM nodes`).Scan(&nodes)
+	if nodes != 0 {
+		t.Errorf("nodes = %d, want 0", nodes)
+	}
+}
