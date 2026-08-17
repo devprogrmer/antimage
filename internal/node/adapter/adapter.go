@@ -148,11 +148,22 @@ func (p Plan) MaxDisruption() Disruption {
 	return worst
 }
 
+// StepResult is one step's outcome.
+//
+// Kind and Disruption are echoed back from the Step that produced this result
+// rather than re-derived by the caller. The panel stores both per step
+// (node_apply_steps.step_kind / .disruption), and they are the only record an
+// operator has of WHAT was done and what it cost: without them a failed run
+// reads as "step 3 failed" with no way to tell a hot user add apart from a
+// service restart. Adapters need not set them — the reconciler fills them in
+// from the step it executed, so the two can never disagree.
 type StepResult struct {
-	Seq      int
-	OK       bool
-	Err      string
-	Duration time.Duration
+	Seq        int
+	Kind       string
+	Disruption Disruption
+	OK         bool
+	Err        string
+	Duration   time.Duration
 }
 
 type Health struct {

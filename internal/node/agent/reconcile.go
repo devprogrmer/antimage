@@ -131,7 +131,15 @@ func (r *Reconciler) applyWithRetry(ctx context.Context, step adapter.Step) (ada
 	for attempt := 1; attempt <= r.opts.MaxRetries; attempt++ {
 		started := r.clk.Now()
 		result, err := r.ad.Apply(ctx, step)
+		// Identity, cost, and timing of a step belong to the step and to the
+		// reconciler that ran it, never to the adapter's own bookkeeping. An
+		// adapter that forgets to fill these in (the stub does) would
+		// otherwise report every step to the panel as an unnamed step of
+		// unknown disruption, which is exactly the data node_apply_steps
+		// exists to hold.
 		result.Seq = step.Seq
+		result.Kind = step.Kind
+		result.Disruption = step.Disruption
 		result.Duration = r.clk.Now().Sub(started)
 
 		if err == nil && result.OK {
