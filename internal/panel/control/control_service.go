@@ -18,6 +18,12 @@ type ControlService struct {
 	deps Deps
 }
 
+// Compile-time check that ControlService still satisfies the generated
+// interface, so regeneration drift (e.g. a signature change from a fresh
+// `buf generate`) fails here at build time instead of surfacing later at
+// Task 27's server wiring.
+var _ pb.ControlServer = (*ControlService)(nil)
+
 func NewControlService(d Deps) *ControlService { return &ControlService{deps: d} }
 
 // GetDesiredSnapshot returns the exact canonical bytes that were hashed.

@@ -107,6 +107,55 @@ func TestEnrollRejectsProtocolSkew(t *testing.T) {
 	}
 }
 
+func TestEnrollAuditsPostBurnFailure(t *testing.T) {
+	s, nodeID, _, _ := enrolledNodeFixture(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	token, err := nodes.IssueEnrollToken(ctx, s, nodeID, audit.SystemActor("test"), "req", now)
+	if err != nil {
+		t.Fatalf("IssueEnrollToken: %v", err)
+	}
+	svc := NewEnrollmentService(depsFor(t, s, now))
+
+	// The token is redeemed before the CSR is parsed, so a malformed CSR
+	// burns the token without ever reaching SignNodeCert's success path.
+	_, err = svc.Enroll(ctx, &pb.EnrollRequest{
+		Token: token, CsrDer: []byte("not a csr"),
+		AgentVersion: "v0.1.0", ProtocolVersion: version.Protocol,
+	})
+	if err == nil {
+		t.Fatal("Enroll accepted a malformed CSR")
+	}
+
+	// The token must be burnt: a second attempt with the same token, even a
+	// well-formed one, must also fail.
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csrDER, _ := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: "x"}}, key)
+	if _, err := svc.Enroll(ctx, &pb.EnrollRequest{
+		Token: token, CsrDer: csrDER,
+		AgentVersion: "v0.1.0", ProtocolVersion: version.Protocol,
+	}); err == nil {
+		t.Fatal("a token burnt by a malformed CSR was accepted a second time")
+	}
+
+	// And the failed attempt itself must be on the record, distinct from a
+	// silently-vanished token.
+	var action, result string
+	var targetID int64
+	if err := s.Read().QueryRow(
+		`SELECT action, result, target_id FROM audit_log
+		  WHERE action = 'node.enroll' AND result = 'failed'
+		  ORDER BY id DESC LIMIT 1`,
+	).Scan(&action, &result, &targetID); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if action != "node.enroll" || result != "failed" || targetID != nodeID {
+		t.Errorf("audit = %s/%s/%d, want node.enroll/failed/%d", action, result, targetID, nodeID)
+	}
+}
+
 func TestGetDesiredSnapshotReturnsMatchingHash(t *testing.T) {
 	s, nodeID, certDER, fingerprint := enrolledNodeFixture(t)
 	_ = setFingerprint(s, nodeID, fingerprint)

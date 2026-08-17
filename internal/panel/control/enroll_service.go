@@ -37,6 +37,12 @@ type EnrollmentService struct {
 	deps Deps
 }
 
+// Compile-time check that EnrollmentService still satisfies the generated
+// interface, so regeneration drift (e.g. a signature change from a fresh
+// `buf generate`) fails here at build time instead of surfacing later at
+// Task 27's server wiring.
+var _ pb.EnrollmentServer = (*EnrollmentService)(nil)
+
 func NewEnrollmentService(d Deps) *EnrollmentService { return &EnrollmentService{deps: d} }
 
 // Enroll redeems a single-use token and issues a client certificate.
@@ -62,6 +68,18 @@ func (s *EnrollmentService) Enroll(ctx context.Context, req *pb.EnrollRequest) (
 
 	certDER, fingerprint, err := s.deps.CA.SignNodeCert(req.CsrDer, nodeID, now)
 	if err != nil {
+		// The token is already burnt at this point. Without this record, a
+		// fumbled CSR and a stolen-token probe are indistinguishable to an
+		// operator who only sees the enrollment fail.
+		audit.BestEffort(ctx, s.deps.Store, "", audit.SystemActor("enrollment"), audit.Record{
+			Action:     "node.enroll",
+			TargetType: "node",
+			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
+			After: map[string]any{
+				"reason": "csr rejected", "agent_version": req.AgentVersion,
+			},
+			Result: "failed",
+		})
 		return nil, status.Errorf(codes.InvalidArgument, "sign CSR: %v", err)
 	}
 
@@ -82,6 +100,20 @@ func (s *EnrollmentService) Enroll(ctx context.Context, req *pb.EnrollRequest) (
 		})
 	})
 	if err != nil {
+		// Same reasoning as above: the token is burnt and the cert was
+		// signed, but the fingerprint never made it into the allow-list.
+		// BestEffort is called after Store.Write returns, never from inside
+		// its callback — the store has a single write connection, and
+		// nesting would block until BestEffort's own timeout.
+		audit.BestEffort(ctx, s.deps.Store, "", audit.SystemActor("enrollment"), audit.Record{
+			Action:     "node.enroll",
+			TargetType: "node",
+			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
+			After: map[string]any{
+				"reason": "fingerprint not recorded", "agent_version": req.AgentVersion,
+			},
+			Result: "failed",
+		})
 		return nil, status.Errorf(codes.Internal, "complete enrollment: %v", err)
 	}
 
