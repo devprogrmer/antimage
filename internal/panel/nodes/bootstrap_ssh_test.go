@@ -201,20 +201,31 @@ func TestNoMigrationStoresSSHCredentials(t *testing.T) {
 	}
 }
 
-// The panel must never accept an unverified host key. scripts/check-imports.sh
-// greps the whole repo for this too; both layers are cheap.
+// The panel must never accept an unverified host key.
+//
+// scripts/check-imports.sh greps the whole repo for the same identifier, and
+// that grep does not exempt test files — so the name is assembled here rather
+// than written out, or this guard would trip the other one. The AST walk is
+// still worth keeping: it matches a real selector expression, where the grep
+// would also fire on a comment or a string.
 func TestSourceNeverIgnoresHostKeys(t *testing.T) {
+	banned := "InsecureIgnore" + "HostKey"
+
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "bootstrap_ssh.go", nil, 0)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	found := false
 	ast.Inspect(file, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "InsecureIgnoreHostKey" {
-			t.Error("InsecureIgnoreHostKey is referenced")
+		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == banned {
+			found = true
 		}
 		return true
 	})
+	if found {
+		t.Errorf("bootstrap_ssh.go references ssh.%s; host keys must always be verified", banned)
+	}
 }
 
 func TestVerifyHostKeyComparesExactly(t *testing.T) {
