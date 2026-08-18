@@ -178,13 +178,28 @@ func (d Deps) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// selfServicePrefix covers the endpoints that act on the caller's own account
+// and nothing else: logging out, and turning a second factor on or off. None
+// of them takes an admin id, so there is no other account they could touch.
+const selfServicePrefix = "/api/v1/auth/"
+
 // readOnlyMiddleware is defence in depth: the readonly role already lacks
 // write permissions, but a blanket rejection means a future handler that
 // forgets its Check still cannot mutate.
+//
+// Note this keys off the role NAME, not a permission, so a custom read-only
+// role called anything else is not covered by it — real enforcement is the
+// rbac.Check in each handler. See TestReadOnlyMiddlewareIsNameKeyed.
+//
+// Self-service auth routes are exempt. Without the exemption a readonly admin
+// could not log out, which leaves them no way to end their own session, and
+// could never enrol TOTP, which locks the least-privileged accounts out of the
+// strongest protection available to them. Neither is a mutation of a managed
+// resource, which is what this middleware exists to stop.
 func readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actor := ActorFrom(r.Context())
-		if actor != nil && actor.RoleName == "readonly" {
+		if actor != nil && actor.RoleName == "readonly" && !strings.HasPrefix(r.URL.Path, selfServicePrefix) {
 			switch r.Method {
 			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 				WriteError(w, http.StatusForbidden, "forbidden", "this account is read-only")

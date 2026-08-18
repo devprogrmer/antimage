@@ -378,3 +378,46 @@ func TestTOTPAuditRecordsCarryNoSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A readonly admin must be able to end their own session and to turn on a
+// second factor. readOnlyMiddleware blanket-rejects write methods for that
+// role, and before the self-service exemption it caught POST /auth/logout and
+// all three TOTP routes: the least-privileged accounts had no way to log out
+// and no way to reach the strongest protection available to them.
+func TestReadOnlyAdminCanUseSelfServiceAuthRoutes(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "ro", "pw", "readonly")
+
+	token := env.login(t, "ro", "pw")
+	if res := env.post(t, "/api/v1/auth/totp/enrol", "", token); res.Code == http.StatusForbidden {
+		t.Errorf("enrol = 403: a readonly admin cannot enable a second factor; body=%s", res.Body)
+	}
+
+	if res := env.post(t, "/api/v1/auth/logout", "", token); res.Code != http.StatusNoContent {
+		t.Fatalf("logout = %d, want 204: a readonly admin cannot end their own session", res.Code)
+	}
+	// The exemption must not have broken revocation.
+	if res := env.get(t, "/api/v1/nodes", token); res.Code != http.StatusUnauthorized {
+		t.Errorf("post-logout = %d, want 401", res.Code)
+	}
+}
+
+// The exemption is scoped to self-service auth paths only: a readonly admin
+// must still be refused everywhere that mutates a managed resource.
+func TestReadOnlyAdminIsStillBlockedFromMutations(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "ro", "pw", "readonly")
+	token := env.login(t, "ro", "pw")
+
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/nodes", `{"name":"x","address":"1.2.3.4"}`},
+		{http.MethodPost, "/api/v1/nodes/1/enroll-token", ""},
+		{http.MethodPost, "/api/v1/nodes/1/services", `{"adapter_kind":"stub","params":{"port":443}}`},
+		{http.MethodDelete, "/api/v1/nodes/1", ""},
+	} {
+		res := env.do(t, tc.method, tc.path, tc.body, token)
+		if res.Code != http.StatusForbidden {
+			t.Errorf("%s %s = %d, want 403", tc.method, tc.path, res.Code)
+		}
+	}
+}
