@@ -4,18 +4,22 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/control"
@@ -31,6 +35,8 @@ func main() {
 	dataDir := flag.String("data-dir", "/var/lib/antimage", "data directory")
 	httpAddr := flag.String("http", ":8080", "HTTP listen address")
 	grpcAddr := flag.String("grpc", ":8443", "gRPC control listen address")
+	grpcHosts := flag.String("grpc-hosts", "localhost,127.0.0.1",
+		"comma-separated DNS names and IPs agents dial this panel on; they become the SANs of the panel's TLS certificate")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -39,13 +45,26 @@ func main() {
 		return
 	}
 
-	if err := run(*dataDir, *httpAddr, *grpcAddr); err != nil {
+	if err := run(*dataDir, *httpAddr, *grpcAddr, *grpcHosts); err != nil {
 		slog.Error("panel stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(dataDir, httpAddr, grpcAddr string) error {
+func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
+	// Agents verify the panel's certificate against the name they dialled, so
+	// these have to be the names operators actually put in node.yaml. Getting
+	// it wrong surfaces as a TLS failure on every node at once, which is loud
+	// -- but the warning below is cheaper than discovering it that way.
+	var grpcHosts []string
+	for _, h := range strings.Split(grpcHostList, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			grpcHosts = append(grpcHosts, h)
+		}
+	}
+	if len(grpcHosts) == 0 {
+		return errors.New("--grpc-hosts must name at least one host agents will dial")
+	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
@@ -75,8 +94,29 @@ func run(dataDir, httpAddr, grpcAddr string) error {
 
 	go nodes.NewSweeper(st, now).Run(ctx, 30*time.Second)
 
+	// The control plane is mTLS end to end. Without credentials here the
+	// server speaks plaintext HTTP/2 while both agent paths dial with TLS, so
+	// every handshake fails before control.VerifyPeer is ever reached and no
+	// node can enroll or stream.
+	serverCert, err := ca.IssueServerCert(grpcHosts, now())
+	if err != nil {
+		return fmt.Errorf("issue panel server certificate: %w", err)
+	}
+	creds := credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		MinVersion:   tls.VersionTLS13,
+		// VerifyClientCertIfGiven, not RequireAndVerifyClientCert: enrolment
+		// necessarily happens before the node holds any certificate, so
+		// requiring one would make enrolment impossible. The Control service
+		// enforces the requirement per-RPC through VerifyPeer, which also
+		// checks the fingerprint against the nodes allow-list -- something a
+		// listener-level setting cannot do.
+		ClientAuth: tls.VerifyClientCertIfGiven,
+		ClientCAs:  ca.ClientCAPool(),
+	})
+
 	deps := control.Deps{Store: st, CA: ca, Hub: hub, Now: now}
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(grpc.Creds(creds))
 	pb.RegisterEnrollmentServer(grpcServer, control.NewEnrollmentService(deps))
 	pb.RegisterControlServer(grpcServer, control.NewControlService(deps))
 
@@ -116,7 +156,10 @@ func run(dataDir, httpAddr, grpcAddr string) error {
 
 	slog.Info("antimage-panel listening",
 		"version", version.Version, "http", httpAddr, "grpc", grpcAddr,
-		"ca_fingerprint", ca.FingerprintSHA256())
+		"ca_fingerprint", ca.FingerprintSHA256(),
+		// Printed because a SAN mismatch is the single most likely reason a
+		// fleet fails to connect, and it is invisible until an agent tries.
+		"grpc_cert_hosts", grpcHosts)
 
 	select {
 	case <-ctx.Done():

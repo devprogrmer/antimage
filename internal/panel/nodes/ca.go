@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
@@ -13,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/store"
@@ -156,4 +158,76 @@ func (c *CA) SignNodeCert(csrDER []byte, nodeID int64, now time.Time) ([]byte, s
 	}
 	sum := sha256.Sum256(certDER)
 	return certDER, hex.EncodeToString(sum[:]), nil
+}
+
+// ServerCertLifetime is deliberately shorter than a node certificate. The
+// panel reissues its own on every start, so a short life costs nothing and
+// bounds the damage from a key that leaks off the panel host.
+const ServerCertLifetime = 90 * 24 * time.Hour
+
+// IssueServerCert mints a TLS server certificate for the panel's own gRPC
+// listener, signed by this CA.
+//
+// The agent verifies the panel two different ways, and the certificate has to
+// satisfy both. During enrolment it has no CA file yet, so it dials with
+// InsecureSkipVerify and a VerifyPeerCertificate callback that walks the
+// presented chain looking for a certificate whose SHA-256 matches the pinned
+// fingerprint — which means the CA certificate itself must be in the chain the
+// server sends, not just the leaf. Afterwards it dials normally with the CA in
+// RootCAs, which requires the leaf to carry a SAN matching the dial target.
+//
+// hosts are the DNS names and IPs agents will dial. An empty list is refused:
+// a certificate with no SAN is rejected by every modern TLS client, so the
+// failure would surface as an opaque handshake error on every node at once
+// rather than here.
+func (c *CA) IssueServerCert(hosts []string, now time.Time) (tls.Certificate, error) {
+	if len(hosts) == 0 {
+		return tls.Certificate{}, errors.New("refusing to issue a server certificate with no hostnames")
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("generate server key: %w", err)
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("generate serial: %w", err)
+	}
+
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "antimage-panel"},
+		NotBefore:    now.Add(-5 * time.Minute),
+		NotAfter:     now.Add(-5 * time.Minute).Add(ServerCertLifetime),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	for _, h := range hosts {
+		if ip := net.ParseIP(h); ip != nil {
+			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+			continue
+		}
+		tmpl.DNSNames = append(tmpl.DNSNames, h)
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, &key.PublicKey, c.key)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("sign server cert: %w", err)
+	}
+
+	return tls.Certificate{
+		// Leaf first, then the CA. The CA certificate is included precisely so
+		// an enrolling agent — which has no CA file yet — can find its pinned
+		// fingerprint in the presented chain.
+		Certificate: [][]byte{certDER, c.certDER},
+		PrivateKey:  key,
+	}, nil
+}
+
+// ClientCAPool returns a pool containing this CA, for verifying node
+// certificates presented on the control stream.
+func (c *CA) ClientCAPool() *x509.CertPool {
+	pool := x509.NewCertPool()
+	pool.AddCert(c.cert)
+	return pool
 }
