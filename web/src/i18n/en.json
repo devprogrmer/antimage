@@ -30,5 +30,6 @@
   "status.disabled": "Disabled",
   "common.never": "Never",
   "common.close": "Close",
-  "common.copy": "Copy"
+  "common.copy": "Copy",
+  "unit.ms": "ms"
 }

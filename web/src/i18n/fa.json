@@ -30,5 +30,6 @@
   "status.disabled": "غیرفعال",
   "common.never": "هرگز",
   "common.close": "بستن",
-  "common.copy": "کپی"
+  "common.copy": "کپی",
+  "unit.ms": "میلی‌ثانیه"
 }
