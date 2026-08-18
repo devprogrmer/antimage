@@ -374,11 +374,15 @@ func (d Deps) consumeRecoveryCode(ctx context.Context, adminID int64, code strin
 	if err != nil {
 		return false, 0, err
 	}
+	// The explicit Close below runs before the write and is the one that
+	// matters; this defer is a safety net for the error return inside the loop.
+	// sql.Rows.Close is idempotent, so closing twice is harmless.
+	defer func() { _ = rows.Close() }()
+
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.hash); err != nil {
-			_ = rows.Close()
 			return false, 0, err
 		}
 		candidates = append(candidates, c)

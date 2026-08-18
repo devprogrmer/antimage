@@ -3,6 +3,7 @@ package nodes
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -65,7 +66,7 @@ func CommitNodeChange(
 		err = tx.QueryRowContext(ctx,
 			`SELECT doc_sha256 FROM node_revisions
 			  WHERE node_id = ? ORDER BY revision DESC LIMIT 1`, nodeID).Scan(&previous)
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("read previous revision hash: %w", err)
 		}
 

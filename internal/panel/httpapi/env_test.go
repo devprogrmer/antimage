@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -65,7 +66,7 @@ func (e *testEnv) seedAdmin(t *testing.T, username, password, role string) int64
 	err = e.store.Write(context.Background(), func(tx *sql.Tx) error {
 		var roleID int64
 		err := tx.QueryRow(`SELECT id FROM roles WHERE name = ?`, role).Scan(&roleID)
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			res, err := tx.Exec(
 				`INSERT INTO roles (name, is_builtin, permissions) VALUES (?, 1, ?)`,
 				role, string(perms))

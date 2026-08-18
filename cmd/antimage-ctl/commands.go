@@ -141,13 +141,13 @@ func listAdmins(ctx context.Context, s *store.Store, out io.Writer) error {
 	}
 	defer func() { _ = rows.Close() }()
 
-	fmt.Fprintf(out, "%-24s %-14s %s\n", "USERNAME", "ROLE", "STATUS")
+	_, _ = fmt.Fprintf(out, "%-24s %-14s %s\n", "USERNAME", "ROLE", "STATUS")
 	for rows.Next() {
 		var username, role, status string
 		if err := rows.Scan(&username, &role, &status); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%-24s %-14s %s\n", username, role, status)
+		_, _ = fmt.Fprintf(out, "%-24s %-14s %s\n", username, role, status)
 	}
 	// Without this a mid-iteration failure prints a short list and exits 0,
 	// which an operator would read as "these are all the admins".

@@ -51,13 +51,13 @@ func main() {
 
 	s, err := store.Open(filepath.Join(*dataDir, "antimage.db"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: open database: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "error: open database: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() { _ = s.Close() }()
 
 	if err := dispatch(context.Background(), s, args, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -71,7 +71,7 @@ func dispatch(ctx context.Context, s *store.Store, args []string, out *os.File) 
 		if err := createAdmin(ctx, s, args[1], args[2], args[3]); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "created admin %q with role %q\n", args[1], args[3])
+		_, _ = fmt.Fprintf(out, "created admin %q with role %q\n", args[1], args[3])
 		return nil
 
 	case "reset-password":
@@ -81,7 +81,7 @@ func dispatch(ctx context.Context, s *store.Store, args []string, out *os.File) 
 		if err := resetPassword(ctx, s, args[1], args[2]); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "password reset for %q; all their sessions were revoked\n", args[1])
+		_, _ = fmt.Fprintf(out, "password reset for %q; all their sessions were revoked\n", args[1])
 		return nil
 
 	case "list-admins":
@@ -99,7 +99,7 @@ func dispatch(ctx context.Context, s *store.Store, args []string, out *os.File) 
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(out, token)
+		_, _ = fmt.Fprintln(out, token)
 		return nil
 
 	case "backup":
@@ -109,7 +109,7 @@ func dispatch(ctx context.Context, s *store.Store, args []string, out *os.File) 
 		if err := backup(ctx, s, args[1]); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "backup written to %s\n", args[1])
+		_, _ = fmt.Fprintf(out, "backup written to %s\n", args[1])
 		return nil
 
 	default:

@@ -59,7 +59,8 @@ func TestEmbeddedScriptMatchesSource(t *testing.T) {
 }
 
 // TestEmbeddedScriptHasNoCarriageReturns protects the node, not the panel.
-// go:embed captures whatever bytes are on disk at build time, so a CRLF
+// The embed directive captures whatever bytes are on disk at build time,
+// so a CRLF
 // checkout would ship a script whose shebang line ends in \r and every node
 // running it would fail with "bad interpreter: /bin/bash^M". The substring
 // assertions above cannot see that; only a byte-level check can.

@@ -6,7 +6,7 @@ import (
 )
 
 func TestDisruptionOrdersBySeverity(t *testing.T) {
-	if !(DisruptNone < DisruptReload && DisruptReload < DisruptRestart) {
+	if DisruptNone >= DisruptReload || DisruptReload >= DisruptRestart {
 		t.Fatal("Disruption constants must order none < reload < restart so " +
 			"MaxDisruption can compare them")
 	}

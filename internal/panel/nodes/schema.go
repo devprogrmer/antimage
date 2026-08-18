@@ -54,7 +54,7 @@ func ValidateServiceParams(schema json.RawMessage, params json.RawMessage) error
 		return fmt.Errorf("%w: params are not valid JSON", ErrSchemaViolation)
 	}
 	if err := compiled.Validate(paramsDoc); err != nil {
-		return fmt.Errorf("%w: %s", ErrSchemaViolation, err)
+		return fmt.Errorf("%w: %w", ErrSchemaViolation, err)
 	}
 	return nil
 }

@@ -125,11 +125,11 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 		return nil, fmt.Errorf("create master key file: %w", err)
 	}
 	if _, err := f.Write([]byte(encoded)); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("write master key: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("write master key: %w", err)
 	}
 	if err := f.Close(); err != nil {

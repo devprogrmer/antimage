@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -54,7 +55,7 @@ func RecordApplyRun(ctx context.Context, s *store.Store, in ApplyRunInput) (Outc
 			`SELECT doc_sha256 FROM node_revisions WHERE node_id = ? AND revision = ?`,
 			in.NodeID, in.TargetRevision).Scan(&expectedSHA)
 		known := err == nil
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("read expected hash: %w", err)
 		}
 
