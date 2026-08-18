@@ -1,5 +1,13 @@
+# golangci-lint v2 configuration.
+#
+# v2 is required: the tool refuses to run when the Go version it was built with
+# is older than the module's target, and go.mod targets 1.25. The v1 config
+# format this replaced failed CI on every push for exactly that reason.
+version: "2"
+
 run:
   timeout: 5m
+
 linters:
   enable:
     - errcheck
@@ -7,12 +15,14 @@ linters:
     - staticcheck
     - ineffassign
     - unused
-    - bodyclose
-    - rowserrcheck
+    - bodyclose      # an unclosed response body leaks a connection per request
+    - rowserrcheck   # rows.Err() forgotten means a truncated list served as complete
     - sqlclosecheck
     - contextcheck
     - errorlint
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters: [errcheck]
+  exclusions:
+    rules:
+      # Assertions in tests are the point; an unchecked Close in a fixture is
+      # noise, not a defect.
+      - path: _test\.go
+        linters: [errcheck]
