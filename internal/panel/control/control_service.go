@@ -42,7 +42,7 @@ func (s *ControlService) GetDesiredSnapshot(
 	var snap *nodes.Snapshot
 	err = s.deps.Store.Write(ctx, func(tx *sql.Tx) error {
 		var err error
-		snap, err = nodes.BuildDesiredSnapshot(ctx, tx, callerID)
+		snap, err = nodes.BuildDesiredSnapshot(ctx, tx, callerID, s.deps.snapshotOpts()...)
 		return err
 	})
 	if err != nil {

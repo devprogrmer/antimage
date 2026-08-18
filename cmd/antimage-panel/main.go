@@ -115,7 +115,11 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 		ClientCAs:  ca.ClientCAPool(),
 	})
 
-	deps := control.Deps{Store: st, CA: ca, Hub: hub, Now: now}
+	// Box lets the control service unseal subject credentials when it builds a
+	// desired document. Without it a node that has subjects cannot fetch a
+	// snapshot at all -- deliberately, since the alternative is serving one
+	// that omits every subject.
+	deps := control.Deps{Store: st, CA: ca, Hub: hub, Now: now, Box: box}
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
 	pb.RegisterEnrollmentServer(grpcServer, control.NewEnrollmentService(deps))
 	pb.RegisterControlServer(grpcServer, control.NewControlService(deps))

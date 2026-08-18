@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/shared/secrets"
 )
 
@@ -348,4 +349,37 @@ func TestSubjectsAreScopedToTheirOwnNode(t *testing.T) {
 
 	assertSubjectCount(t, s, nodeA, box, 1, "node A")
 	assertSubjectCount(t, s, nodeB, box, 1, "node B")
+}
+
+// CommitNodeChange is what every service handler calls, and it rebuilds the
+// desired document. If the unsealer does not reach it, the first subject
+// created on a node makes every subsequent commit for that node fail forever:
+// the builder correctly refuses to omit subjects it cannot unseal, but it must
+// be given the means to unseal them. This pins the wiring, not the refusal.
+func TestCommitStillWorksOnceASubjectExists(t *testing.T) {
+	s, nodeID := newNodeFixture(t)
+	box := testBox(t)
+	svcID := seedService(t, s, nodeID)
+	fixedNow(t, time.Unix(1_700_000_000, 0).UTC())
+
+	commit := func(reason string, opts ...SnapshotOption) error {
+		_, err := CommitNodeChange(context.Background(), s, nodeID,
+			audit.SystemActor("audit"), "req", reason,
+			func(tx *sql.Tx) error { return nil }, opts...)
+		return err
+	}
+
+	if err := commit("before any subject"); err != nil {
+		t.Fatalf("commit with no subjects: %v", err)
+	}
+
+	seedSubject(t, s, box, "alice", svcID, true, nil)
+
+	if err := commit("after a subject exists", WithUnsealer(box)); err != nil {
+		t.Fatalf("commit with the unsealer supplied: %v", err)
+	}
+	// And the failure mode is still the safe one when it is NOT supplied.
+	if err := commit("without the unsealer"); err == nil {
+		t.Fatal("committed without an unsealer while subjects exist")
+	}
 }

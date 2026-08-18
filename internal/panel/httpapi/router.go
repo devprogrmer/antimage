@@ -162,3 +162,17 @@ func NewRouter(d Deps) http.Handler {
 	r.Handle("/*", d.uiHandler())
 	return r
 }
+
+// snapshotOpts turns the configured secret box into BuildDesiredSnapshot
+// options, so every commit that rebuilds a desired document can unseal the
+// credentials of subjects on that node.
+//
+// Without this, the first subject created on a node makes every subsequent
+// commit for it fail: the document builder refuses to omit subjects it cannot
+// unseal, which is correct, but it must be given the means to unseal them.
+func (d Deps) snapshotOpts() []nodes.SnapshotOption {
+	if d.Box == nil {
+		return nil
+	}
+	return []nodes.SnapshotOption{nodes.WithUnsealer(d.Box)}
+}
