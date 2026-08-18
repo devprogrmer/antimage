@@ -49,6 +49,13 @@ type nodeStatus struct {
 // would otherwise defeat that. The re-check costs one indexed lookup per tick,
 // against the node query already happening on the same tick.
 //
+// It uses Sessions.Validate, not Sessions.Lookup, because Lookup refreshes
+// last_used_at and the idle window is measured from it. Re-checking with
+// Lookup every few seconds would mean an unattended browser tab holding this
+// stream open never reaches IdleTimeout: the connection alone would count as
+// activity. Validate runs the identical checks and writes nothing, so the
+// stream can enforce revocation without extending the idle window.
+//
 // Second, nothing may be held across a tick: each snapshot runs one scoped
 // query through Store.ListNodes, which closes its rows and reports rows.Err
 // before returning, so the read connection is not pinned between sends. No
@@ -134,7 +141,7 @@ func (d Deps) handleEvents(w http.ResponseWriter, r *http.Request) {
 			// all of them mean the same thing here: stop streaming. A
 			// storage failure stops it too — continuing to serve a session
 			// that could not be verified is the failure mode this guards.
-			if _, err := d.Sessions.Lookup(ctx, cookie.Value); err != nil {
+			if _, err := d.Sessions.Validate(ctx, cookie.Value); err != nil {
 				return
 			}
 			if !send() {

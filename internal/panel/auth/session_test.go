@@ -127,3 +127,81 @@ func TestRevokeAllForAdmin(t *testing.T) {
 		}
 	}
 }
+
+// Validate must run exactly the checks Lookup does, but never touch
+// last_used_at. The SSE stream re-checks its session every few seconds; if
+// that refreshed the idle window, an unattended tab holding a stream open
+// would never idle out and IdleTimeout would be dead for that endpoint.
+func TestValidateDoesNotExtendTheIdleWindow(t *testing.T) {
+	sessions, s, adminID, clk := newSessions(t)
+	ctx := context.Background()
+	token, err := sessions.Create(ctx, adminID, "10.0.0.1", "agent")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	readLastUsed := func() int64 {
+		var v int64
+		if err := s.Read().QueryRow(
+			`SELECT last_used_at FROM sessions WHERE admin_id = ?`, adminID).Scan(&v); err != nil {
+			t.Fatalf("read last_used_at: %v", err)
+		}
+		return v
+	}
+	original := readLastUsed()
+
+	for i := 0; i < 5; i++ {
+		clk.advance(30 * time.Minute)
+		if _, err := sessions.Validate(ctx, token); err != nil {
+			t.Fatalf("Validate at step %d: %v", i, err)
+		}
+	}
+	if got := readLastUsed(); got != original {
+		t.Fatalf("last_used_at moved %d -> %d: Validate extended the idle window", original, got)
+	}
+
+	// Cross IdleTimeout with no real activity. The session must be dead, which
+	// is only true because the Validate calls above did not refresh it.
+	clk.advance(IdleTimeout)
+	if _, err := sessions.Validate(ctx, token); err == nil {
+		t.Fatal("session outlived the idle window: Validate kept it alive")
+	}
+}
+
+// The contrast: ordinary requests use Lookup, which must keep extending the
+// window, or an actively working admin would be logged out mid-session.
+func TestLookupStillExtendsTheIdleWindow(t *testing.T) {
+	sessions, _, adminID, clk := newSessions(t)
+	ctx := context.Background()
+	token, err := sessions.Create(ctx, adminID, "10.0.0.1", "agent")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		clk.advance(IdleTimeout - time.Minute)
+		if _, err := sessions.Lookup(ctx, token); err != nil {
+			t.Fatalf("Lookup at step %d: %v", i, err)
+		}
+	}
+}
+
+// Validate must still reject a revoked session — that is its purpose on the
+// stream.
+func TestValidateRejectsARevokedSession(t *testing.T) {
+	sessions, _, adminID, _ := newSessions(t)
+	ctx := context.Background()
+	token, err := sessions.Create(ctx, adminID, "10.0.0.1", "agent")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	sess, err := sessions.Validate(ctx, token)
+	if err != nil {
+		t.Fatalf("Validate before revoke: %v", err)
+	}
+	if err := sessions.Revoke(ctx, sess.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if _, err := sessions.Validate(ctx, token); err == nil {
+		t.Fatal("a revoked session passed Validate")
+	}
+}

@@ -83,6 +83,24 @@ func (s *Sessions) Create(ctx context.Context, adminID int64, ip, ua string) (st
 // Every rejection reason collapses to ErrSessionInvalid so callers cannot
 // tell an attacker whether a token ever existed.
 func (s *Sessions) Lookup(ctx context.Context, token string) (*Session, error) {
+	return s.lookup(ctx, token, true)
+}
+
+// Validate performs exactly the checks Lookup does but does NOT refresh
+// last_used_at, so calling it cannot extend the idle window.
+//
+// It exists for long-lived connections. The SSE stream re-checks its session
+// on every tick so a logout or an operator's revoke takes effect within one
+// interval rather than whenever the client happens to reconnect. Using Lookup
+// there would touch last_used_at every few seconds, which means an unattended
+// browser tab holding a stream open would never reach IdleTimeout — the open
+// connection alone would count as activity and quietly defeat the idle
+// window for the one endpoint that stays open longest.
+func (s *Sessions) Validate(ctx context.Context, token string) (*Session, error) {
+	return s.lookup(ctx, token, false)
+}
+
+func (s *Sessions) lookup(ctx context.Context, token string, refresh bool) (*Session, error) {
 	if token == "" {
 		return nil, ErrSessionInvalid
 	}
@@ -117,17 +135,22 @@ func (s *Sessions) Lookup(ctx context.Context, token string) (*Session, error) {
 		return nil, ErrSessionInvalid
 	}
 
-	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
-			`UPDATE sessions SET last_used_at = ? WHERE id = ?`, now.Unix(), sess.ID)
-		return err
-	}); err != nil {
-		return nil, fmt.Errorf("refresh session: %w", err)
+	if refresh {
+		if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx,
+				`UPDATE sessions SET last_used_at = ? WHERE id = ?`, now.Unix(), sess.ID)
+			return err
+		}); err != nil {
+			return nil, fmt.Errorf("refresh session: %w", err)
+		}
 	}
 
 	sess.CreatedAt = time.Unix(createdAt, 0).UTC()
 	sess.ExpiresAt = time.Unix(expiresAt, 0).UTC()
-	sess.LastUsedAt = now
+	sess.LastUsedAt = time.Unix(lastUsedAt, 0).UTC()
+	if refresh {
+		sess.LastUsedAt = now
+	}
 	return &sess, nil
 }
 
