@@ -22,6 +22,11 @@ const OfflineAfter = 90 * time.Second
 type Sweeper struct {
 	store *store.Store
 	now   func() time.Time
+	// after is how long a node may go unheard before it is swept. Zero means
+	// OfflineAfter, which is what production runs; it is settable only so the
+	// acceptance suite can exercise the real code path without a 90-second
+	// wall-clock wait, the same reason httpapi.Deps.SSEInterval exists.
+	after time.Duration
 }
 
 func NewSweeper(s *store.Store, now func() time.Time) *Sweeper {
@@ -31,6 +36,20 @@ func NewSweeper(s *store.Store, now func() time.Time) *Sweeper {
 	return &Sweeper{store: s, now: now}
 }
 
+// WithThreshold returns a sweeper that marks nodes offline after d instead of
+// the default OfflineAfter. A non-positive d selects the default.
+func (s *Sweeper) WithThreshold(d time.Duration) *Sweeper {
+	s.after = d
+	return s
+}
+
+func (s *Sweeper) threshold() time.Duration {
+	if s.after <= 0 {
+		return OfflineAfter
+	}
+	return s.after
+}
+
 // Sweep marks every stale node offline and returns how many it moved.
 //
 // The audit row is written with audit.InTx inside the same transaction as the
@@ -38,7 +57,7 @@ func NewSweeper(s *store.Store, now func() time.Time) *Sweeper {
 // offline. That is also why this function must never reach for
 // audit.BestEffort: it already holds the store's single write connection.
 func (s *Sweeper) Sweep(ctx context.Context) (int, error) {
-	cutoff := s.now().Add(-OfflineAfter).Unix()
+	cutoff := s.now().Add(-s.threshold()).Unix()
 	var marked int
 
 	err := s.store.Write(ctx, func(tx *sql.Tx) error {

@@ -54,3 +54,8 @@ build: sync-install web
 
 clean:
 	rm -rf bin
+
+# Acceptance suite for the SP1 definition of done. It runs a real panel and a
+# real agent over loopback with genuine mTLS, so it needs no Docker daemon.
+e2e:
+	$(GO) test ./test/e2e/... -tags e2e -count=1 -timeout 15m -v

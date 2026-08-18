@@ -13,6 +13,10 @@ jobs:
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@v6
       - run: go test ./... -race -count=1
+      # The acceptance suite for the definition of done. It needs no daemon:
+      # a real panel and a real agent talk over loopback with genuine mTLS.
+      - run: go test ./test/e2e/... -tags e2e -count=1 -timeout 15m
+
       - name: cross-compile
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...

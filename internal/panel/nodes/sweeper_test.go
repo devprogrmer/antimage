@@ -174,3 +174,47 @@ func TestNodeWithNoHeartbeatEverIsSwept(t *testing.T) {
 		t.Errorf("status = %q, want offline", got)
 	}
 }
+
+// WithThreshold exists so the acceptance suite can exercise the real sweep
+// path without a 90-second wall-clock wait. It must actually change the
+// cutoff, and a non-positive value must fall back to the production default
+// rather than sweeping everything immediately.
+func TestSweeperThresholdIsConfigurableAndDefaultsSafely(t *testing.T) {
+	s, nodeID := newNodeFixture(t)
+	ctx := context.Background()
+	base := time.Unix(1_700_000_000, 0).UTC()
+
+	setSeen(t, s, nodeID, "online", base.Add(-10*time.Second))
+
+	now := func() time.Time { return base }
+
+	// Ten seconds of silence is far inside the 90s default: nothing swept.
+	n, err := NewSweeper(s, now).Sweep(ctx)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("default threshold swept %d nodes after 10s of silence", n)
+	}
+
+	// A non-positive threshold must NOT mean "sweep everything now".
+	n, err = NewSweeper(s, now).WithThreshold(0).Sweep(ctx)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("WithThreshold(0) swept %d nodes; zero must select the default", n)
+	}
+
+	// A short threshold sweeps the same node.
+	n, err = NewSweeper(s, now).WithThreshold(5 * time.Second).Sweep(ctx)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("WithThreshold(5s) swept %d nodes, want 1", n)
+	}
+	if got := statusOf(t, s, nodeID); got != "offline" {
+		t.Errorf("status = %q, want offline", got)
+	}
+}
