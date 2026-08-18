@@ -29,6 +29,15 @@ const (
 	// lets Observe tell "we wrote this and it is current" from "we wrote this
 	// and somebody edited it" from "a human put this here".
 	markerPrefix = "// antimage:"
+	// appliedSuffix names the sidecar recording the checksum the RUNTIME was
+	// last successfully restarted with. Written only after a restart succeeds.
+	//
+	// Without it a write that succeeds followed by a restart that fails leaves
+	// a correct file on disk, so the next Observe sees no difference and plans
+	// nothing -- and the node reports converged while the proxy is still
+	// running the old configuration. The file says what should be running; this
+	// says what is.
+	appliedSuffix = ".applied"
 )
 
 // Adapter implements the adapter contract for Xray-core.
@@ -90,6 +99,25 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			ServiceSchema:   serviceSchema,
 		},
 	}
+}
+
+func (a *Adapter) appliedPath(id int64) string {
+	return a.path(id) + appliedSuffix
+}
+
+// recordApplied notes that the runtime is now serving this checksum.
+func (a *Adapter) recordApplied(serviceID int64, checksum string) error {
+	return os.WriteFile(a.appliedPath(serviceID), []byte(checksum+"\n"), 0o600)
+}
+
+// appliedChecksum reads what the runtime was last restarted with. An empty
+// string means "never successfully applied", which forces a restart.
+func (a *Adapter) appliedChecksum(serviceID int64) string {
+	body, err := os.ReadFile(a.appliedPath(serviceID))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(body))
 }
 
 func (a *Adapter) path(id int64) string {
@@ -170,7 +198,8 @@ func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
 
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasPrefix(name, filePrefix) || !strings.HasSuffix(name, fileSuffix) {
+		if e.IsDir() || !strings.HasPrefix(name, filePrefix) ||
+			!strings.HasSuffix(name, fileSuffix) || strings.HasSuffix(name, appliedSuffix) {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(a.dir, name))
@@ -234,6 +263,9 @@ const (
 	StepAddUser       = "add_user"
 	StepRemoveUser    = "remove_user"
 	StepValidate      = "validate_config"
+	// StepRestartService reapplies a config already on disk that the runtime
+	// never successfully loaded.
+	StepRestartService = "restart_service"
 )
 
 // Plan diffs desired against observed. It is pure and repeatable: it performs
@@ -306,6 +338,16 @@ func (a *Adapter) Plan(
 				"service %d: %s exists but was not written by antimage; refusing to overwrite",
 				svc.ID, a.path(svc.ID))
 
+		case o.Checksum == want && a.appliedChecksum(svc.ID) != want:
+			// The file is right but the runtime never came up with it: a
+			// previous restart failed. Restart without rewriting.
+			seq++
+			plan.Steps = append(plan.Steps, adapter.Step{
+				Seq: seq, Kind: StepRestartService,
+				Disruption: adapter.DisruptRestart, ServiceID: svc.ID,
+				Payload: mustPayload(stepPayload{Config: string(rendered), Shape: want}),
+			})
+
 		case o.Checksum != want:
 			// Content differs. If only the user set changed and the runtime
 			// supports hot add, do it without dropping sessions; otherwise the
@@ -319,6 +361,9 @@ func (a *Adapter) Plan(
 				// Observe reports drift forever. Rewriting it costs nothing
 				// live because the running instance is already correct.
 				seq++
+				// DisruptNone: the running instance is already correct because
+				// the users were added through the API; the file is brought
+				// into line so the next Observe does not report drift.
 				plan.Steps = append(plan.Steps, a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptNone))
 			} else {
 				seq++
@@ -493,8 +538,23 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 				return fail(fmt.Errorf("restart after writing service %d: %w", step.ServiceID, err))
 			}
 		}
+		// Recorded only after the runtime is actually serving it.
+		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config))); err != nil {
+			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
+		}
+
+	case StepRestartService:
+		if err := a.rt.Restart(ctx); err != nil {
+			return fail(fmt.Errorf("restart service %d: %w", step.ServiceID, err))
+		}
+		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config))); err != nil {
+			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
+		}
 
 	case StepRemoveService:
+		if err := os.Remove(a.appliedPath(step.ServiceID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fail(fmt.Errorf("remove applied marker for service %d: %w", step.ServiceID, err))
+		}
 		if err := os.Remove(a.path(step.ServiceID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			// Already gone is the state we wanted; anything else is a failure.
 			return fail(fmt.Errorf("remove service %d: %w", step.ServiceID, err))

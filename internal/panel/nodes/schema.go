@@ -9,7 +9,9 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
+	"github.com/amyrm/antimage/internal/node/adapter/singbox"
 	"github.com/amyrm/antimage/internal/node/adapter/stub"
+	"github.com/amyrm/antimage/internal/node/adapter/xray"
 )
 
 // ErrSchemaViolation means service params failed their adapter's schema.
@@ -21,9 +23,21 @@ var ErrSchemaViolation = errors.New("service params violate the adapter schema")
 // which is the whole extension point: the panel never learns protocol config
 // formats, only how to fetch a schema and validate against it.
 func KnownAdapters() map[string]adapter.Descriptor {
+	// Constructed with empty paths and nil runtimes: only the Descriptor is
+	// read here, and it must not touch the host. The panel never runs an
+	// adapter, it only validates operator input against the schema each one
+	// publishes.
+	//
+	// HotUserAdd in these descriptors is the CAPABILITY OF THE TYPE, not of any
+	// particular node. A node reports its own at Hello, because whether Xray
+	// can hot-add depends on that node having a management API configured.
+	x := xray.New("", nil, true)
+	sb := singbox.New("", nil)
 	s := stub.New("")
 	return map[string]adapter.Descriptor{
-		string(stub.Kind): s.Descriptor(),
+		string(stub.Kind):    s.Descriptor(),
+		string(xray.Kind):    x.Descriptor(),
+		string(singbox.Kind): sb.Descriptor(),
 	}
 }
 
