@@ -1,11 +1,14 @@
 package httpapi
 
-import "net/http"
+import (
+	"net/http"
+	"os"
 
-// uiHandler serves the embedded single-page app. Task 30 replaces this with
-// the real embed.FS handler; until then it keeps the router complete.
+	"github.com/amyrm/antimage/internal/panel/webui"
+)
+
+// uiHandler serves the embedded SPA, or proxies to Vite when
+// ANTIMAGE_DEV_PROXY is set.
 func (d Deps) uiHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "ui not built", http.StatusNotFound)
-	})
+	return webui.Handler(os.Getenv("ANTIMAGE_DEV_PROXY"))
 }

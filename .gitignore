@@ -5,4 +5,10 @@ bin/
 master.key
 web/node_modules/
 web/dist/
+# Vite builds into the Go package, because a go:embed pattern resolves
+# relative to the file holding it and embed.go lives here. The build output
+# stays out of git; .gitkeep is committed so `//go:embed all:dist` still
+# compiles on a checkout where the UI has never been built.
+internal/panel/webui/dist/*
+!internal/panel/webui/dist/.gitkeep
 .env

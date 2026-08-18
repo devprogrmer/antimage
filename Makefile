@@ -2,7 +2,7 @@ GO      ?= go
 LDFLAGS := -X github.com/amyrm/antimage/internal/shared/version.Version=$(shell git describe --tags --always --dirty)
 BUILD   := CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)"
 
-.PHONY: test lint build check-imports proto proto-lint sync-install clean
+.PHONY: test lint build check-imports check-rtl web proto proto-lint sync-install clean
 
 # buf is installed with `go install github.com/bufbuild/buf/cmd/buf@latest`,
 # which places it in $(go env GOPATH)/bin. Put that directory on PATH rather
@@ -30,6 +30,15 @@ lint:
 check-imports:
 	./scripts/check-imports.sh
 
+check-rtl:
+	./scripts/check-rtl.sh
+
+# Vite writes into internal/panel/webui/dist, which is where go:embed reads
+# from, so `build` depends on this: a released binary always carries a UI
+# built from the sources in this tree, never a stale one.
+web:
+	cd web && npm ci && npm run build
+
 # go:embed cannot reach outside internal/panel/httpapi, so the panel keeps its
 # own copy of the bootstrap script. This refreshes it. The copy is not trusted
 # to stay fresh on its own: TestEmbeddedScriptMatchesSource fails the test
@@ -38,7 +47,7 @@ check-imports:
 sync-install:
 	cp scripts/install.sh internal/panel/httpapi/install.sh
 
-build: sync-install
+build: sync-install web
 	$(BUILD) -o bin/antimage-panel ./cmd/antimage-panel
 	$(BUILD) -o bin/antimage-node  ./cmd/antimage-node
 	$(BUILD) -o bin/antimage-ctl   ./cmd/antimage-ctl

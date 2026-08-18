@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* Direction is carried by <html dir>, set once by setLocale(). Components use
+   logical utilities (ms-/me-/ps-/pe-/text-start) so nothing has to be mirrored
+   by hand; scripts/check-rtl.sh keeps the physical ones out. */
+html,
+body,
+#root {
+  min-height: 100%;
+}
