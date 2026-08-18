@@ -187,24 +187,3 @@ func TestPanicAfterPartialWriteDoesNotAppendAnEnvelope(t *testing.T) {
 		t.Errorf("an error envelope was appended to a committed response: %s", res.Body)
 	}
 }
-
-// TestNotImplementedStubsAreReachableAndAuthenticated pins that a route whose
-// handler has not landed yet is still routed and still behind the auth
-// middleware — a stub must answer 501, never 404, and never before a session
-// is checked.
-//
-// It points at whichever route is still a stub. That was /api/v1/audit until
-// Task 25 implemented it; /api/v1/events is the remaining one, owned by Task
-// 26. Retarget it again rather than deleting it when that lands.
-func TestNotImplementedStubsAreReachableAndAuthenticated(t *testing.T) {
-	env := newTestEnv(t)
-	env.seedAdmin(t, "alice", "pw", "super_admin")
-	token := env.login(t, "alice", "pw")
-
-	if res := env.get(t, "/api/v1/events", token); res.Code != http.StatusNotImplemented {
-		t.Errorf("authenticated stub status = %d, want 501", res.Code)
-	}
-	if res := env.get(t, "/api/v1/events", ""); res.Code != http.StatusUnauthorized {
-		t.Errorf("unauthenticated stub status = %d, want 401", res.Code)
-	}
-}

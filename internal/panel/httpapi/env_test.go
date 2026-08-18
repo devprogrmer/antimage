@@ -25,7 +25,10 @@ type testEnv struct {
 
 func itoa64(i int64) string { return strconv.FormatInt(i, 10) }
 
-func newTestEnv(t *testing.T) *testEnv {
+// newTestEnv builds a router over a fresh database. The options mutate Deps
+// before the router is built, for the handful of tests that need a dependency
+// tuned — the SSE snapshot interval, so far.
+func newTestEnv(t *testing.T, opts ...func(*Deps)) *testEnv {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -34,14 +37,17 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() { _ = s.Close() })
 
 	now := func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
-	h := NewRouter(Deps{
+	deps := Deps{
 		Store:    s,
 		Sessions: auth.NewSessions(s, now),
 		Limiter:  auth.NewLimiter(s, now),
 		Hub:      control.NewHub(),
 		Now:      now,
-	})
-	return &testEnv{store: s, handler: h}
+	}
+	for _, opt := range opts {
+		opt(&deps)
+	}
+	return &testEnv{store: s, handler: NewRouter(deps)}
 }
 
 func (e *testEnv) seedAdmin(t *testing.T, username, password, role string) int64 {

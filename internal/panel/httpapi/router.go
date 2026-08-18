@@ -27,7 +27,12 @@ type Deps struct {
 	// loaded: handleLogin then DENIES any admin who has TOTP enrolled rather
 	// than admitting them on a password alone. Task 27's main.go populates it.
 	Box *secrets.Box
-	Now func() time.Time
+	// SSEInterval is how often GET /api/v1/events pushes a node-status
+	// snapshot. Zero means defaultSSEInterval, which is what production
+	// runs; it is a field only so a test can drive the loop faster than a
+	// real client would rather than pin a sleep to the production value.
+	SSEInterval time.Duration
+	Now         func() time.Time
 }
 
 func (d Deps) now() time.Time {
