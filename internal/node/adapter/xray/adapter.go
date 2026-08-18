@@ -417,31 +417,6 @@ func (a *Adapter) userOnlyChange(serviceID int64, in Inbound) bool {
 	return checksumOf(shell) == recorded
 }
 
-// sameExceptClients compares two rendered inbounds ignoring the clients array,
-// so "only the user set changed" can be decided without parsing Xray's schema.
-func sameExceptClients(a, b []byte) bool {
-	var da, db map[string]any
-	if json.Unmarshal(a, &da) != nil || json.Unmarshal(b, &db) != nil {
-		return false
-	}
-	stripClients(da)
-	stripClients(db)
-	ja, err1 := json.Marshal(da)
-	jb, err2 := json.Marshal(db)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	return string(ja) == string(jb)
-}
-
-func stripClients(doc map[string]any) {
-	settings, ok := doc["settings"].(map[string]any)
-	if !ok {
-		return
-	}
-	delete(settings, "clients")
-}
-
 func (a *Adapter) writeStep(
 	seq int, serviceID int64, in Inbound, rendered []byte, d adapter.Disruption,
 ) adapter.Step {
