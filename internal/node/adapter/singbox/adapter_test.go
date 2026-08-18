@@ -477,3 +477,97 @@ func TestWrittenConfigIsNotWorldReadable(t *testing.T) {
 		t.Errorf("config mode = %04o, want no group or other access", perm)
 	}
 }
+
+// The same security property the Xray adapter needs, asserted independently
+// here rather than assumed from "sing-box has no hot path".
+//
+// sing-box cannot add or remove a user without a restart, so a revocation is
+// structurally forced down the restart path -- but that is a property of the
+// current implementation, not of the contract. If somebody later adds a hot
+// path they must not reintroduce the hole where a revoked credential leaves
+// the config file while the running process keeps serving the session.
+func TestRevokingAUserActuallyReachesTheRuntime(t *testing.T) {
+	a, rt, dir := newAdapter(t)
+
+	converge(t, a, desiredWith(2, 10, tlsParams))
+	restartsBefore := rt.count()
+
+	revoked := "11111111-2222-3333-4444-555555555552"
+	body, err := os.ReadFile(filepath.Join(dir, "antimage-10.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(body), revoked) {
+		t.Fatal("precondition: the second user was never in the config")
+	}
+
+	plan := converge(t, a, desiredWith(1, 10, tlsParams))
+
+	if got := plan.MaxDisruption(); got < adapter.DisruptRestart {
+		t.Errorf("revocation planned as %v, want at least %v", got, adapter.DisruptRestart)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "antimage-10.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(after), revoked) {
+		t.Error("the revoked credential is still in the config file")
+	}
+	if rt.count() == restartsBefore {
+		t.Error("the revoked user left the config file but the process was never restarted, " +
+			"so they stay connected")
+	}
+}
+
+// A write that succeeds followed by a restart that fails must NOT look like
+// convergence.
+//
+// The config file on disk is correct at that point, so a checksum comparison
+// alone reports no drift and the adapter plans nothing -- while sing-box is
+// still serving the previous configuration, including any user the write was
+// meant to revoke. The applied sidecar is what separates "what should be
+// running" from "what is running".
+func TestFailedRestartDoesNotLookLikeConvergence(t *testing.T) {
+	a, rt, _ := newAdapter(t)
+	ctx := context.Background()
+	d := desiredWith(1, 10, tlsParams)
+
+	rt.failRst = errors.New("systemctl: job failed")
+	obs, _ := a.Observe(ctx)
+	plan, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	for _, s := range plan.Steps {
+		_, _ = a.Apply(ctx, s) // staged to fail at the restart
+	}
+
+	rt.failRst = nil
+	obs, _ = a.Observe(ctx)
+	next, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if next.IsEmpty() {
+		t.Fatal("the adapter reported convergence after a restart that never happened; " +
+			"the process is still running the old configuration")
+	}
+	if got := next.MaxDisruption(); got < adapter.DisruptRestart {
+		t.Errorf("recovery planned as %v, want at least %v", got, adapter.DisruptRestart)
+	}
+
+	// And applying it converges for real.
+	for _, s := range next.Steps {
+		if _, err := a.Apply(ctx, s); err != nil {
+			t.Fatalf("Apply %s: %v", s.Kind, err)
+		}
+	}
+	if rt.count() == 0 {
+		t.Error("recovery never restarted the runtime")
+	}
+	obs, _ = a.Observe(ctx)
+	final, _ := a.Plan(ctx, d, obs)
+	if !final.IsEmpty() {
+		t.Errorf("did not settle after recovery: %+v", final.Steps)
+	}
+}

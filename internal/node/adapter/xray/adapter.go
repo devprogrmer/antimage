@@ -105,19 +105,63 @@ func (a *Adapter) appliedPath(id int64) string {
 	return a.path(id) + appliedSuffix
 }
 
-// recordApplied notes that the runtime is now serving this checksum.
-func (a *Adapter) recordApplied(serviceID int64, checksum string) error {
-	return os.WriteFile(a.appliedPath(serviceID), []byte(checksum+"\n"), 0o600)
+// appliedState is what the RUNTIME is serving, as opposed to what the config
+// file on disk says it should serve.
+//
+// Users is recorded alongside the checksum because a checksum alone cannot
+// answer "was anybody removed?", and that question decides between a hot add
+// and a restart. Getting it wrong is not a performance problem: a revoked user
+// whose removal never reaches the running process stays connected while the
+// panel reports them gone.
+type appliedState struct {
+	Checksum string   `json:"checksum"`
+	Users    []string `json:"users"`
 }
 
-// appliedChecksum reads what the runtime was last restarted with. An empty
-// string means "never successfully applied", which forces a restart.
-func (a *Adapter) appliedChecksum(serviceID int64) string {
+// recordApplied notes what the runtime is now serving. Called only after the
+// runtime has actually accepted it.
+func (a *Adapter) recordApplied(serviceID int64, checksum string, users []string) error {
+	sorted := append([]string(nil), users...)
+	sort.Strings(sorted)
+	body, err := json.Marshal(appliedState{Checksum: checksum, Users: sorted})
+	if err != nil {
+		return fmt.Errorf("encode applied state: %w", err)
+	}
+	return os.WriteFile(a.appliedPath(serviceID), body, 0o600)
+}
+
+// applied reads what the runtime was last successfully restarted with. A zero
+// value means "unknown", which forces a restart -- the safe direction.
+func (a *Adapter) applied(serviceID int64) appliedState {
 	body, err := os.ReadFile(a.appliedPath(serviceID))
 	if err != nil {
-		return ""
+		return appliedState{}
 	}
-	return strings.TrimSpace(string(body))
+	var st appliedState
+	if err := json.Unmarshal(body, &st); err != nil {
+		return appliedState{}
+	}
+	return st
+}
+
+// removedFrom reports which users the runtime is currently serving that the
+// desired state no longer contains. A non-empty result disqualifies the hot
+// path, because Xray keeps serving a user until it is explicitly told
+// otherwise -- deleting them from the config file alone does nothing to an
+// established session.
+func removedFrom(st appliedState, desired []User) []string {
+	want := make(map[string]struct{}, len(desired))
+	for _, u := range desired {
+		want[u.Email] = struct{}{}
+	}
+	var gone []string
+	for _, email := range st.Users {
+		if _, still := want[email]; !still {
+			gone = append(gone, email)
+		}
+	}
+	sort.Strings(gone)
+	return gone
 }
 
 func (a *Adapter) path(id int64) string {
@@ -253,6 +297,9 @@ type stepPayload struct {
 	// in the marker so a later Plan can tell a membership change from a change
 	// to the inbound itself.
 	Shape string `json:"shape,omitempty"`
+	// Users is the tag set this config serves, carried through to the applied
+	// sidecar so a later Plan can tell whether anybody is being removed.
+	Users []string `json:"users,omitempty"`
 }
 
 // Step kinds. These reach the panel's node_apply_steps.step_kind and are what
@@ -324,12 +371,15 @@ func (a *Adapter) Plan(
 		}
 		want := checksumOf(rendered)
 
+		st := a.applied(svc.ID)
+
 		o, exists := present[svc.ID]
 		switch {
 		case !exists:
 			// New inbound: a new listener cannot appear without a restart.
 			seq++
-			plan.Steps = append(plan.Steps, a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart))
+			plan.Steps = append(plan.Steps,
+				a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users))
 
 		case !o.Managed:
 			// Somebody else's file occupies our name. Refusing is safer than
@@ -338,21 +388,39 @@ func (a *Adapter) Plan(
 				"service %d: %s exists but was not written by antimage; refusing to overwrite",
 				svc.ID, a.path(svc.ID))
 
-		case o.Checksum == want && a.appliedChecksum(svc.ID) != want:
+		case o.Checksum == want && st.Checksum != want:
 			// The file is right but the runtime never came up with it: a
 			// previous restart failed. Restart without rewriting.
 			seq++
 			plan.Steps = append(plan.Steps, adapter.Step{
 				Seq: seq, Kind: StepRestartService,
 				Disruption: adapter.DisruptRestart, ServiceID: svc.ID,
-				Payload: mustPayload(stepPayload{Config: string(rendered), Shape: want}),
+				Payload: mustPayload(stepPayload{
+					Config: string(rendered), Shape: want, Users: userTags(users),
+				}),
 			})
 
 		case o.Checksum != want:
-			// Content differs. If only the user set changed and the runtime
-			// supports hot add, do it without dropping sessions; otherwise the
-			// inbound's shape changed and only a restart is honest.
-			if a.userOnlyChange(svc.ID, in) && a.hotAdd && len(users) > 0 {
+			// Content differs. The hot path is only legitimate when the change
+			// is PURELY ADDITIVE:
+			//
+			//   - the inbound's shape is unchanged (a moved port is not a
+			//     membership change), and
+			//   - the runtime can add users without a restart, and
+			//   - nobody is being REMOVED.
+			//
+			// The last condition is a security boundary, not an optimisation.
+			// Xray goes on serving a user until it is told to stop; dropping
+			// them from the config file has no effect on an established
+			// session. Taking the hot path on a revocation would delete the
+			// credential from disk, report the plan converged, and leave the
+			// revoked user connected indefinitely.
+			//
+			// Revocation therefore takes the rewrite-and-restart path, which
+			// is the classification recorded in SP2 decision 3.
+			revoked := removedFrom(st, users)
+			additive := st.Checksum != "" && len(revoked) == 0
+			if a.userOnlyChange(svc.ID, in) && a.hotAdd && len(users) > 0 && additive {
 				for _, u := range users {
 					seq++
 					plan.Steps = append(plan.Steps, a.userStep(seq, StepAddUser, svc.ID, in, u))
@@ -364,10 +432,12 @@ func (a *Adapter) Plan(
 				// DisruptNone: the running instance is already correct because
 				// the users were added through the API; the file is brought
 				// into line so the next Observe does not report drift.
-				plan.Steps = append(plan.Steps, a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptNone))
+				plan.Steps = append(plan.Steps,
+					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptNone, users))
 			} else {
 				seq++
-				plan.Steps = append(plan.Steps, a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart))
+				plan.Steps = append(plan.Steps,
+					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users))
 			}
 		}
 	}
@@ -418,7 +488,7 @@ func (a *Adapter) userOnlyChange(serviceID int64, in Inbound) bool {
 }
 
 func (a *Adapter) writeStep(
-	seq int, serviceID int64, in Inbound, rendered []byte, d adapter.Disruption,
+	seq int, serviceID int64, in Inbound, rendered []byte, d adapter.Disruption, users []User,
 ) adapter.Step {
 	shell, err := in.Generate(nil)
 	shape := ""
@@ -427,8 +497,19 @@ func (a *Adapter) writeStep(
 	}
 	return adapter.Step{
 		Seq: seq, Kind: StepWriteService, Disruption: d, ServiceID: serviceID,
-		Payload: mustPayload(stepPayload{Config: string(rendered), Tag: in.Tag(), Shape: shape}),
+		Payload: mustPayload(stepPayload{
+			Config: string(rendered), Tag: in.Tag(), Shape: shape, Users: userTags(users),
+		}),
 	}
+}
+
+// userTags projects users to the tags the runtime knows them by.
+func userTags(users []User) []string {
+	tags := make([]string, 0, len(users))
+	for _, u := range users {
+		tags = append(tags, u.Email)
+	}
+	return tags
 }
 
 func (a *Adapter) userStep(seq int, kind string, serviceID int64, in Inbound, u User) adapter.Step {
@@ -514,7 +595,7 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 			}
 		}
 		// Recorded only after the runtime is actually serving it.
-		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config))); err != nil {
+		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config)), p.Users); err != nil {
 			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
 		}
 
@@ -522,7 +603,7 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		if err := a.rt.Restart(ctx); err != nil {
 			return fail(fmt.Errorf("restart service %d: %w", step.ServiceID, err))
 		}
-		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config))); err != nil {
+		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config)), p.Users); err != nil {
 			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
 		}
 

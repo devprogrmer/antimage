@@ -312,6 +312,12 @@ func TestSubjectWritesRequireThePermission(t *testing.T) {
 	if res := env.get(t, "/api/v1/subjects/1/credentials/uuid", roToken); res.Code != http.StatusForbidden {
 		t.Errorf("readonly reveal = %d, want 403", res.Code)
 	}
+	// Nor is rotating one, which replaces the credential a user is connecting
+	// with and is therefore a write however it is spelled.
+	if res := env.post(t, "/api/v1/subjects/1/credentials/uuid/rotate", "{}", roToken); //nolint:lll
+	res.Code != http.StatusForbidden {
+		t.Errorf("readonly rotate = %d, want 403", res.Code)
+	}
 }
 
 func TestSubjectEndpointsRequireAuthentication(t *testing.T) {
@@ -323,6 +329,7 @@ func TestSubjectEndpointsRequireAuthentication(t *testing.T) {
 		{http.MethodPut, "/api/v1/subjects/1"},
 		{http.MethodDelete, "/api/v1/subjects/1"},
 		{http.MethodGet, "/api/v1/subjects/1/credentials/uuid"},
+		{http.MethodPost, "/api/v1/subjects/1/credentials/uuid/rotate"},
 	} {
 		if res := env.do(t, tc.method, tc.path, "{}", ""); res.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s = %d, want 401", tc.method, tc.path, res.Code)

@@ -77,7 +77,18 @@ type sp2Env struct {
 	serviceID int64
 	adapter   adapter.Adapter
 	rt        *sp2Runtime
+	sbRT      *singboxRuntime
 	confDir   string
+}
+
+// restartCount reports how many times the proxy process has been restarted,
+// whichever adapter is under test. Kept as one accessor so a test asserting a
+// disruption property reads the same way for both runtimes.
+func (s *sp2Env) restartCount() int {
+	if s.rt != nil {
+		return s.rt.restarts
+	}
+	return s.sbRT.restarts
 }
 
 func startSP2(t *testing.T, adapterKind string) *sp2Env {
@@ -93,7 +104,8 @@ func startSP2(t *testing.T, adapterKind string) *sp2Env {
 		s.rt = newSP2Runtime()
 		s.adapter = xray.New(confDir, s.rt, true) // hot add supported
 	case "singbox":
-		s.adapter = singbox.New(confDir, &singboxRuntime{})
+		s.sbRT = &singboxRuntime{}
+		s.adapter = singbox.New(confDir, s.sbRT)
 	default:
 		t.Fatalf("unknown adapter kind %q", adapterKind)
 	}
@@ -403,6 +415,62 @@ func TestSP2RepeatedReconciliationIsANoOp(t *testing.T) {
 					t.Fatalf("reconcile %d planned %d step(s) with unchanged state: %+v",
 						i, len(plan.Steps), plan.Steps)
 				}
+			}
+		})
+	}
+}
+
+// Revocation, end to end: removing a user must reach the RUNNING proxy, not
+// just the config file on disk.
+//
+// The lifecycle test above proves the credential leaves the generated config.
+// That is necessary but not sufficient: Xray goes on serving a user until it is
+// told to stop, so a revocation that rewrote the file without restarting would
+// pass every config assertion while the revoked user stayed connected. This
+// test asserts the part that actually terminates access.
+func TestSP2RevocationReachesTheRunningProxy(t *testing.T) {
+	for _, kind := range []string{"xray", "singbox"} {
+		t.Run(kind, func(t *testing.T) {
+			e := startSP2(t, kind)
+
+			keep := e.createSubject(t, "alice", nil)
+			keepCred := e.credential(t, keep)
+			revoke := e.createSubject(t, "mallory", nil)
+			revokeCred := e.credential(t, revoke)
+
+			e.reconcile(t)
+			if !strings.Contains(e.generatedConfig(t), revokeCred) {
+				t.Fatal("precondition: the user to revoke never reached the config")
+			}
+			restartsBefore := e.restartCount()
+
+			// Revoke by deleting the subject outright.
+			if code := e.apiJSON("DELETE", fmt.Sprintf("/api/v1/subjects/%d", revoke), "", nil); //nolint:lll
+			code != http.StatusNoContent {
+				t.Fatalf("delete: %d", code)
+			}
+			plan := e.reconcile(t)
+
+			config := e.generatedConfig(t)
+			if strings.Contains(config, revokeCred) {
+				t.Error("the revoked credential is still in the generated config")
+			}
+			if !strings.Contains(config, keepCred) {
+				t.Error("revoking one user removed another")
+			}
+
+			// The part that matters: the proxy process learned about it.
+			if plan.MaxDisruption() < adapter.DisruptRestart {
+				t.Errorf("revocation classified as %v, want at least %v; the running "+
+					"process would never be told", plan.MaxDisruption(), adapter.DisruptRestart)
+			}
+			if e.restartCount() == restartsBefore {
+				t.Errorf("revocation did not restart the proxy (%d restarts throughout); "+
+					"the revoked user keeps their session", e.restartCount())
+			}
+
+			if next := e.reconcile(t); !next.IsEmpty() {
+				t.Errorf("not converged after revocation: %+v", next.Steps)
 			}
 		})
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -562,5 +563,163 @@ func TestWrittenConfigIsNotWorldReadable(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		t.Errorf("config mode = %04o, want no group or other access", perm)
+	}
+}
+
+// Revocation is a security boundary, not a performance question.
+//
+// Xray keeps serving a user until it is explicitly told to stop. Deleting the
+// credential from the config file does nothing to an established session, so a
+// revocation planned as a hot, DisruptNone change would report converged while
+// the revoked user stayed connected indefinitely. This test exists because an
+// earlier implementation did exactly that: it saw "only the user set changed",
+// took the hot-add path, rewrote the file without the revoked user, and never
+// restarted or called RemoveUser.
+func TestRevokingAUserActuallyReachesTheRuntime(t *testing.T) {
+	a, rt, dir := newAdapter(t, true) // hot add supported: the tempting path
+
+	converge(t, a, desiredWith(2, 10, tlsParams))
+	restartsBefore, _, _, _ := rt.counts()
+
+	revoked := "11111111-2222-3333-4444-555555555552"
+	body, err := os.ReadFile(filepath.Join(dir, "antimage-10.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(body), revoked) {
+		t.Fatal("precondition: the second user was never in the config")
+	}
+
+	// Desired drops to one subject: the second is revoked.
+	plan := converge(t, a, desiredWith(1, 10, tlsParams))
+
+	if got := plan.MaxDisruption(); got < adapter.DisruptRestart {
+		t.Errorf("revocation planned as %v, want at least %v: the running process "+
+			"would never learn about it", got, adapter.DisruptRestart)
+	}
+
+	after, err := os.ReadFile(filepath.Join(dir, "antimage-10.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(after), revoked) {
+		t.Error("the revoked credential is still in the config file")
+	}
+
+	restartsAfter, _, _, removedFromRT := rt.counts()
+	if restartsAfter == restartsBefore && len(removedFromRT) == 0 {
+		t.Error("the revoked user was removed from the file but the running process was " +
+			"neither restarted nor told to remove them, so they stay connected")
+	}
+}
+
+// The applied sidecar has to carry the user set, because that is the only
+// thing Plan can consult to tell an addition from a removal. If it recorded
+// the checksum alone, revocation would silently become a hot change again.
+func TestAppliedStateRecordsTheUserSet(t *testing.T) {
+	a, _, dir := newAdapter(t, true)
+	converge(t, a, desiredWith(2, 10, tlsParams))
+
+	body, err := os.ReadFile(filepath.Join(dir, "antimage-10.json"+appliedSuffix))
+	if err != nil {
+		t.Fatalf("read applied sidecar: %v", err)
+	}
+	var st appliedState
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatalf("decode applied sidecar: %v", err)
+	}
+	if st.Checksum == "" {
+		t.Error("applied sidecar records no checksum")
+	}
+	want := []string{"subject-1@antimage", "subject-2@antimage"}
+	if !reflect.DeepEqual(st.Users, want) {
+		t.Errorf("applied users = %v, want %v; Plan cannot detect a removal without them",
+			st.Users, want)
+	}
+}
+
+// Adding a user while nobody is removed must still take the cheap path -- the
+// revocation fix must not turn every membership change into a restart.
+func TestAddingAUserIsStillHotAfterTheRevocationFix(t *testing.T) {
+	a, rt, _ := newAdapter(t, true)
+	converge(t, a, desiredWith(1, 10, tlsParams))
+	restartsBefore, _, _, _ := rt.counts()
+
+	plan := converge(t, a, desiredWith(2, 10, tlsParams))
+	if got := plan.MaxDisruption(); got != adapter.DisruptNone {
+		t.Errorf("pure addition planned as %v, want %v", got, adapter.DisruptNone)
+	}
+	if restartsAfter, _, _, _ := rt.counts(); restartsAfter != restartsBefore {
+		t.Errorf("a pure addition restarted the runtime: %d -> %d", restartsBefore, restartsAfter)
+	}
+}
+
+// A missing or unreadable sidecar means "unknown", and unknown must not be
+// treated as "nobody was removed".
+func TestUnknownAppliedStateForcesARestart(t *testing.T) {
+	a, _, dir := newAdapter(t, true)
+	converge(t, a, desiredWith(2, 10, tlsParams))
+
+	if err := os.Remove(filepath.Join(dir, "antimage-10.json"+appliedSuffix)); err != nil {
+		t.Fatalf("remove sidecar: %v", err)
+	}
+
+	ctx := context.Background()
+	obs, err := a.Observe(ctx)
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	plan, err := a.Plan(ctx, desiredWith(3, 10, tlsParams), obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.MaxDisruption(); got < adapter.DisruptRestart {
+		t.Errorf("planned %v with no applied state; want at least %v, because the "+
+			"adapter cannot know who the runtime is serving", got, adapter.DisruptRestart)
+	}
+}
+
+// The Xray half of the same property: a write that lands on disk but never
+// reaches the process must not be reported as converged.
+func TestFailedRestartDoesNotLookLikeConvergence(t *testing.T) {
+	a, rt, _ := newAdapter(t, true)
+	ctx := context.Background()
+	d := desiredWith(1, 10, tlsParams)
+
+	rt.failRst = errors.New("systemctl: job failed")
+	obs, _ := a.Observe(ctx)
+	plan, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	for _, s := range plan.Steps {
+		_, _ = a.Apply(ctx, s)
+	}
+
+	rt.failRst = nil
+	obs, _ = a.Observe(ctx)
+	next, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if next.IsEmpty() {
+		t.Fatal("the adapter reported convergence after a restart that never happened; " +
+			"the process is still running the old configuration")
+	}
+	if got := next.MaxDisruption(); got < adapter.DisruptRestart {
+		t.Errorf("recovery planned as %v, want at least %v", got, adapter.DisruptRestart)
+	}
+	for _, s := range next.Steps {
+		if _, err := a.Apply(ctx, s); err != nil {
+			t.Fatalf("Apply %s: %v", s.Kind, err)
+		}
+	}
+	if restarts, _, _, _ := rt.counts(); restarts == 0 {
+		t.Error("recovery never restarted the runtime")
+	}
+	obs, _ = a.Observe(ctx)
+	final, _ := a.Plan(ctx, d, obs)
+	if !final.IsEmpty() {
+		t.Errorf("did not settle after recovery: %+v", final.Steps)
 	}
 }

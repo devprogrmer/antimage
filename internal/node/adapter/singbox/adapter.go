@@ -29,6 +29,15 @@ const (
 	// Xray tolerates a leading // comment; sing-box does not, so the marker
 	// lives beside the config rather than inside it.
 	markerSuffix = ".marker"
+	// appliedSuffix names the sidecar recording the checksum the RUNTIME was
+	// last successfully restarted with. Written only after a restart succeeds.
+	//
+	// Without it, a write that succeeds followed by a restart that fails leaves
+	// a correct file on disk, so the next Observe sees no drift and plans
+	// nothing -- and the node reports converged while sing-box is still serving
+	// the old configuration, including users who have since been revoked. The
+	// config file says what should be running; this says what is.
+	appliedSuffix = ".applied"
 )
 
 // ErrRuntimeUnavailable means sing-box or its unit could not be reached.
@@ -155,6 +164,26 @@ func (a *Adapter) markerPath(id int64) string {
 	return a.path(id) + markerSuffix
 }
 
+func (a *Adapter) appliedPath(id int64) string {
+	return a.path(id) + appliedSuffix
+}
+
+// recordApplied notes the checksum the runtime is now serving. Called only
+// after a restart has actually succeeded.
+func (a *Adapter) recordApplied(serviceID int64, checksum string) error {
+	return os.WriteFile(a.appliedPath(serviceID), []byte(checksum+"\n"), 0o600)
+}
+
+// appliedChecksum reads what the runtime was last successfully restarted with.
+// An empty string means "never applied", which forces a restart.
+func (a *Adapter) appliedChecksum(serviceID int64) string {
+	body, err := os.ReadFile(a.appliedPath(serviceID))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(body))
+}
+
 func checksumOf(payload []byte) string {
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
@@ -211,6 +240,9 @@ type stepPayload struct {
 const (
 	StepWriteService  = "write_service"
 	StepRemoveService = "remove_service"
+	// StepRestartService reapplies a config already on disk that the runtime
+	// never successfully loaded.
+	StepRestartService = "restart_service"
 )
 
 // Plan diffs desired against observed. Pure and repeatable.
@@ -264,16 +296,28 @@ func (a *Adapter) Plan(
 			return adapter.Plan{}, fmt.Errorf("service %d: %w", svc.ID, err)
 		}
 
+		want := checksumOf(rendered)
+
 		o, exists := present[svc.ID]
 		switch {
 		case exists && !o.Managed:
 			return adapter.Plan{}, fmt.Errorf(
 				"service %d: %s exists but was not written by antimage; refusing to overwrite",
 				svc.ID, a.path(svc.ID))
-		case !exists || o.Checksum != checksumOf(rendered):
+		case !exists || o.Checksum != want:
 			seq++
 			plan.Steps = append(plan.Steps, adapter.Step{
 				Seq: seq, Kind: StepWriteService,
+				Disruption: adapter.DisruptRestart, ServiceID: svc.ID,
+				Payload: mustPayload(stepPayload{Config: string(rendered)}),
+			})
+		case a.appliedChecksum(svc.ID) != want:
+			// The file is right but the runtime never came up with it: an
+			// earlier restart failed. Restart without rewriting, rather than
+			// reporting a convergence that never reached the process.
+			seq++
+			plan.Steps = append(plan.Steps, adapter.Step{
+				Seq: seq, Kind: StepRestartService,
 				Disruption: adapter.DisruptRestart, ServiceID: svc.ID,
 				Payload: mustPayload(stepPayload{Config: string(rendered)}),
 			})
@@ -360,9 +404,23 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		if err := a.rt.Restart(ctx); err != nil {
 			return fail(fmt.Errorf("restart after writing service %d: %w", step.ServiceID, err))
 		}
+		// Recorded only after the runtime is actually serving it.
+		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config))); err != nil {
+			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
+		}
+
+	case StepRestartService:
+		if err := a.rt.Restart(ctx); err != nil {
+			return fail(fmt.Errorf("restart service %d: %w", step.ServiceID, err))
+		}
+		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config))); err != nil {
+			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
+		}
 
 	case StepRemoveService:
-		for _, path := range []string{a.path(step.ServiceID), a.markerPath(step.ServiceID)} {
+		for _, path := range []string{
+			a.path(step.ServiceID), a.markerPath(step.ServiceID), a.appliedPath(step.ServiceID),
+		} {
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fail(fmt.Errorf("remove %s: %w", path, err))
 			}

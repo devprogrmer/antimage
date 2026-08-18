@@ -103,10 +103,28 @@ needed for correctness here and would duplicate authority over the same fact.
 
 | Change | Xray | sing-box |
 |---|---|---|
-| Add or remove a user | `DisruptNone` via the Xray gRPC HandlerService | `DisruptRestart` |
+| Add a user | `DisruptNone` via the Xray gRPC HandlerService | `DisruptRestart` |
+| Remove or revoke a user | `DisruptRestart` | `DisruptRestart` |
 | Enable or disable an inbound | `DisruptRestart` | `DisruptRestart` |
 | Change port, protocol, or TLS | `DisruptRestart` | `DisruptRestart` |
 | Rewrite config with no live change | `DisruptReload` | `DisruptReload` |
+
+**Addition and removal are not symmetric, and treating them as one row is a
+security bug.** Xray keeps serving a user until it is explicitly told to stop;
+deleting their credential from the config file has no effect on an established
+session. A revocation planned as a cheap, `DisruptNone` change would therefore
+rewrite the file without the revoked user, report the plan converged, and leave
+that user connected indefinitely — while the panel showed them revoked.
+
+The hot path is consequently taken only when a change is *purely additive*: the
+inbound's shape is unchanged, the runtime declares `HotUserAdd`, and nobody is
+being removed. Answering the last question needs state a checksum cannot carry,
+so the `.applied` sidecar records the user set the runtime was last restarted
+with, not just the configuration hash. An unreadable or missing sidecar counts
+as "unknown" and forces a restart, which is the safe direction.
+
+Regression tests: `TestRevokingAUserActuallyReachesTheRuntime` in both adapter
+packages, and `TestSP2RevocationReachesTheRunningProxy` end to end.
 
 Xray declares `Caps.HotUserAdd: true`; sing-box declares `false`.
 
