@@ -90,7 +90,10 @@ func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter 
 func recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w}
-		defer func() {
+		// The context is passed in rather than captured through r: a handler
+		// below may replace the request, and the log line for a panic should
+		// carry the request id this middleware actually stamped.
+		defer func(ctx context.Context) {
 			p := recover()
 			if p == nil {
 				return
@@ -101,8 +104,8 @@ func recoverMiddleware(next http.Handler) http.Handler {
 				panic(p)
 			}
 
-			slog.ErrorContext(r.Context(), "panic in http handler",
-				"request_id", RequestID(r.Context()),
+			slog.ErrorContext(ctx, "panic in http handler",
+				"request_id", RequestID(ctx),
 				"method", r.Method,
 				"path", r.URL.Path,
 				"panic", p,
@@ -114,7 +117,7 @@ func recoverMiddleware(next http.Handler) http.Handler {
 				return
 			}
 			WriteError(rec, http.StatusInternalServerError, "internal", "internal server error")
-		}()
+		}(r.Context())
 		next.ServeHTTP(rec, r)
 	})
 }

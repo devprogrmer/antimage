@@ -26,3 +26,8 @@ linters:
       # noise, not a defect.
       - path: _test\.go
         linters: [errcheck]
+      # Test fixtures take *testing.T, not a context, and creating one inside
+      # a test is the correct thing to do -- there is no caller context to
+      # inherit. contextcheck flags that pattern in every table-driven test.
+      - path: _test\.go
+        linters: [contextcheck]
