@@ -26,6 +26,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/httpapi"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/panel/subjects"
 	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
 	"github.com/amyrm/antimage/internal/shared/secrets"
 	"github.com/amyrm/antimage/internal/shared/version"
@@ -93,6 +94,13 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 	now := func() time.Time { return time.Now().UTC() }
 
 	go nodes.NewSweeper(st, now).Run(ctx, 30*time.Second)
+
+	// Expiry is enforced by omission from the desired document; this sweeper
+	// makes it prompt and visible by stamping expired_at and bumping the
+	// revision of every affected node, rather than leaving the removal to
+	// whenever some unrelated change next occurs.
+	go subjects.NewSweeper(st, now, func(nodeID, revision int64) { hub.Notify(nodeID, revision) }, nodes.WithUnsealer(box)).
+		Run(ctx, time.Minute)
 
 	// The control plane is mTLS end to end. Without credentials here the
 	// server speaks plaintext HTTP/2 while both agent paths dial with TLS, so

@@ -143,6 +143,17 @@ func NewRouter(d Deps) http.Handler {
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)
 
+			// Subjects are the people a node serves. Credentials are never
+			// returned by list or get; revealing one needs its own permission
+			// and is audited by kind, never by value.
+			private.Get("/subjects", d.handleListSubjects)
+			private.Post("/subjects", d.handleCreateSubject)
+			private.Get("/subjects/{subjectID}", d.handleGetSubject)
+			private.Put("/subjects/{subjectID}", d.handleUpdateSubject)
+			private.Delete("/subjects/{subjectID}", d.handleDeleteSubject)
+			private.Get("/subjects/{subjectID}/credentials/{kind}", d.handleRevealCredential)
+			private.Post("/subjects/{subjectID}/credentials/{kind}/rotate", d.handleRotateCredential)
+
 			private.Get("/audit", d.handleListAudit)
 			private.Get("/sessions", d.handleListSessions)
 			private.Delete("/sessions/{sessionID}", d.handleRevokeSession)

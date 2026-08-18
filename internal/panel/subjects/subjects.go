@@ -368,3 +368,133 @@ func (s *Store) NodeIDsFor(ctx context.Context, tx *sql.Tx, subjectID int64) ([]
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(strings.ToUpper(err.Error()), "UNIQUE CONSTRAINT FAILED")
 }
+
+// UpdateInput describes a partial change. Nil fields are left alone, which is
+// what lets a caller toggle `enabled` without resending the whole subject.
+type UpdateInput struct {
+	Name        *string
+	Note        *string
+	Enabled     *bool
+	ExpiresAt   *time.Time
+	ClearExpiry bool
+	ServiceIDs  *[]int64
+}
+
+// Update applies a partial change.
+//
+// Re-enabling a subject clears expired_at, because leaving it set would make a
+// re-enabled account look permanently expired in every listing.
+func (s *Store) Update(ctx context.Context, tx *sql.Tx, id int64, in UpdateInput) error {
+	var exists int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM subjects WHERE id = ?`, id).Scan(&exists); err != nil {
+		return err // sql.ErrNoRows reaches the handler as a 404
+	}
+
+	if in.Name != nil {
+		name := strings.TrimSpace(*in.Name)
+		if name == "" {
+			return errors.New("subject name cannot be empty")
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET name = ? WHERE id = ?`, name, id); err != nil {
+			if isUniqueViolation(err) {
+				return fmt.Errorf("%w: %q", ErrNameTaken, name)
+			}
+			return fmt.Errorf("rename subject: %w", err)
+		}
+	}
+	if in.Note != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET note = ? WHERE id = ?`, *in.Note, id); err != nil {
+			return fmt.Errorf("update note: %w", err)
+		}
+	}
+	if in.Enabled != nil {
+		enabled := 0
+		if *in.Enabled {
+			enabled = 1
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET enabled = ? WHERE id = ?`, enabled, id); err != nil {
+			return fmt.Errorf("update enabled: %w", err)
+		}
+		if *in.Enabled {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE subjects SET expired_at = NULL WHERE id = ?`, id); err != nil {
+				return fmt.Errorf("clear expired_at: %w", err)
+			}
+		}
+	}
+	switch {
+	case in.ClearExpiry:
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET expires_at = NULL, expired_at = NULL WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("clear expiry: %w", err)
+		}
+	case in.ExpiresAt != nil:
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET expires_at = ?, expired_at = NULL WHERE id = ?`,
+			in.ExpiresAt.UTC().Unix(), id); err != nil {
+			return fmt.Errorf("set expiry: %w", err)
+		}
+	}
+	if in.ServiceIDs != nil {
+		// Replace wholesale: computing a delta would leave a window where the
+		// subject is granted neither the old nor the new set.
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM subject_services WHERE subject_id = ?`, id); err != nil {
+			return fmt.Errorf("clear service grants: %w", err)
+		}
+		for _, svcID := range *in.ServiceIDs {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO subject_services (subject_id, service_id) VALUES (?,?)`,
+				id, svcID); err != nil {
+				return fmt.Errorf("grant service %d: %w", svcID, err)
+			}
+		}
+	}
+	return nil
+}
+
+// Delete removes a subject. The schema cascades its credentials and grants, so
+// the credential stops working rather than merely disappearing from the panel.
+func (s *Store) Delete(ctx context.Context, tx *sql.Tx, id int64) error {
+	res, err := tx.ExecContext(ctx, `DELETE FROM subjects WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// NodeIDsForRead is NodeIDsFor without a transaction, for callers that need the
+// node set before opening one.
+func (s *Store) NodeIDsForRead(ctx context.Context, subjectID int64) ([]int64, error) {
+	rows, err := s.db.Read().QueryContext(ctx,
+		`SELECT DISTINCT sv.node_id
+		   FROM subject_services ss
+		   JOIN services sv ON sv.id = ss.service_id
+		  WHERE ss.subject_id = ?
+		  ORDER BY sv.node_id`, subjectID)
+	if err != nil {
+		return nil, fmt.Errorf("find nodes for subject %d: %w", subjectID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
