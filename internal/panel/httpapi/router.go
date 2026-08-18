@@ -124,6 +124,7 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/nodes/{nodeID}", d.handleGetNode)
 			private.Delete("/nodes/{nodeID}", d.handleDeleteNode)
 			private.Post("/nodes/{nodeID}/enroll-token", d.handleIssueEnrollToken)
+			private.Post("/nodes/{nodeID}/bootstrap-ssh", d.handleSSHBootstrap)
 			private.Get("/nodes/{nodeID}/revisions", d.handleListRevisions)
 			private.Get("/nodes/{nodeID}/apply-runs", d.handleListApplyRuns)
 
