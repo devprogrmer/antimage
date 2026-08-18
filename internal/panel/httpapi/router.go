@@ -108,6 +108,11 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Post("/auth/login", d.handleLogin)
 
+		// Unauthenticated on purpose, alongside GET /install.sh: a node being
+		// bootstrapped has no session, and the CA fingerprint is a public
+		// value — it is the thing the node pins the panel against.
+		api.Get("/ca-fingerprint", d.handleCAFingerprint)
+
 		api.Group(func(private chi.Router) {
 			private.Use(d.authMiddleware, readOnlyMiddleware)
 
@@ -133,6 +138,9 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/events", d.handleEvents)
 		})
 	})
+
+	// Registered before the UI catch-all so the SPA handler cannot shadow it.
+	r.Get("/install.sh", d.handleInstallScript)
 
 	r.Handle("/*", d.uiHandler())
 	return r

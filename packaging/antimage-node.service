@@ -1,0 +1,18 @@
+[Unit]
+Description=antimage node agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/antimage-node --config /etc/antimage/node.yaml
+Restart=always
+RestartSec=5s
+User=root
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

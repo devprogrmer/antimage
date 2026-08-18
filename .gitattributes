@@ -1,0 +1,7 @@
+# Shell scripts and systemd units are consumed by Linux hosts and by
+# go:embed, which embeds whatever bytes sit on disk at build time. A CRLF
+# checkout on Windows would make the panel serve a script whose shebang ends
+# in \r, and every node would die with "bad interpreter: /bin/bash^M". Pin
+# them to LF on every platform regardless of core.autocrlf.
+*.sh text eol=lf
+*.service text eol=lf

@@ -1,0 +1,21 @@
+[Unit]
+Description=antimage panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/antimage-panel --data-dir /var/lib/antimage --http :8080 --grpc :8443
+Restart=always
+RestartSec=5s
+User=antimage
+Group=antimage
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/antimage
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
