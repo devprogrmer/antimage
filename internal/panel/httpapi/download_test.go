@@ -241,3 +241,41 @@ func TestOpenInRootRefusesToEscape(t *testing.T) {
 		}
 	}
 }
+
+// The allow-list does something OpenInRoot cannot: it refuses names that
+// resolve INSIDE the downloads directory but are not agent binaries. A release
+// process that drops a stray file there -- a backup, an env file, a build
+// manifest -- must not have it published to the internet by an unauthenticated
+// endpoint.
+//
+// This is the property that distinguishes an allow-list from a sanitiser.
+// Traversal alone does not discriminate between the two, because OpenInRoot
+// blocks escapes either way.
+func TestDownloadServesOnlyAllowListedNamesInsideTheDirectory(t *testing.T) {
+	env, downloads, _ := newDownloadEnv(t)
+
+	// Files that plausibly end up beside a release artefact.
+	for _, stray := range []string{"master.key.bak", "deploy.env", "SHA256SUMS", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(downloads, stray),
+			[]byte("STRAY-FILE-CONTENT-"+stray), 0o600); err != nil {
+			t.Fatalf("stage %s: %v", stray, err)
+		}
+	}
+
+	for _, stray := range []string{"master.key.bak", "deploy.env", "SHA256SUMS", "notes.txt"} {
+		res := env.get(t, "/download/"+stray, "")
+		if res.Code == http.StatusOK {
+			t.Errorf("%q was served though it is not an agent binary; body = %q",
+				stray, res.Body.String())
+		}
+		if strings.Contains(res.Body.String(), "STRAY-FILE-CONTENT") {
+			t.Errorf("%q leaked its contents", stray)
+		}
+	}
+
+	// The real artefacts must still work, or this test would pass by breaking
+	// the endpoint entirely.
+	if res := env.get(t, "/download/antimage-node-linux-amd64", ""); res.Code != http.StatusOK {
+		t.Fatalf("the actual binary stopped being served: %d", res.Code)
+	}
+}
