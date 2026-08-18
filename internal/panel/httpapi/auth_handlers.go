@@ -129,10 +129,33 @@ func (d Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !auth.VerifyTOTP(string(secret), req.TOTP, d.now()) {
-			// deny() also records a rate-limiter failure, so the code space
-			// cannot be brute-forced any faster than the password can.
-			deny()
-			return
+			// Not a live code — try the same field as a recovery code. They
+			// share one input because an admin who has lost their
+			// authenticator has nowhere else to type it, and a 6-digit code
+			// can never collide with a 16-character base32 one.
+			used, remaining, err := d.consumeRecoveryCode(ctx, adminID, req.TOTP)
+			if err != nil {
+				slog.ErrorContext(ctx, "could not check recovery codes; denying login",
+					"admin_id", adminID, "request_id", RequestID(ctx), "error", err)
+				deny()
+				return
+			}
+			if !used {
+				// deny() also records a rate-limiter failure, so the code
+				// space cannot be brute-forced any faster than the password.
+				deny()
+				return
+			}
+			// Spending a code is the signal that someone has lost their
+			// authenticator — or that someone else has their codes. The
+			// remaining count is in the record so an operator can see the
+			// set being burned through rather than only the last one.
+			audit.BestEffort(ctx, d.Store, RequestID(ctx),
+				audit.AdminActor(adminID, ip),
+				audit.Record{Action: "auth.recovery_used", TargetType: "admin",
+					TargetID: sql.NullInt64{Int64: adminID, Valid: true},
+					After:    map[string]any{"remaining": remaining},
+					Result:   "ok"})
 		}
 	}
 

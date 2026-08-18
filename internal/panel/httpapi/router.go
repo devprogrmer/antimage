@@ -119,6 +119,13 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/auth/logout", d.handleLogout)
 			private.Get("/auth/me", d.handleMe)
 
+			// Each of these acts on the caller's own account only — no admin
+			// id in the path, so there is no other account to authorize
+			// against and no rbac.Check to make.
+			private.Post("/auth/totp/enrol", d.handleTOTPEnrol)
+			private.Post("/auth/totp/confirm", d.handleTOTPConfirm)
+			private.Post("/auth/totp/disable", d.handleTOTPDisable)
+
 			private.Get("/nodes", d.handleListNodes)
 			private.Post("/nodes", d.handleCreateNode)
 			private.Get("/nodes/{nodeID}", d.handleGetNode)
