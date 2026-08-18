@@ -294,14 +294,17 @@ func (e *testEnv) currentSessionID(t *testing.T, token string) int64 {
 }
 
 // An open stream must not keep its own session alive. The handler re-checks
-// the session every tick; if it did that with Sessions.Lookup instead of
-// Sessions.Validate it would refresh last_used_at each time, and IdleTimeout
-// — which is measured from that column — would never be reached. An
-// unattended browser tab would hold a logged-in session open indefinitely.
+// its session every tick; doing that with Sessions.Lookup instead of
+// Sessions.Validate would refresh last_used_at each time, and IdleTimeout is
+// measured from that column, so an unattended browser tab would hold a
+// logged-in session open forever.
 //
-// This pins the choice at the endpoint. The auth package proves Validate does
-// not refresh; without this test, swapping the call back to Lookup here breaks
-// nothing, because revocation keeps working either way.
+// The clock must advance in steps SMALLER than IdleTimeout with a tick
+// between them. A single jump past the timeout does not discriminate: both
+// Lookup and Validate reject, because either way the gap since the previous
+// refresh already exceeds the window. Only repeated small advances separate
+// them — Lookup keeps resetting the window and the stream never dies, while
+// Validate lets the window run out.
 func TestEventsStreamDoesNotKeepItsOwnSessionAlive(t *testing.T) {
 	cur := time.Unix(1_700_000_000, 0).UTC()
 	var mu sync.Mutex
@@ -320,7 +323,7 @@ func TestEventsStreamDoesNotKeepItsOwnSessionAlive(t *testing.T) {
 		d.Sessions = auth.NewSessions(d.Store, clock)
 		d.Limiter = auth.NewLimiter(d.Store, clock)
 		d.Now = clock
-		d.SSEInterval = 20 * time.Millisecond
+		d.SSEInterval = 10 * time.Millisecond
 	})
 	env.seedAdmin(t, "root", "pw", "super_admin")
 	token := env.login(t, "root", "pw")
@@ -331,10 +334,29 @@ func TestEventsStreamDoesNotKeepItsOwnSessionAlive(t *testing.T) {
 	rec, done := env.openStream(t, ctx, token)
 	rec.awaitEvent(t, 5*time.Second)
 
-	// No further requests: the stream is the only thing touching this session.
-	// Cross the idle window while it keeps ticking.
-	advance(auth.IdleTimeout + time.Minute)
+	// Step the clock in quarter-window increments, letting the stream tick
+	// between each. No other request touches this session, so the stream is
+	// the only thing that could be refreshing it. After four steps the window
+	// has elapsed and the session must be gone.
+	step := auth.IdleTimeout / 4
+	deadline := time.Now().Add(5 * time.Second)
+	for i := 0; i < 8; i++ {
+		select {
+		case <-done:
+			return // died as required
+		default:
+		}
+		advance(step)
+		if time.Now().After(deadline) {
+			break
+		}
+		// Give the handler a tick to observe the new time.
+		select {
+		case <-rec.flushed:
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 
 	awaitReturn(t, done, 5*time.Second,
-		"after its session passed the idle timeout — the stream refreshed its own session")
+		"after its session passed the idle timeout — the stream kept refreshing its own session")
 }
