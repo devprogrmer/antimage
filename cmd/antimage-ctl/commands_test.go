@@ -75,10 +75,26 @@ func TestCreateAdminRejectsDuplicateUsername(t *testing.T) {
 	}
 }
 
+// An unknown role must be refused with a message naming the valid ones.
+//
+// Asserting only that some error came back does not discriminate: with the
+// upfront check removed, the role lookup inside the transaction still fails,
+// but with "sql: no rows in result set" — accurate to a developer and useless
+// to an operator who typed the wrong word. The message is the behaviour worth
+// pinning here, since a second layer already guarantees safety.
 func TestCreateAdminRejectsUnknownRole(t *testing.T) {
 	s, _ := newCtlEnv(t)
-	if err := createAdmin(context.Background(), s, "x", "pw", "wizard"); err == nil {
+	err := createAdmin(context.Background(), s, "x", "pw", "wizard")
+	if err == nil {
 		t.Fatal("unknown role accepted")
+	}
+	if !strings.Contains(err.Error(), "wizard") {
+		t.Errorf("err = %v, want it to quote the role the operator typed", err)
+	}
+	for _, role := range []string{"super_admin", "admin", "reseller", "readonly"} {
+		if !strings.Contains(err.Error(), role) {
+			t.Errorf("err = %v, want it to list the valid role %q", err, role)
+		}
 	}
 	var n int
 	_ = s.Read().QueryRow(`SELECT count(*) FROM admins`).Scan(&n)
