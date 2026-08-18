@@ -83,7 +83,7 @@ func ParseInbound(raw json.RawMessage) (Inbound, error) {
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
-		return Inbound{}, fmt.Errorf("%w: %s", ErrInvalidInbound, err)
+		return Inbound{}, fmt.Errorf("%w: %w", ErrInvalidInbound, err)
 	}
 	if err := in.Validate(); err != nil {
 		return Inbound{}, err
