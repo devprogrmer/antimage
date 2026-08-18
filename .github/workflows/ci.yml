@@ -17,3 +17,30 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...
+
+  # The go job runs check-rtl, which is pure grep and needs no toolchain. The
+  # i18n tests and the UI build do need Node, and without this job neither is
+  # enforced anywhere: a missing Persian translation or a broken build would
+  # only surface when someone happened to run npm locally.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx vitest run
+      - run: npm run build
+      # The build writes into internal/panel/webui/dist, which go:embed reads.
+      # If it left the tree dirty, release builds would depend on uncommitted
+      # state; the Vite plugin that restores .gitkeep exists to prevent that.
+      - name: build leaves the tree clean
+        working-directory: .
+        run: git diff --exit-code && git status --porcelain --untracked-files=no
