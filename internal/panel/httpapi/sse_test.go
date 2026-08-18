@@ -292,3 +292,49 @@ func (e *testEnv) currentSessionID(t *testing.T, token string) int64 {
 	t.Fatal("no current session in list")
 	return 0
 }
+
+// An open stream must not keep its own session alive. The handler re-checks
+// the session every tick; if it did that with Sessions.Lookup instead of
+// Sessions.Validate it would refresh last_used_at each time, and IdleTimeout
+// — which is measured from that column — would never be reached. An
+// unattended browser tab would hold a logged-in session open indefinitely.
+//
+// This pins the choice at the endpoint. The auth package proves Validate does
+// not refresh; without this test, swapping the call back to Lookup here breaks
+// nothing, because revocation keeps working either way.
+func TestEventsStreamDoesNotKeepItsOwnSessionAlive(t *testing.T) {
+	cur := time.Unix(1_700_000_000, 0).UTC()
+	var mu sync.Mutex
+	clock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return cur
+	}
+	advance := func(d time.Duration) {
+		mu.Lock()
+		defer mu.Unlock()
+		cur = cur.Add(d)
+	}
+
+	env := newTestEnv(t, func(d *Deps) {
+		d.Sessions = auth.NewSessions(d.Store, clock)
+		d.Limiter = auth.NewLimiter(d.Store, clock)
+		d.Now = clock
+		d.SSEInterval = 20 * time.Millisecond
+	})
+	env.seedAdmin(t, "root", "pw", "super_admin")
+	token := env.login(t, "root", "pw")
+	env.post(t, "/api/v1/nodes", `{"name":"de-1","address":"1.2.3.4"}`, token)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rec, done := env.openStream(t, ctx, token)
+	rec.awaitEvent(t, 5*time.Second)
+
+	// No further requests: the stream is the only thing touching this session.
+	// Cross the idle window while it keeps ticking.
+	advance(auth.IdleTimeout + time.Minute)
+
+	awaitReturn(t, done, 5*time.Second,
+		"after its session passed the idle timeout — the stream refreshed its own session")
+}
