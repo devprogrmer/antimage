@@ -3,11 +3,20 @@ import { Login } from "./routes/Login";
 import { Nodes } from "./routes/Nodes";
 import { NodeDetail } from "./routes/NodeDetail";
 import { api } from "./lib/api";
-import { t } from "./i18n";
+import { getLocale, locales, setLocale, t } from "./i18n";
+import type { Locale } from "./i18n";
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
+  // setLocale mutates module state and flips <html lang>/<html dir>; this
+  // mirrors it into React state so the tree re-renders with the new catalogue.
+  const [locale, setLocaleState] = useState<Locale>(getLocale());
+
+  function changeLocale(next: Locale) {
+    setLocale(next);
+    setLocaleState(next);
+  }
 
   if (!authed) {
     return <Login onSuccess={() => setAuthed(true)} />;
@@ -35,10 +44,22 @@ export default function App() {
             {t("nav.nodes")}
           </button>
         </nav>
+        <select
+          value={locale}
+          onChange={(e) => changeLocale(e.target.value as Locale)}
+          aria-label={t("nav.language")}
+          className="ms-auto rounded border border-zinc-800 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-300"
+        >
+          {locales.map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.label}
+            </option>
+          ))}
+        </select>
         <button
           type="button"
           onClick={signOut}
-          className="ms-auto text-xs text-zinc-500 hover:text-zinc-200"
+          className="text-xs text-zinc-500 hover:text-zinc-200"
         >
           {t("nav.signOut")}
         </button>

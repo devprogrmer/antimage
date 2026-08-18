@@ -3,11 +3,11 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import App from "./App.tsx";
-import { setLocale } from "./i18n";
+import { localeFromTag, setLocale } from "./i18n";
 
 // Setting the locale once at boot fixes <html lang> and <html dir>, which is
 // what every logical CSS property in the app resolves against.
-setLocale(navigator.language.startsWith("fa") ? "fa" : "en");
+setLocale(localeFromTag(navigator.language));
 
 // The node list and detail screens run on useQuery, which throws without a
 // provider above it. Retries are off for 401s: an expired session should send

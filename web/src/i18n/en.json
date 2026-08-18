@@ -9,6 +9,7 @@
   "nav.nodes": "Nodes",
   "nav.audit": "Audit",
   "nav.sessions": "Sessions",
+  "nav.language": "Language",
   "nav.signOut": "Sign out",
   "node.name": "Name",
   "node.address": "Address",

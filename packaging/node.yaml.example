@@ -1,0 +1,40 @@
+# antimage node agent configuration.
+#
+# Installed to /etc/antimage/node.yaml at mode 0600. install.sh writes this file
+# on first install and does NOT rewrite it on upgrade, so the node id and the
+# enrolment state survive.
+#
+# Every value below is an example. Replace them; never ship this file as-is.
+
+# panel_url  (string, REQUIRED)
+#   Where the agent dials the panel's gRPC control plane. Accepts an https URL
+#   or a bare host:port. The port defaults to 8443 when omitted.
+#   Rejected at startup if it carries a path, query, fragment, userinfo, or a
+#   scheme other than https -- gRPC dials a host, not a URL path.
+panel_url: https://panel.example.com:8443
+
+# token  (string, required on FIRST RUN only)
+#   Single-use enrolment token from the panel. Expires 30 minutes after it is
+#   issued. The agent clears this field once the token is spent, so an upgrade
+#   does not consume a new one.
+#   SECURITY: this is a bearer credential until it is used. Keep the file 0600
+#   and do not commit it anywhere.
+token: replace-with-a-token-from-the-panel
+
+# ca_fingerprint  (string, REQUIRED)
+#   Hex SHA-256 of the panel's CA certificate. The agent pins this, so a
+#   hijacked DNS record or a mis-issued public certificate yields nothing.
+#   Get it out of band, or from: curl -fsS https://panel.example.com/api/v1/ca-fingerprint
+#   SECURITY: a config without this is REFUSED at startup rather than falling
+#   back to the system trust store. That refusal is deliberate.
+ca_fingerprint: replace-with-the-panel-ca-fingerprint
+
+# state_dir  (path, optional, default /var/lib/antimage)
+#   Holds node.key, node.crt, panel-ca.crt, and adapter-managed state.
+#   Created 0700; the key and certificate are written 0600.
+state_dir: /var/lib/antimage
+
+# node_id  (integer, optional)
+#   Written by the agent after enrolment. Do not set this by hand: it must match
+#   the id the panel issued the certificate for.
+# node_id: 1
