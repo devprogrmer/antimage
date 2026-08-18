@@ -139,6 +139,8 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 			// here would lock every TOTP-enrolled admin out of production
 			// while every unit test still passed.
 			Box: box,
+			// Agent binaries are published here for install.sh to fetch.
+			DownloadDir: filepath.Join(dataDir, "downloads"),
 			// SSEInterval is left at zero on purpose: zero selects the
 			// production default. Only tests set it.
 			Now: now,

@@ -27,6 +27,10 @@ type Deps struct {
 	// loaded: handleLogin then DENIES any admin who has TOTP enrolled rather
 	// than admitting them on a password alone. Task 27's main.go populates it.
 	Box *secrets.Box
+	// DownloadDir holds published agent binaries served at /download/{name}.
+	// Empty means nothing is published and every download 404s with a message
+	// telling the operator where to put them.
+	DownloadDir string
 	// SSEInterval is how often GET /api/v1/events pushes a node-status
 	// snapshot. Zero means defaultSSEInterval, which is what production
 	// runs; it is a field only so a test can drive the loop faster than a
@@ -149,6 +153,11 @@ func NewRouter(d Deps) http.Handler {
 
 	// Registered before the UI catch-all so the SPA handler cannot shadow it.
 	r.Get("/install.sh", d.handleInstallScript)
+
+	// Unauthenticated for the same reason as /install.sh: a node running the
+	// bootstrap one-liner has no session, and the agent binary is not secret.
+	r.Get("/download/{name}", d.handleDownload)
+	r.Head("/download/{name}", d.handleDownload)
 
 	r.Handle("/*", d.uiHandler())
 	return r
