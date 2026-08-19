@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -721,5 +722,115 @@ func TestFailedRestartDoesNotLookLikeConvergence(t *testing.T) {
 	final, _ := a.Plan(ctx, d, obs)
 	if !final.IsEmpty() {
 		t.Errorf("did not settle after recovery: %+v", final.Steps)
+	}
+}
+
+// The complete revocation sequence, including the part that only matters when
+// something goes wrong.
+//
+// TestRevokingAUserActuallyReachesTheRuntime proves the classification. This
+// proves what happens either side of it: that a revocation whose restart FAILS
+// is not mistaken for convergence, and that once the restart succeeds the
+// applied state reflects the smaller user set rather than the one that was
+// revoked. Those two together are what stop a failed revocation from being
+// retried into silence.
+func TestRevocationDoesNotConvergeUntilTheRestartSucceeds(t *testing.T) {
+	a, rt, dir := newAdapter(t, true) // hot add supported
+	ctx := context.Background()
+
+	// A and B are both applied and live.
+	converge(t, a, desiredWith(2, 10, tlsParams))
+	revoked := "11111111-2222-3333-4444-555555555552"
+
+	st := a.applied(10)
+	if len(st.Users) != 2 {
+		t.Fatalf("precondition: applied state carries %v, want both users", st.Users)
+	}
+
+	// Desired drops B. Stage the restart to fail.
+	rt.failRst = errors.New("systemctl: job failed")
+	d := desiredWith(1, 10, tlsParams)
+
+	obs, err := a.Observe(ctx)
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	plan, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.MaxDisruption(); got < adapter.DisruptRestart {
+		t.Fatalf("revocation planned as %v, want at least %v", got, adapter.DisruptRestart)
+	}
+
+	var sawFailure bool
+	for _, step := range plan.Steps {
+		if res, err := a.Apply(ctx, step); err != nil {
+			sawFailure = true
+			if res.OK {
+				t.Error("a step whose restart failed reported OK")
+			}
+		}
+	}
+	if !sawFailure {
+		t.Fatal("the staged restart failure never surfaced as a step failure")
+	}
+
+	// The file no longer lists B, but the process was never reloaded. The
+	// adapter must NOT call that converged -- B is still connected.
+	body, err := os.ReadFile(filepath.Join(dir, "antimage-10.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(body), revoked) {
+		t.Error("the revoked credential is still in the config file")
+	}
+	// The applied state must still list the revoked user, because the runtime
+	// IS still serving them. Recording the revocation here on the strength of a
+	// restart that failed is what would make the next Plan believe nobody was
+	// removed, quietly downgrading the retry to the hot path.
+	if got := a.applied(10); !slices.Contains(got.Users, "subject-2@antimage") {
+		t.Errorf("applied state = %v; it dropped the revoked user after a FAILED "+
+			"restart, so the next Plan would no longer see a removal", got.Users)
+	}
+
+	obs, _ = a.Observe(ctx)
+	pending, err := a.Plan(ctx, d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if pending.IsEmpty() {
+		t.Fatal("reported convergence while the revoked user is still being served " +
+			"by a process that never reloaded")
+	}
+
+	// The runtime recovers.
+	rt.failRst = nil
+	for _, step := range pending.Steps {
+		if _, err := a.Apply(ctx, step); err != nil {
+			t.Fatalf("Apply %s after recovery: %v", step.Kind, err)
+		}
+	}
+
+	// Applied state now reflects the smaller set.
+	final := a.applied(10)
+	want := []string{"subject-1@antimage"}
+	if !reflect.DeepEqual(final.Users, want) {
+		t.Errorf("applied users = %v, want %v", final.Users, want)
+	}
+	if restarts, _, _, _ := rt.counts(); restarts < 2 {
+		t.Errorf("restarts = %d, want the revocation to have restarted the process", restarts)
+	}
+
+	// And it stays converged.
+	for i := 0; i < 3; i++ {
+		obs, _ = a.Observe(ctx)
+		again, err := a.Plan(ctx, d, obs)
+		if err != nil {
+			t.Fatalf("Plan %d: %v", i, err)
+		}
+		if !again.IsEmpty() {
+			t.Fatalf("not idempotent; pass %d still plans %+v", i, again.Steps)
+		}
 	}
 }
