@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -112,10 +113,26 @@ func TestGenerateProducesTheExpectedXrayShape(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("generated config is not valid JSON: %v", err)
 	}
+
+	// The envelope is not decoration. Xray merges a confdir of complete
+	// documents; handed a bare inbound object it finds no "inbounds" key,
+	// starts with zero inbounds, and reports itself healthy while binding
+	// nothing. This assertion exists because that is exactly what shipped
+	// until a real Xray binary was pointed at the output.
+	inbounds, ok := doc["inbounds"].([]any)
+	if !ok {
+		t.Fatalf("generated config has no inbounds array; Xray would start and serve "+
+			"nothing. got keys: %v", keysOf(doc))
+	}
+	if len(inbounds) != 1 {
+		t.Fatalf("inbounds = %d, want 1", len(inbounds))
+	}
+	got := inbounds[0].(map[string]any)
+
 	for _, key := range []string{"tag", "listen", "port", "protocol", "settings", "streamSettings"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("generated inbound is missing %q", key)
@@ -163,8 +180,9 @@ func TestTrojanUsesPasswordNotID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	var got map[string]any
-	_ = json.Unmarshal(raw, &got)
+	var doc map[string]any
+	_ = json.Unmarshal(raw, &doc)
+	got := doc["inbounds"].([]any)[0].(map[string]any)
 	client := got["settings"].(map[string]any)["clients"].([]any)[0].(map[string]any)
 
 	if client["password"] != "a-long-enough-password" {
@@ -234,4 +252,14 @@ func TestTagIsStableAndPortDistinct(t *testing.T) {
 	if a.Tag() == c.Tag() {
 		t.Errorf("two ports share the tag %q", a.Tag())
 	}
+}
+
+// keysOf lists a decoded object's keys for failure messages.
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

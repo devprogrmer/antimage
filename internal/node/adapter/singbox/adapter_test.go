@@ -236,10 +236,24 @@ func TestGenerateProducesTheSingBoxShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("not valid JSON: %v", err)
 	}
+
+	// The envelope is load-bearing. sing-box decodes each file in -C against
+	// the top-level schema; a bare inbound object makes it exit with
+	// `unknown field "listen"` before serving anything. This assertion exists
+	// because that is what shipped until a real sing-box was pointed at it.
+	inbounds, ok := doc["inbounds"].([]any)
+	if !ok {
+		t.Fatalf("generated config has no inbounds array; sing-box refuses to load it")
+	}
+	if len(inbounds) != 1 {
+		t.Fatalf("inbounds = %d, want 1", len(inbounds))
+	}
+	got := inbounds[0].(map[string]any)
+
 	if got["type"] != "vless" {
 		t.Errorf("type = %v", got["type"])
 	}
@@ -271,7 +285,8 @@ func TestPasswordProtocolsUsePassword(t *testing.T) {
 			}
 			var got map[string]any
 			_ = json.Unmarshal(raw, &got)
-			u := got["users"].([]any)[0].(map[string]any)
+			inbound := got["inbounds"].([]any)[0].(map[string]any)
+			u := inbound["users"].([]any)[0].(map[string]any)
 			if u["password"] != "a-long-password" {
 				t.Errorf("user = %v, want a password", u)
 			}
@@ -281,8 +296,8 @@ func TestPasswordProtocolsUsePassword(t *testing.T) {
 			if in.CredentialKind() != "password" {
 				t.Errorf("CredentialKind = %q", in.CredentialKind())
 			}
-			if proto == Shadowsocks && got["method"] != defaultShadowsocksMethod {
-				t.Errorf("shadowsocks method = %v, want the default", got["method"])
+			if proto == Shadowsocks && inbound["method"] != defaultShadowsocksMethod {
+				t.Errorf("shadowsocks method = %v, want the default", inbound["method"])
 			}
 		})
 	}

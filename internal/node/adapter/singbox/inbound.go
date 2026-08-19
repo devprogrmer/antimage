@@ -227,5 +227,12 @@ func (in Inbound) Generate(users []User) ([]byte, error) {
 		inbound["transport"] = ws
 	}
 
-	return json.MarshalIndent(inbound, "", "  ")
+	// sing-box reads -C as a directory of complete configuration documents and
+	// merges them. A bare inbound object is not a document: sing-box decodes it
+	// against the top-level schema, finds no such field as "listen", and exits
+	// with a fatal error before it serves anything. The envelope is what makes
+	// the file loadable at all.
+	doc := map[string]any{"inbounds": []any{inbound}}
+
+	return json.MarshalIndent(doc, "", "  ")
 }

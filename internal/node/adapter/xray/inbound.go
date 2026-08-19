@@ -261,10 +261,19 @@ func (in Inbound) Generate(users []User) ([]byte, error) {
 		}
 	}
 
+	// Xray reads a confdir as a set of complete configuration documents and
+	// merges them, appending array fields. A bare inbound object is not a
+	// document: Xray parses it, finds no "inbounds" key, and starts with no
+	// inbounds at all -- logging "Xray started" while binding nothing. That is
+	// the worst available failure, because the process is up and healthy by
+	// every check the node makes while no user can connect. The envelope is
+	// what makes the file a document Xray will actually act on.
+	doc := map[string]any{"inbounds": []any{inbound}}
+
 	// MarshalIndent for an operator who has to read the file during an
 	// incident. encoding/json sorts map keys, which is what makes this
 	// deterministic.
-	return json.MarshalIndent(inbound, "", "  ")
+	return json.MarshalIndent(doc, "", "  ")
 }
 
 // Tag is the inbound's stable identifier inside Xray. It is derived from the
