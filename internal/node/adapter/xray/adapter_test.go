@@ -73,6 +73,11 @@ func (f *fakeRuntime) Restart(context.Context) error {
 
 func (f *fakeRuntime) Healthy(context.Context) (bool, string) { return f.healthy, f.detail }
 
+func (f *fakeRuntime) QueryStats(context.Context) ([]UserStat, error) {
+	// Tests that don't care about accounting can leave this empty.
+	return nil, nil
+}
+
 func (f *fakeRuntime) counts() (restarts, reloads int, added, removed []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

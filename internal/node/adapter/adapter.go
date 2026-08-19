@@ -191,3 +191,21 @@ type Adapter interface {
 	// Probe is a cheap liveness check run on the health cadence.
 	Probe(ctx context.Context) (Health, error)
 }
+
+// UsageSample is one subject's traffic delta since the last report. SP3
+// design decision 1: the agent computes deltas; the panel never sees raw
+// cumulative counters.
+type UsageSample struct {
+	SubjectID     int64
+	UplinkBytes   uint64
+	DownlinkBytes uint64
+}
+
+// UsageReporter is an optional adapter capability (SP3 design decision 2).
+// Only adapters that can account for themselves implement it; Caps.SelfAccounting
+// declares the capability. Type-assert the adapter to this interface to check.
+type UsageReporter interface {
+	// Usage reads traffic deltas since the last successful call. It is the
+	// adapter's responsibility to persist cursors and detect restarts.
+	Usage(ctx context.Context) ([]UsageSample, error)
+}

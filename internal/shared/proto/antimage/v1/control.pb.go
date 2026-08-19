@@ -162,6 +162,7 @@ type AgentMessage struct {
 	//	*AgentMessage_Hello
 	//	*AgentMessage_Heartbeat
 	//	*AgentMessage_ApplyReport
+	//	*AgentMessage_UsageReport
 	Payload       isAgentMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -231,6 +232,15 @@ func (x *AgentMessage) GetApplyReport() *ApplyReport {
 	return nil
 }
 
+func (x *AgentMessage) GetUsageReport() *UsageReport {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentMessage_UsageReport); ok {
+			return x.UsageReport
+		}
+	}
+	return nil
+}
+
 type isAgentMessage_Payload interface {
 	isAgentMessage_Payload()
 }
@@ -247,11 +257,17 @@ type AgentMessage_ApplyReport struct {
 	ApplyReport *ApplyReport `protobuf:"bytes,3,opt,name=apply_report,json=applyReport,proto3,oneof"`
 }
 
+type AgentMessage_UsageReport struct {
+	UsageReport *UsageReport `protobuf:"bytes,4,opt,name=usage_report,json=usageReport,proto3,oneof"`
+}
+
 func (*AgentMessage_Hello) isAgentMessage_Payload() {}
 
 func (*AgentMessage_Heartbeat) isAgentMessage_Payload() {}
 
 func (*AgentMessage_ApplyReport) isAgentMessage_Payload() {}
+
+func (*AgentMessage_UsageReport) isAgentMessage_Payload() {}
 
 type PanelMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1059,6 +1075,130 @@ func (x *SnapshotResponse) GetSha256() string {
 	return ""
 }
 
+// UsageReport carries accounting deltas from one node. SP3 design decision 1:
+// the agent computes deltas; the panel never reasons about raw counters.
+type UsageReport struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	NodeId int64                  `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// Monotonic per node. Idempotency key: (node_id, sequence).
+	Sequence      int64          `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	Samples       []*UsageSample `protobuf:"bytes,3,rep,name=samples,proto3" json:"samples,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageReport) Reset() {
+	*x = UsageReport{}
+	mi := &file_antimage_v1_control_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageReport) ProtoMessage() {}
+
+func (x *UsageReport) ProtoReflect() protoreflect.Message {
+	mi := &file_antimage_v1_control_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageReport.ProtoReflect.Descriptor instead.
+func (*UsageReport) Descriptor() ([]byte, []int) {
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *UsageReport) GetNodeId() int64 {
+	if x != nil {
+		return x.NodeId
+	}
+	return 0
+}
+
+func (x *UsageReport) GetSequence() int64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *UsageReport) GetSamples() []*UsageSample {
+	if x != nil {
+		return x.Samples
+	}
+	return nil
+}
+
+// UsageSample is one subject's traffic delta since the last report.
+type UsageSample struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SubjectId     int64                  `protobuf:"varint,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
+	UplinkBytes   uint64                 `protobuf:"varint,2,opt,name=uplink_bytes,json=uplinkBytes,proto3" json:"uplink_bytes,omitempty"`
+	DownlinkBytes uint64                 `protobuf:"varint,3,opt,name=downlink_bytes,json=downlinkBytes,proto3" json:"downlink_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageSample) Reset() {
+	*x = UsageSample{}
+	mi := &file_antimage_v1_control_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageSample) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageSample) ProtoMessage() {}
+
+func (x *UsageSample) ProtoReflect() protoreflect.Message {
+	mi := &file_antimage_v1_control_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageSample.ProtoReflect.Descriptor instead.
+func (*UsageSample) Descriptor() ([]byte, []int) {
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *UsageSample) GetSubjectId() int64 {
+	if x != nil {
+		return x.SubjectId
+	}
+	return 0
+}
+
+func (x *UsageSample) GetUplinkBytes() uint64 {
+	if x != nil {
+		return x.UplinkBytes
+	}
+	return 0
+}
+
+func (x *UsageSample) GetDownlinkBytes() uint64 {
+	if x != nil {
+		return x.DownlinkBytes
+	}
+	return 0
+}
+
 var File_antimage_v1_control_proto protoreflect.FileDescriptor
 
 const file_antimage_v1_control_proto_rawDesc = "" +
@@ -1072,11 +1212,12 @@ const file_antimage_v1_control_proto_rawDesc = "" +
 	"\x0eEnrollResponse\x12\x19\n" +
 	"\bcert_der\x18\x01 \x01(\fR\acertDer\x12\x15\n" +
 	"\x06ca_der\x18\x02 \x01(\fR\x05caDer\x12\x17\n" +
-	"\anode_id\x18\x03 \x01(\x03R\x06nodeId\"\xbc\x01\n" +
+	"\anode_id\x18\x03 \x01(\x03R\x06nodeId\"\xfb\x01\n" +
 	"\fAgentMessage\x12*\n" +
 	"\x05hello\x18\x01 \x01(\v2\x12.antimage.v1.HelloH\x00R\x05hello\x126\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x16.antimage.v1.HeartbeatH\x00R\theartbeat\x12=\n" +
-	"\fapply_report\x18\x03 \x01(\v2\x18.antimage.v1.ApplyReportH\x00R\vapplyReportB\t\n" +
+	"\fapply_report\x18\x03 \x01(\v2\x18.antimage.v1.ApplyReportH\x00R\vapplyReport\x12=\n" +
+	"\fusage_report\x18\x04 \x01(\v2\x18.antimage.v1.UsageReportH\x00R\vusageReportB\t\n" +
 	"\apayload\"\xdc\x01\n" +
 	"\fPanelMessage\x12@\n" +
 	"\rrevision_bump\x18\x01 \x01(\v2\x19.antimage.v1.RevisionBumpH\x00R\frevisionBump\x124\n" +
@@ -1139,7 +1280,16 @@ const file_antimage_v1_control_proto_rawDesc = "" +
 	"\x10SnapshotResponse\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x1a\n" +
 	"\bdocument\x18\x02 \x01(\fR\bdocument\x12\x16\n" +
-	"\x06sha256\x18\x03 \x01(\tR\x06sha2562O\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"v\n" +
+	"\vUsageReport\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\x03R\x06nodeId\x12\x1a\n" +
+	"\bsequence\x18\x02 \x01(\x03R\bsequence\x122\n" +
+	"\asamples\x18\x03 \x03(\v2\x18.antimage.v1.UsageSampleR\asamples\"v\n" +
+	"\vUsageSample\x12\x1d\n" +
+	"\n" +
+	"subject_id\x18\x01 \x01(\x03R\tsubjectId\x12!\n" +
+	"\fuplink_bytes\x18\x02 \x01(\x04R\vuplinkBytes\x12%\n" +
+	"\x0edownlink_bytes\x18\x03 \x01(\x04R\rdownlinkBytes2O\n" +
 	"\n" +
 	"Enrollment\x12A\n" +
 	"\x06Enroll\x12\x1a.antimage.v1.EnrollRequest\x1a\x1b.antimage.v1.EnrollResponse2\xa0\x01\n" +
@@ -1159,7 +1309,7 @@ func file_antimage_v1_control_proto_rawDescGZIP() []byte {
 	return file_antimage_v1_control_proto_rawDescData
 }
 
-var file_antimage_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_antimage_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_antimage_v1_control_proto_goTypes = []any{
 	(*EnrollRequest)(nil),     // 0: antimage.v1.EnrollRequest
 	(*EnrollResponse)(nil),    // 1: antimage.v1.EnrollResponse
@@ -1176,28 +1326,32 @@ var file_antimage_v1_control_proto_goTypes = []any{
 	(*UpgradeRequired)(nil),   // 12: antimage.v1.UpgradeRequired
 	(*SnapshotRequest)(nil),   // 13: antimage.v1.SnapshotRequest
 	(*SnapshotResponse)(nil),  // 14: antimage.v1.SnapshotResponse
+	(*UsageReport)(nil),       // 15: antimage.v1.UsageReport
+	(*UsageSample)(nil),       // 16: antimage.v1.UsageSample
 }
 var file_antimage_v1_control_proto_depIdxs = []int32{
 	4,  // 0: antimage.v1.AgentMessage.hello:type_name -> antimage.v1.Hello
 	6,  // 1: antimage.v1.AgentMessage.heartbeat:type_name -> antimage.v1.Heartbeat
 	8,  // 2: antimage.v1.AgentMessage.apply_report:type_name -> antimage.v1.ApplyReport
-	10, // 3: antimage.v1.PanelMessage.revision_bump:type_name -> antimage.v1.RevisionBump
-	11, // 4: antimage.v1.PanelMessage.fetch_now:type_name -> antimage.v1.FetchNow
-	12, // 5: antimage.v1.PanelMessage.upgrade_required:type_name -> antimage.v1.UpgradeRequired
-	5,  // 6: antimage.v1.Hello.adapters:type_name -> antimage.v1.AdapterDescriptor
-	7,  // 7: antimage.v1.Heartbeat.adapter_health:type_name -> antimage.v1.AdapterHealth
-	9,  // 8: antimage.v1.ApplyReport.steps:type_name -> antimage.v1.StepResult
-	0,  // 9: antimage.v1.Enrollment.Enroll:input_type -> antimage.v1.EnrollRequest
-	2,  // 10: antimage.v1.Control.Stream:input_type -> antimage.v1.AgentMessage
-	13, // 11: antimage.v1.Control.GetDesiredSnapshot:input_type -> antimage.v1.SnapshotRequest
-	1,  // 12: antimage.v1.Enrollment.Enroll:output_type -> antimage.v1.EnrollResponse
-	3,  // 13: antimage.v1.Control.Stream:output_type -> antimage.v1.PanelMessage
-	14, // 14: antimage.v1.Control.GetDesiredSnapshot:output_type -> antimage.v1.SnapshotResponse
-	12, // [12:15] is the sub-list for method output_type
-	9,  // [9:12] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	15, // 3: antimage.v1.AgentMessage.usage_report:type_name -> antimage.v1.UsageReport
+	10, // 4: antimage.v1.PanelMessage.revision_bump:type_name -> antimage.v1.RevisionBump
+	11, // 5: antimage.v1.PanelMessage.fetch_now:type_name -> antimage.v1.FetchNow
+	12, // 6: antimage.v1.PanelMessage.upgrade_required:type_name -> antimage.v1.UpgradeRequired
+	5,  // 7: antimage.v1.Hello.adapters:type_name -> antimage.v1.AdapterDescriptor
+	7,  // 8: antimage.v1.Heartbeat.adapter_health:type_name -> antimage.v1.AdapterHealth
+	9,  // 9: antimage.v1.ApplyReport.steps:type_name -> antimage.v1.StepResult
+	16, // 10: antimage.v1.UsageReport.samples:type_name -> antimage.v1.UsageSample
+	0,  // 11: antimage.v1.Enrollment.Enroll:input_type -> antimage.v1.EnrollRequest
+	2,  // 12: antimage.v1.Control.Stream:input_type -> antimage.v1.AgentMessage
+	13, // 13: antimage.v1.Control.GetDesiredSnapshot:input_type -> antimage.v1.SnapshotRequest
+	1,  // 14: antimage.v1.Enrollment.Enroll:output_type -> antimage.v1.EnrollResponse
+	3,  // 15: antimage.v1.Control.Stream:output_type -> antimage.v1.PanelMessage
+	14, // 16: antimage.v1.Control.GetDesiredSnapshot:output_type -> antimage.v1.SnapshotResponse
+	14, // [14:17] is the sub-list for method output_type
+	11, // [11:14] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_antimage_v1_control_proto_init() }
@@ -1209,6 +1363,7 @@ func file_antimage_v1_control_proto_init() {
 		(*AgentMessage_Hello)(nil),
 		(*AgentMessage_Heartbeat)(nil),
 		(*AgentMessage_ApplyReport)(nil),
+		(*AgentMessage_UsageReport)(nil),
 	}
 	file_antimage_v1_control_proto_msgTypes[3].OneofWrappers = []any{
 		(*PanelMessage_RevisionBump)(nil),
@@ -1221,7 +1376,7 @@ func file_antimage_v1_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_antimage_v1_control_proto_rawDesc), len(file_antimage_v1_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

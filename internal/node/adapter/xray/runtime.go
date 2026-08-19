@@ -44,6 +44,9 @@ type Runtime interface {
 
 	// Healthy is the cheap liveness check behind Probe.
 	Healthy(ctx context.Context) (bool, string)
+
+	// QueryStats reads per-user cumulative traffic counters. SP3 accounting.
+	QueryStats(ctx context.Context) ([]UserStat, error)
 }
 
 // ExecRuntime drives Xray through systemd and its gRPC management API.
@@ -174,6 +177,76 @@ func (r *ExecRuntime) Healthy(ctx context.Context) (bool, string) {
 		return false, fmt.Sprintf("%s is %s", r.Unit, state)
 	}
 	return true, "active"
+}
+
+// QueryStats queries Xray's StatsService for per-user traffic counters.
+// Output format from `xray api statsquery` is one line per counter:
+//   user>>>subject-1@antimage>>>traffic>>>uplink       12345
+//   user>>>subject-1@antimage>>>traffic>>>downlink     67890
+func (r *ExecRuntime) QueryStats(ctx context.Context) ([]UserStat, error) {
+	if r.APIAddress == "" {
+		return nil, fmt.Errorf("%w: no management API address configured", ErrRuntimeUnavailable)
+	}
+
+	out, err := r.run(ctx, r.Binary, "api", "statsquery",
+		"--server="+r.APIAddress, "--pattern=user>>>")
+	if err != nil {
+		return nil, fmt.Errorf("query stats: %w", err)
+	}
+
+	// Parse output: each line is "<pattern> <value>".
+	// We look for lines like:
+	//   user>>>subject-N@antimage>>>traffic>>>uplink 12345
+	//   user>>>subject-N@antimage>>>traffic>>>downlink 67890
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	users := make(map[string]*UserStat)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) != 2 {
+			continue
+		}
+		pattern, valueStr := parts[0], parts[1]
+
+		// Parse value.
+		var value uint64
+		if _, err := fmt.Sscanf(valueStr, "%d", &value); err != nil {
+			continue
+		}
+
+		// Extract email and direction from pattern.
+		// Format: user>>>EMAIL>>>traffic>>>DIRECTION
+		segments := strings.Split(pattern, ">>>")
+		if len(segments) != 4 || segments[0] != "user" || segments[2] != "traffic" {
+			continue
+		}
+		email := segments[1]
+		direction := segments[3]
+
+		// Ensure user entry exists.
+		if users[email] == nil {
+			users[email] = &UserStat{Email: email}
+		}
+
+		// Record counter.
+		switch direction {
+		case "uplink":
+			users[email].Uplink = value
+		case "downlink":
+			users[email].Downlink = value
+		}
+	}
+
+	// Convert map to slice.
+	result := make([]UserStat, 0, len(users))
+	for _, stat := range users {
+		result = append(result, *stat)
+	}
+	return result, nil
 }
 
 // ValidateConfig asks Xray itself whether a config file is loadable. This is

@@ -38,6 +38,9 @@ const (
 	// running the old configuration. The file says what should be running; this
 	// says what is.
 	appliedSuffix = ".applied"
+	// statsConfigFile is the shared stats infrastructure (SP3). Written when
+	// the adapter has SelfAccounting enabled. Not tied to a service ID.
+	statsConfigFile = "antimage-stats.json"
 )
 
 // Adapter implements the adapter contract for Xray-core.
@@ -93,7 +96,7 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			// The panel records this at Hello so the UI can tell an operator
 			// BEFORE they click whether adding a user drops sessions.
 			HotUserAdd:      a.hotAdd,
-			SelfAccounting:  false,
+			SelfAccounting:  a.hotAdd, // SP3: accounting requires the API inbound
 			RequiresPKI:     false,
 			CredentialKinds: []adapter.CredentialKind{"uuid", "password"},
 			ServiceSchema:   serviceSchema,
@@ -590,6 +593,10 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		}
 		// A write that needs a restart is useless until the process reloads.
 		if step.Disruption >= adapter.DisruptRestart {
+			// Ensure stats config is present before restart (SP3).
+			if err := a.ensureStatsConfig(ctx); err != nil {
+				return fail(fmt.Errorf("ensure stats config: %w", err))
+			}
 			if err := a.rt.Restart(ctx); err != nil {
 				return fail(fmt.Errorf("restart after writing service %d: %w", step.ServiceID, err))
 			}
@@ -600,6 +607,10 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		}
 
 	case StepRestartService:
+		// Ensure stats config is present before restart (SP3).
+		if err := a.ensureStatsConfig(ctx); err != nil {
+			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
 		if err := a.rt.Restart(ctx); err != nil {
 			return fail(fmt.Errorf("restart service %d: %w", step.ServiceID, err))
 		}
@@ -614,6 +625,10 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		if err := os.Remove(a.path(step.ServiceID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			// Already gone is the state we wanted; anything else is a failure.
 			return fail(fmt.Errorf("remove service %d: %w", step.ServiceID, err))
+		}
+		// Ensure stats config is present before restart (SP3).
+		if err := a.ensureStatsConfig(ctx); err != nil {
+			return fail(fmt.Errorf("ensure stats config: %w", err))
 		}
 		if err := a.rt.Restart(ctx); err != nil {
 			return fail(fmt.Errorf("restart after removing service %d: %w", step.ServiceID, err))
@@ -674,6 +689,63 @@ func (a *Adapter) writeService(serviceID int64, rendered []byte, shape string) e
 	}
 	if err := os.Rename(tmpName, a.path(serviceID)); err != nil {
 		return fmt.Errorf("install config for service %d: %w", serviceID, err)
+	}
+	return nil
+}
+
+// ensureStatsConfig writes the stats infrastructure file when accounting is
+// enabled. It's a separate config document that Xray merges with inbound files.
+// Returns true if the file was written or is already current.
+func (a *Adapter) ensureStatsConfig(ctx context.Context) error {
+	if !a.hotAdd {
+		// No API address means no accounting capability.
+		return nil
+	}
+	rt, ok := a.rt.(*ExecRuntime)
+	if !ok || rt.APIAddress == "" {
+		return nil
+	}
+
+	path := filepath.Join(a.dir, statsConfigFile)
+	desired, err := GenerateStatsConfig(rt.APIAddress)
+	if err != nil {
+		return fmt.Errorf("generate stats config: %w", err)
+	}
+	want := checksumOf(desired)
+
+	// Check if already current.
+	existing, err := os.ReadFile(path)
+	if err == nil && checksumOf(existing) == want {
+		return nil
+	}
+
+	// Write atomically.
+	if err := os.MkdirAll(a.dir, 0o700); err != nil {
+		return fmt.Errorf("create xray confdir: %w", err)
+	}
+	tmp, err := os.CreateTemp(a.dir, "stats-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp stats config: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+
+	if _, err := tmp.Write(desired); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp stats config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temp stats config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp stats config: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		return fmt.Errorf("chmod temp stats config: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("install stats config: %w", err)
 	}
 	return nil
 }

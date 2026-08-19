@@ -226,6 +226,11 @@ func (c *Client) runSession(
 	heartbeat := c.clk.After(HeartbeatInterval)
 	reconcile := c.clk.After(jitter(ReconcileInterval))
 
+	// Start accounting loop if the adapter supports it (SP3).
+	if _, ok := c.ad.(adapter.UsageReporter); ok {
+		go c.AccountingLoop(sessionCtx, stream, 30*time.Second)
+	}
+
 	for {
 		select {
 		case <-sessionCtx.Done():
