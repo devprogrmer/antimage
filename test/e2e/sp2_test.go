@@ -93,6 +93,14 @@ func (s *sp2Env) restartCount() int {
 
 func startSP2(t *testing.T, adapterKind string) *sp2Env {
 	t.Helper()
+	return startSP2WithPort(t, adapterKind, 8443)
+}
+
+// startSP2WithPort is startSP2 with the inbound's listen port chosen by the
+// caller. The real-runtime tests need a port that is actually free, because
+// something really binds it.
+func startSP2WithPort(t *testing.T, adapterKind string, port int) *sp2Env {
+	t.Helper()
 	e := startPanel(t)
 	e.createNodeAndEnroll()
 
@@ -111,9 +119,20 @@ func startSP2(t *testing.T, adapterKind string) *sp2Env {
 	}
 
 	// Create the inbound through the API, exactly as an operator would.
-	params := `{"protocol":"vless","port":8443,"security":"tls","cert_file":"/c","key_file":"/k"}`
+	params := fmt.Sprintf(
+		`{"protocol":"vless","port":%d,"security":"tls","cert_file":"/c","key_file":"/k"}`, port)
 	if adapterKind == "singbox" {
-		params = `{"protocol":"vless","port":8443,"tls":true,"cert_file":"/c","key_file":"/k"}`
+		params = fmt.Sprintf(
+			`{"protocol":"vless","port":%d,"tls":true,"cert_file":"/c","key_file":"/k"}`, port)
+	}
+	// A real proxy will not start with certificates that do not exist, so the
+	// real-runtime tests ask for a plain inbound. Everything else about the
+	// document, the plan and the generated config is identical.
+	if os.Getenv("ANTIMAGE_REALRUNTIME") == "1" {
+		params = fmt.Sprintf(`{"protocol":"vless","port":%d,"security":"none"}`, port)
+		if adapterKind == "singbox" {
+			params = fmt.Sprintf(`{"protocol":"vless","port":%d}`, port)
+		}
 	}
 	var created struct {
 		ID int64 `json:"id"`
