@@ -16,7 +16,6 @@ import (
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 	antimagev1 "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
-	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
 )
 
 // AccountingState persists deltas and sequence numbers between polls.
@@ -30,7 +29,7 @@ type AccountingState struct {
 // "deliberately short" to bound loss on restart).
 //
 // This must be called from within a session where the stream is available.
-func (c *Client) AccountingLoop(ctx context.Context, stream pb.Control_StreamClient, interval time.Duration) {
+func (c *Client) AccountingLoop(ctx context.Context, stream antimagev1.Control_StreamClient, interval time.Duration) {
 	if interval <= 0 {
 		interval = 30 * time.Second // Default: 30s poll interval
 	}
@@ -50,7 +49,7 @@ func (c *Client) AccountingLoop(ctx context.Context, stream pb.Control_StreamCli
 	}
 }
 
-func (c *Client) pollAndReport(ctx context.Context, stream pb.Control_StreamClient) error {
+func (c *Client) pollAndReport(ctx context.Context, stream antimagev1.Control_StreamClient) error {
 	// Check if the adapter supports accounting.
 	reporter, ok := c.ad.(adapter.UsageReporter)
 	if !ok {

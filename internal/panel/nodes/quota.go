@@ -36,7 +36,7 @@ func (s *QuotaEnforcementSweeper) Run(ctx context.Context, now int64) error {
 	if err != nil {
 		return fmt.Errorf("query subjects over quota: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var id int64
@@ -93,7 +93,7 @@ func (s *QuotaEnforcementSweeper) freezeSubject(ctx context.Context, subjectID, 
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		for rows.Next() {
 			var nodeID int64
@@ -148,7 +148,7 @@ func (s *QuotaResetSweeper) Run(ctx context.Context, now int64) error {
 	if err != nil {
 		return fmt.Errorf("query subjects for reset: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var r struct {
@@ -231,7 +231,7 @@ func (s *QuotaResetSweeper) resetSubject(
 			if err != nil {
 				return err
 			}
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 
 			for rows.Next() {
 				var nodeID int64

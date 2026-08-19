@@ -59,6 +59,10 @@ func (r *sp2Runtime) Healthy(context.Context) (bool, string) {
 	}
 	return false, "inactive (dead)"
 }
+func (r *sp2Runtime) QueryStats(context.Context) ([]xray.UserStat, error) {
+	// SP3 accounting: mock runtime returns empty stats (tests don't exercise accounting).
+	return nil, nil
+}
 
 // singboxRuntime is the restart-only counterpart.
 type singboxRuntime struct{ restarts int }
