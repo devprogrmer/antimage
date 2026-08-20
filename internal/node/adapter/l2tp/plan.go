@@ -122,11 +122,9 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 		}
 	}
 
-	// Case 4: Service present but not managed (drift) → report via health, no plan.
-	if l2tpService != nil && observedService != nil && observedService.Present && !observedService.Managed {
-		// Drift is reported via Probe, not Plan.
-		// Plan returns empty to avoid overwriting unmanaged files.
-	}
+	// Case 4: Service present but not managed (drift).
+	// Drift is reported via Probe, not Plan.
+	// Plan returns empty to avoid overwriting unmanaged files without operator approval.
 
 	return adapter.Plan{Steps: steps}, nil
 }

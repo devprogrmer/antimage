@@ -14,12 +14,6 @@ import (
 const (
 	markerPrefix = "# antimage-managed:"
 	markerXL2TPD = "; antimage-managed:" // xl2tpd uses semicolon comments
-
-	ipsecConfPath   = "/etc/strongswan/ipsec.conf"
-	ipsecSecretsPath = "/etc/strongswan/ipsec.secrets"
-	xl2tpdConfPath  = "/etc/xl2tpd/xl2tpd.conf"
-	chapSecretsPath = "/etc/ppp/chap-secrets"
-	pppOptionsPath  = "/etc/ppp/options.xl2tpd"
 )
 
 // ServiceParams mirrors the JSON schema in adapter.go.
@@ -173,7 +167,7 @@ func parseMarker(line string) (serviceID int64, checksum string, ok bool) {
 	parts := strings.Fields(line)
 	for _, part := range parts {
 		if strings.HasPrefix(part, "service_id=") {
-			fmt.Sscanf(part, "service_id=%d", &serviceID)
+			_, _ = fmt.Sscanf(part, "service_id=%d", &serviceID)
 		}
 		if strings.HasPrefix(part, "checksum=") {
 			checksum = strings.TrimPrefix(part, "checksum=")

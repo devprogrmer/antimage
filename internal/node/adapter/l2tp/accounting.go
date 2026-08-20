@@ -175,9 +175,10 @@ func (a *Adapter) readNftablesCounters() (map[string]trafficCounter, error) {
 			}
 
 			c := counters[ip]
-			if currentChain == "input" {
+			switch currentChain {
+			case "input":
 				c.RxBytes = bytes
-			} else if currentChain == "output" {
+			case "output":
 				c.TxBytes = bytes
 			}
 			counters[ip] = c
@@ -235,9 +236,12 @@ func (a *Adapter) ipToSubjectID(ip string) (int64, error) {
 	return 0, fmt.Errorf("no subject mapping for IP %s", ip)
 }
 
+// The following functions are reserved for future enhancements (automatic rule management).
+// Currently, rules are set up manually via Apply steps.
+
 // setupAccounting creates the nftables table and chains for L2TP accounting.
-// This should be called during service installation.
-func (a *Adapter) setupAccounting() error {
+// Reserved for future use: automatic accounting setup during service installation.
+func (a *Adapter) setupAccounting() error { //nolint:unused
 	// Create nftables table and chains.
 	script := `
 table inet antimage_l2tp {
@@ -259,7 +263,8 @@ table inet antimage_l2tp {
 }
 
 // addAccountingRule adds a counter rule for a specific client IP.
-func (a *Adapter) addAccountingRule(ip string) error {
+// Reserved for future use: dynamic rule addition on PPP session start.
+func (a *Adapter) addAccountingRule(ip string) error { //nolint:unused
 	// Add input rule (RX).
 	rxCmd := exec.Command("nft", "add", "rule", "inet", "antimage_l2tp", "input",
 		"ip", "saddr", ip, "counter")
@@ -278,7 +283,8 @@ func (a *Adapter) addAccountingRule(ip string) error {
 }
 
 // removeAccountingRule removes counter rules for a specific IP.
-func (a *Adapter) removeAccountingRule(ip string) error {
+// Reserved for future use: dynamic rule cleanup on PPP session end.
+func (a *Adapter) removeAccountingRule(ip string) error { //nolint:unused
 	// Note: Removing specific rules requires finding their handle.
 	// For simplicity, we flush and recreate all rules periodically.
 	// A production implementation would track rule handles.
