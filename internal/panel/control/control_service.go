@@ -156,7 +156,11 @@ func (s *ControlService) handle(
 func (s *ControlService) onHello(ctx context.Context, nodeID int64, h *pb.Hello, srv pb.Control_StreamServer) error {
 	adapters := make([]nodes.AdapterInfo, 0, len(h.Adapters))
 	for _, a := range h.Adapters {
-		adapters = append(adapters, nodes.AdapterInfo{Kind: a.Kind, Version: a.Version})
+		adapters = append(adapters, nodes.AdapterInfo{
+			Kind:         a.Kind,
+			Version:      a.Version,
+			Capabilities: a.Capabilities, // SP5: capture capabilities
+		})
 	}
 	if err := nodes.RecordHello(ctx, s.deps.Store, nodeID, adapters,
 		h.AppliedRevision, h.DocSha256, s.deps.now()); err != nil {

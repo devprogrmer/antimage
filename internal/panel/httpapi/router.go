@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/control"
@@ -138,6 +139,8 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/nodes/{nodeID}/bootstrap-ssh", d.handleSSHBootstrap)
 			private.Get("/nodes/{nodeID}/revisions", d.handleListRevisions)
 			private.Get("/nodes/{nodeID}/apply-runs", d.handleListApplyRuns)
+			private.Get("/nodes/{nodeID}/adapters", d.handleListAdapters) // SP5: adapter registry
+			private.Get("/nodes/{nodeID}/metrics", d.handleNodeMetrics)   // SP5: connection metrics
 
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 			private.Put("/services/{serviceID}", d.handleUpdateService)
@@ -158,6 +161,9 @@ func NewRouter(d Deps) http.Handler {
 	// bootstrap one-liner has no session, and the agent binary is not secret.
 	r.Get("/download/{name}", d.handleDownload)
 	r.Head("/download/{name}", d.handleDownload)
+
+	// SP5: Prometheus metrics endpoint (no auth, standard for /metrics)
+	r.Handle("/metrics", promhttp.Handler())
 
 	r.Handle("/*", d.uiHandler())
 	return r

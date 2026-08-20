@@ -18,12 +18,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/httpapi"
+	"github.com/amyrm/antimage/internal/panel/metrics"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/store"
 	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
@@ -84,6 +86,10 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// SP5: Register Prometheus metrics collector
+	collector := metrics.NewCollector(st)
+	prometheus.MustRegister(collector)
 
 	ca, err := nodes.LoadOrCreateCA(ctx, st, box)
 	if err != nil {

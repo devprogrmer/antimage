@@ -170,8 +170,9 @@ func RecordApplyRun(ctx context.Context, s *store.Store, in ApplyRunInput) (Outc
 }
 
 type AdapterInfo struct {
-	Kind    string
-	Version string
+	Kind         string
+	Version      string
+	Capabilities []string // SP5: adapter capabilities
 }
 
 // RecordHello caches the adapter kinds the agent reports.
@@ -191,7 +192,7 @@ func RecordHello(
 		return fmt.Errorf("encode adapter kinds: %w", err)
 	}
 
-	return s.Write(ctx, func(tx *sql.Tx) error {
+	err = s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
 			`UPDATE nodes SET adapter_kinds = ?, last_seen_at = ?,
 			        status = CASE WHEN status IN ('pending','enrolling','offline')
@@ -200,6 +201,18 @@ func RecordHello(
 			string(encoded), now.Unix(), nodeID)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+
+	// SP5: Update adapter registry with version and capabilities
+	for _, a := range adapters {
+		if err := UpsertAdapter(ctx, s, nodeID, a.Kind, a.Version, a.Capabilities, now); err != nil {
+			return fmt.Errorf("upsert adapter %s: %w", a.Kind, err)
+		}
+	}
+
+	return nil
 }
 
 type AdapterHealthSample struct {
