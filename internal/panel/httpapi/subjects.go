@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -41,7 +42,7 @@ func (d Deps) handleGetSubject(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, name, enabled, subscription_token, expires_at, created_at, note
 		 FROM subjects WHERE id = ?`, subjectID)
 	err := row.Scan(&id, &name, &enabled, &token, &expiresAt, &createdAt, &note)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

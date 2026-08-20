@@ -264,9 +264,8 @@ func TestHandleSubscribe_RateLimit(t *testing.T) {
 	// Make 10 requests (should all succeed, though 503 due to no nodes).
 	for i := 0; i < 10; i++ {
 		rec := env.get(t, "/api/v1/subscribe/"+token, "")
-		if rec.Code != http.StatusServiceUnavailable {
-			// Expected 503 since no services exist
-		}
+		// Expected 503 since no services exist, just verify no panic.
+		_ = rec
 	}
 
 	// 11th request should be rate limited.
