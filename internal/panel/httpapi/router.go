@@ -138,6 +138,7 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/nodes/{nodeID}/bootstrap-ssh", d.handleSSHBootstrap)
 			private.Get("/nodes/{nodeID}/revisions", d.handleListRevisions)
 			private.Get("/nodes/{nodeID}/apply-runs", d.handleListApplyRuns)
+			private.Get("/nodes/{nodeID}/adapters", d.handleListAdapters) // SP5: adapter registry
 
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 			private.Put("/services/{serviceID}", d.handleUpdateService)

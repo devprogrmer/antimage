@@ -444,7 +444,8 @@ type AdapterDescriptor struct {
 	RequiresPki    bool                   `protobuf:"varint,5,opt,name=requires_pki,json=requiresPki,proto3" json:"requires_pki,omitempty"`
 	// JSON Schema for this adapter's service params. The panel validates
 	// writes against it and the UI renders forms from it.
-	ServiceSchema []byte `protobuf:"bytes,6,opt,name=service_schema,json=serviceSchema,proto3" json:"service_schema,omitempty"`
+	ServiceSchema []byte   `protobuf:"bytes,6,opt,name=service_schema,json=serviceSchema,proto3" json:"service_schema,omitempty"`
+	Capabilities  []string `protobuf:"bytes,7,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // SP5: adapter capabilities (e.g., ["tls", "ws", "grpc"])
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -517,6 +518,13 @@ func (x *AdapterDescriptor) GetRequiresPki() bool {
 func (x *AdapterDescriptor) GetServiceSchema() []byte {
 	if x != nil {
 		return x.ServiceSchema
+	}
+	return nil
+}
+
+func (x *AdapterDescriptor) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
 	}
 	return nil
 }
@@ -1090,7 +1098,7 @@ const file_antimage_v1_control_proto_rawDesc = "" +
 	"\x10applied_revision\x18\x04 \x01(\x03R\x0fappliedRevision\x12\x1d\n" +
 	"\n" +
 	"doc_sha256\x18\x05 \x01(\tR\tdocSha256\x12:\n" +
-	"\badapters\x18\x06 \x03(\v2\x1e.antimage.v1.AdapterDescriptorR\badapters\"\xd6\x01\n" +
+	"\badapters\x18\x06 \x03(\v2\x1e.antimage.v1.AdapterDescriptorR\badapters\"\xfa\x01\n" +
 	"\x11AdapterDescriptor\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12 \n" +
@@ -1098,7 +1106,8 @@ const file_antimage_v1_control_proto_rawDesc = "" +
 	"hotUserAdd\x12'\n" +
 	"\x0fself_accounting\x18\x04 \x01(\bR\x0eselfAccounting\x12!\n" +
 	"\frequires_pki\x18\x05 \x01(\bR\vrequiresPki\x12%\n" +
-	"\x0eservice_schema\x18\x06 \x01(\fR\rserviceSchema\"\xb1\x01\n" +
+	"\x0eservice_schema\x18\x06 \x01(\fR\rserviceSchema\x12\"\n" +
+	"\fcapabilities\x18\a \x03(\tR\fcapabilities\"\xb1\x01\n" +
 	"\tHeartbeat\x12\x14\n" +
 	"\x05load1\x18\x01 \x01(\x01R\x05load1\x12$\n" +
 	"\x0emem_used_bytes\x18\x02 \x01(\x04R\fmemUsedBytes\x12%\n" +

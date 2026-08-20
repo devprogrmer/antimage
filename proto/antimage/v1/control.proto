@@ -72,6 +72,7 @@ message AdapterDescriptor {
   // JSON Schema for this adapter's service params. The panel validates
   // writes against it and the UI renders forms from it.
   bytes service_schema = 6;
+  repeated string capabilities = 7;  // SP5: adapter capabilities (e.g., ["tls", "ws", "grpc"])
 }
 
 message Heartbeat {
