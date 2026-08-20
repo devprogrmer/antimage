@@ -139,6 +139,7 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/nodes/{nodeID}/revisions", d.handleListRevisions)
 			private.Get("/nodes/{nodeID}/apply-runs", d.handleListApplyRuns)
 			private.Get("/nodes/{nodeID}/adapters", d.handleListAdapters) // SP5: adapter registry
+			private.Get("/nodes/{nodeID}/metrics", d.handleNodeMetrics)   // SP5: connection metrics
 
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 			private.Put("/services/{serviceID}", d.handleUpdateService)
