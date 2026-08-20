@@ -10,7 +10,6 @@
 package l2tp
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
@@ -85,22 +84,8 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 	}
 }
 
-func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
-	// TODO: Phase C
-	return adapter.Observed{}, nil
-}
-
-func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed adapter.Observed) (adapter.Plan, error) {
-	// TODO: Phase C
-	return adapter.Plan{}, nil
-}
-
-func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepResult, error) {
-	// TODO: Phase C
-	return adapter.StepResult{}, nil
-}
-
-func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
-	// TODO: Phase C
-	return adapter.Health{OK: true}, nil
-}
+// Observe, Plan, Apply, and Probe implementations are in separate files:
+// - observe.go: reads current config state from disk
+// - plan.go: diffs desired vs observed, emits steps
+// - apply.go: executes steps (install, update, reload, remove)
+// - probe.go: checks service health
