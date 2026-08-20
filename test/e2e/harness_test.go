@@ -69,7 +69,12 @@ type env struct {
 	agentCert   tls.Certificate
 	agentCADER  []byte
 	agentCfg    *agent.Config
+	secretBox   *secrets.Box
 }
+
+// box exposes the panel's secret box so SP2 tests can build a desired document
+// carrying subject credentials.
+func (e *env) box() *secrets.Box { return e.secretBox }
 
 func now() time.Time { return time.Now().UTC() }
 
@@ -115,7 +120,7 @@ func startPanel(t *testing.T) *env {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	deps := control.Deps{Store: st, CA: ca, Hub: hub, Now: now}
+	deps := control.Deps{Store: st, CA: ca, Hub: hub, Now: now, Box: box}
 	grpcSrv := grpc.NewServer(grpc.Creds(creds))
 	pb.RegisterEnrollmentServer(grpcSrv, control.NewEnrollmentService(deps))
 	pb.RegisterControlServer(grpcSrv, control.NewControlService(deps))
@@ -140,7 +145,7 @@ func startPanel(t *testing.T) *env {
 	go nodes.NewSweeper(st, now).WithThreshold(3*time.Second).Run(sweepCtx, 250*time.Millisecond)
 
 	e := &env{
-		t: t, store: st, ca: ca, hub: hub, http: api,
+		t: t, store: st, ca: ca, hub: hub, http: api, secretBox: box,
 		grpcAddr: ln.Addr().String(), grpcSrv: grpcSrv,
 		stateDir: filepath.Join(dir, "node-state"), agentRoot: filepath.Join(dir, "node-services"),
 	}

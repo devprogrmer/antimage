@@ -26,6 +26,50 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...
 
+  # Real-runtime verification: the adapters against the actual proxies.
+  #
+  # Every other test drives a fake Runtime, which proves the adapter's logic but
+  # never asks a real binary whether the generated configuration is loadable.
+  # That gap hid two defects: both adapters emitted a bare inbound object rather
+  # than a configuration document, so sing-box refused to start and Xray started
+  # while binding nothing at all. Neither was visible to any test that only
+  # compared bytes against expectations we wrote ourselves.
+  #
+  # This job must actually RUN, not merely compile. The realruntime tag makes a
+  # missing binary a failure rather than a skip, so the job cannot quietly
+  # degrade into a no-op.
+  realruntime:
+    runs-on: ubuntu-latest
+    env:
+      XRAY_VERSION: v26.3.27
+      SINGBOX_VERSION: 1.13.19
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: 'go.mod' }
+
+      - name: install real xray and sing-box
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/bin"
+          curl -sSL -o /tmp/xray.zip \
+            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"
+          unzip -o -q /tmp/xray.zip xray -d "$HOME/bin"
+          curl -sSL -o /tmp/sb.tar.gz \
+            "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-amd64.tar.gz"
+          tar -xzf /tmp/sb.tar.gz -C /tmp
+          install -m 0755 "/tmp/sing-box-${SINGBOX_VERSION}-linux-amd64/sing-box" "$HOME/bin/sing-box"
+          chmod +x "$HOME/bin/xray"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: prove the binaries are real
+        run: |
+          xray version
+          sing-box version
+
+      - name: real-runtime lifecycle for both adapters
+        run: go test ./test/e2e/... -tags "e2e realruntime" -run TestRealRuntime -v -count=1 -timeout 15m
+
   # The go job runs check-rtl, which is pure grep and needs no toolchain. The
   # i18n tests and the UI build do need Node, and without this job neither is
   # enforced anywhere: a missing Persian translation or a broken build would

@@ -42,7 +42,7 @@ func (s *ControlService) GetDesiredSnapshot(
 	var snap *nodes.Snapshot
 	err = s.deps.Store.Write(ctx, func(tx *sql.Tx) error {
 		var err error
-		snap, err = nodes.BuildDesiredSnapshot(ctx, tx, callerID)
+		snap, err = nodes.BuildDesiredSnapshot(ctx, tx, callerID, s.deps.snapshotOpts()...)
 		return err
 	})
 	if err != nil {
@@ -148,6 +148,9 @@ func (s *ControlService) handle(
 	case *pb.AgentMessage_ApplyReport:
 		return s.onApplyReport(ctx, nodeID, p.ApplyReport)
 
+	case *pb.AgentMessage_UsageReport:
+		return s.onUsageReport(ctx, nodeID, p.UsageReport)
+
 	default:
 		return nil // forward compatible: ignore unknown payloads
 	}
@@ -199,4 +202,18 @@ func (s *ControlService) onApplyReport(ctx context.Context, nodeID int64, r *pb.
 	}
 	_, err := nodes.RecordApplyRun(ctx, s.deps.Store, in)
 	return err
+}
+
+func (s *ControlService) onUsageReport(ctx context.Context, nodeID int64, r *pb.UsageReport) error {
+	// SP3 design decision 3: idempotency key is (node_id, sequence).
+	// The panel ignores a repeated sequence number.
+	samples := make([]nodes.UsageDelta, 0, len(r.Samples))
+	for _, sample := range r.Samples {
+		samples = append(samples, nodes.UsageDelta{
+			SubjectID:     sample.SubjectId,
+			UplinkBytes:   sample.UplinkBytes,
+			DownlinkBytes: sample.DownlinkBytes,
+		})
+	}
+	return nodes.IngestUsageReport(ctx, s.deps.Store, nodeID, r.Sequence, samples, s.deps.now().Unix())
 }

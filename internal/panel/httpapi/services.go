@@ -117,7 +117,7 @@ func (d Deps) handleCreateService(w http.ResponseWriter, r *http.Request) {
 			}
 			serviceID, err = res.LastInsertId()
 			return err
-		})
+		}, d.snapshotOpts()...)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "could not create service")
 		return
@@ -170,7 +170,7 @@ func (d Deps) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 				`UPDATE services SET adapter_kind = ?, params = ?, enabled = ? WHERE id = ?`,
 				req.AdapterKind, paramsOf(req), enabledOf(req), serviceID)
 			return err
-		})
+		}, d.snapshotOpts()...)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "could not update service")
 		return
@@ -208,7 +208,7 @@ func (d Deps) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `DELETE FROM services WHERE id = ?`, serviceID)
 			return err
-		})
+		}, d.snapshotOpts()...)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "could not delete service")
 		return
