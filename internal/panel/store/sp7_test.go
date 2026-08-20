@@ -36,9 +36,9 @@ func TestSP7Schema(t *testing.T) {
 		}
 	})
 
-	t.Run("alerts dedup_key is unique", func(t *testing.T) {
+	t.Run("alerts dedup_key is unique for active alerts only", func(t *testing.T) {
+		// Try to insert duplicate active dedup_key - should fail
 		err := s.Write(ctx, func(tx *sql.Tx) error {
-			// Try to insert duplicate dedup_key
 			_, err := tx.Exec(`
 				INSERT INTO alerts (alert_type, severity, target_type, target_id, state, dedup_key, first_seen_at, last_seen_at)
 				VALUES ('cert_expiry', 'warning', 'node', 1, 'active', 'cert_expiry:node:1:warning', ?, ?)`,
@@ -46,7 +46,51 @@ func TestSP7Schema(t *testing.T) {
 			return err
 		})
 		if err == nil {
-			t.Error("expected UNIQUE constraint violation, got nil")
+			t.Error("expected UNIQUE constraint violation for duplicate active dedup_key, got nil")
+		}
+
+		// Resolve the first alert
+		err = s.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.Exec(`
+				UPDATE alerts
+				SET state = 'resolved', resolved_at = ?
+				WHERE dedup_key = 'cert_expiry:node:1:warning'`,
+				time.Now().Unix())
+			return err
+		})
+		if err != nil {
+			t.Fatalf("resolve alert: %v", err)
+		}
+
+		// Now insert a new active alert with same dedup_key - should succeed (re-alert)
+		err = s.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.Exec(`
+				INSERT INTO alerts (alert_type, severity, target_type, target_id, state, dedup_key, first_seen_at, last_seen_at)
+				VALUES ('cert_expiry', 'warning', 'node', 1, 'active', 'cert_expiry:node:1:warning', ?, ?)`,
+				time.Now().Unix(), time.Now().Unix())
+			return err
+		})
+		if err != nil {
+			t.Errorf("expected re-alert to succeed after resolution, got error: %v", err)
+		}
+
+		// Verify both alerts exist (one resolved, one active)
+		var count int
+		err = s.Read().QueryRow(`SELECT COUNT(*) FROM alerts WHERE dedup_key = 'cert_expiry:node:1:warning'`).Scan(&count)
+		if err != nil {
+			t.Fatalf("query alerts: %v", err)
+		}
+		if count != 2 {
+			t.Errorf("expected 2 alerts (1 resolved, 1 active), got %d", count)
+		}
+
+		// Verify only one is active
+		err = s.Read().QueryRow(`SELECT COUNT(*) FROM alerts WHERE dedup_key = 'cert_expiry:node:1:warning' AND state = 'active'`).Scan(&count)
+		if err != nil {
+			t.Fatalf("query active alerts: %v", err)
+		}
+		if count != 1 {
+			t.Errorf("expected 1 active alert, got %d", count)
 		}
 	})
 
@@ -139,6 +183,97 @@ func TestSP7Schema(t *testing.T) {
 		}
 		if samples != 2880 {
 			t.Errorf("expected 2880 samples, got %d", samples)
+		}
+	})
+
+	t.Run("resolved alerts preserve history and allow re-alert", func(t *testing.T) {
+		dedupKey := "cert_expiry:node:100:critical:history-test"
+
+		// Create first alert
+		var firstID int64
+		err := s.Write(ctx, func(tx *sql.Tx) error {
+			res, err := tx.Exec(`
+				INSERT INTO alerts (alert_type, severity, target_type, target_id, state, dedup_key, first_seen_at, last_seen_at, threshold_value, current_value)
+				VALUES ('cert_expiry', 'critical', 'node', 100, 'active', ?, ?, ?, '7 days', '5 days')`,
+				dedupKey, time.Now().Unix(), time.Now().Unix())
+			if err != nil {
+				return err
+			}
+			firstID, err = res.LastInsertId()
+			return err
+		})
+		if err != nil {
+			t.Fatalf("create first alert: %v", err)
+		}
+
+		// Resolve it
+		resolvedAt := time.Now().Unix()
+		err = s.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE alerts SET state = 'resolved', resolved_at = ? WHERE id = ?`, resolvedAt, firstID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("resolve first alert: %v", err)
+		}
+
+		// Create second alert with same dedup_key (condition returned)
+		var secondID int64
+		err = s.Write(ctx, func(tx *sql.Tx) error {
+			res, err := tx.Exec(`
+				INSERT INTO alerts (alert_type, severity, target_type, target_id, state, dedup_key, first_seen_at, last_seen_at, threshold_value, current_value)
+				VALUES ('cert_expiry', 'critical', 'node', 100, 'active', ?, ?, ?, '7 days', '4 days')`,
+				dedupKey, time.Now().Unix(), time.Now().Unix())
+			if err != nil {
+				return err
+			}
+			secondID, err = res.LastInsertId()
+			return err
+		})
+		if err != nil {
+			t.Fatalf("create second alert (re-alert): %v", err)
+		}
+
+		// Verify both alerts exist with different IDs
+		if firstID == secondID {
+			t.Errorf("expected different alert IDs, both got %d", firstID)
+		}
+
+		// Verify first is resolved, second is active
+		var firstState, secondState string
+		err = s.Read().QueryRow(`SELECT state FROM alerts WHERE id = ?`, firstID).Scan(&firstState)
+		if err != nil {
+			t.Fatalf("query first alert state: %v", err)
+		}
+		if firstState != "resolved" {
+			t.Errorf("expected first alert state 'resolved', got %q", firstState)
+		}
+
+		err = s.Read().QueryRow(`SELECT state FROM alerts WHERE id = ?`, secondID).Scan(&secondState)
+		if err != nil {
+			t.Fatalf("query second alert state: %v", err)
+		}
+		if secondState != "active" {
+			t.Errorf("expected second alert state 'active', got %q", secondState)
+		}
+
+		// Verify only one active alert for this dedup_key
+		var activeCount int
+		err = s.Read().QueryRow(`SELECT COUNT(*) FROM alerts WHERE dedup_key = ? AND state = 'active'`, dedupKey).Scan(&activeCount)
+		if err != nil {
+			t.Fatalf("query active count: %v", err)
+		}
+		if activeCount != 1 {
+			t.Errorf("expected 1 active alert for dedup_key, got %d", activeCount)
+		}
+
+		// Verify resolved alert history preserved
+		var resolvedCount int
+		err = s.Read().QueryRow(`SELECT COUNT(*) FROM alerts WHERE dedup_key = ? AND state = 'resolved'`, dedupKey).Scan(&resolvedCount)
+		if err != nil {
+			t.Fatalf("query resolved count: %v", err)
+		}
+		if resolvedCount != 1 {
+			t.Errorf("expected 1 resolved alert for dedup_key (history preserved), got %d", resolvedCount)
 		}
 	})
 }

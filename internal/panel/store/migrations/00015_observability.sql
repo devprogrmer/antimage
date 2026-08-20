@@ -10,7 +10,7 @@ CREATE TABLE alerts (
     target_type     TEXT NOT NULL CHECK (target_type IN ('node', 'subject')),
     target_id       INTEGER NOT NULL,
     state           TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'resolved')),
-    dedup_key       TEXT NOT NULL UNIQUE,
+    dedup_key       TEXT NOT NULL,
     first_seen_at   INTEGER NOT NULL,
     last_seen_at    INTEGER NOT NULL,
     resolved_at     INTEGER,
@@ -19,6 +19,9 @@ CREATE TABLE alerts (
     metadata        TEXT NOT NULL DEFAULT '{}',
     CHECK (state = 'resolved' OR resolved_at IS NULL)
 ) STRICT;
+
+-- Partial unique index: only one active alert per dedup_key (allows re-alerts after resolution)
+CREATE UNIQUE INDEX alerts_dedup_active ON alerts(dedup_key) WHERE state = 'active';
 
 CREATE INDEX alerts_active ON alerts(state, alert_type) WHERE state = 'active';
 CREATE INDEX alerts_target ON alerts(target_type, target_id);
