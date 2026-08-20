@@ -117,6 +117,10 @@ func NewRouter(d Deps) http.Handler {
 		// value — it is the thing the node pins the panel against.
 		api.Get("/ca-fingerprint", d.handleCAFingerprint)
 
+		// SP4: Subscription endpoint - public, token-authenticated.
+		// The token IS the authentication, no session required.
+		api.Get("/subscribe/{token}", d.handleSubscribe)
+
 		api.Group(func(private chi.Router) {
 			private.Use(d.authMiddleware, readOnlyMiddleware)
 
@@ -146,6 +150,10 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/audit", d.handleListAudit)
 			private.Get("/sessions", d.handleListSessions)
 			private.Delete("/sessions/{sessionID}", d.handleRevokeSession)
+
+			// SP4: Subject subscription management
+			private.Get("/subjects/{id}", d.handleGetSubject)
+			private.Post("/subjects/{id}/revoke-token", d.handleRevokeToken)
 
 			private.Get("/events", d.handleEvents)
 		})

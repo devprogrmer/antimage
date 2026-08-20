@@ -1,0 +1,189 @@
+package subscriptions
+
+import (
+	"context"
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
+// ClashRenderer renders Clash-format YAML subscriptions.
+type ClashRenderer struct{}
+
+// Render returns Clash YAML config and content-type.
+func (r *ClashRenderer) Render(ctx context.Context, servers []Server) ([]byte, string, error) {
+	if len(servers) == 0 {
+		return nil, "", fmt.Errorf("no servers to render")
+	}
+
+	var proxies []map[string]interface{}
+	for _, srv := range servers {
+		proxy, err := r.renderServer(srv)
+		if err != nil {
+			return nil, "", fmt.Errorf("render server %s: %w", srv.NodeName, err)
+		}
+		proxies = append(proxies, proxy)
+	}
+
+	config := map[string]interface{}{
+		"proxies": proxies,
+	}
+
+	yamlBytes, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal yaml: %w", err)
+	}
+
+	return yamlBytes, "application/x-yaml; charset=utf-8", nil
+}
+
+// renderServer converts a Server to a Clash proxy map.
+func (r *ClashRenderer) renderServer(srv Server) (map[string]interface{}, error) {
+	switch srv.Protocol {
+	case "vless":
+		return r.renderVLESS(srv), nil
+	case "vmess":
+		return r.renderVMess(srv), nil
+	case "trojan":
+		return r.renderTrojan(srv), nil
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", srv.Protocol)
+	}
+}
+
+// renderVLESS generates a Clash VLESS proxy.
+func (r *ClashRenderer) renderVLESS(srv Server) map[string]interface{} {
+	proxy := map[string]interface{}{
+		"name":   srv.NodeName,
+		"type":   "vless",
+		"server": srv.NodeAddress,
+		"port":   srv.Port,
+		"uuid":   srv.UUID,
+		"udp":    true,
+	}
+
+	// Network type
+	network := srv.Network
+	if network == "" {
+		network = "tcp"
+	}
+	proxy["network"] = network
+
+	// TLS
+	if srv.TLS {
+		proxy["tls"] = true
+		proxy["skip-cert-verify"] = false
+		if srv.SNI != "" {
+			proxy["servername"] = srv.SNI
+		}
+	}
+
+	// ALPN
+	if len(srv.ALPN) > 0 {
+		proxy["alpn"] = srv.ALPN
+	}
+
+	// WebSocket options
+	if network == "ws" {
+		wsOpts := make(map[string]interface{})
+		if srv.Path != "" {
+			wsOpts["path"] = srv.Path
+		}
+		if len(wsOpts) > 0 {
+			proxy["ws-opts"] = wsOpts
+		}
+	}
+
+	// gRPC options
+	if network == "grpc" && srv.Path != "" {
+		grpcOpts := map[string]interface{}{
+			"grpc-service-name": srv.Path,
+		}
+		proxy["grpc-opts"] = grpcOpts
+	}
+
+	return proxy
+}
+
+// renderVMess generates a Clash VMess proxy.
+func (r *ClashRenderer) renderVMess(srv Server) map[string]interface{} {
+	proxy := map[string]interface{}{
+		"name":     srv.NodeName,
+		"type":     "vmess",
+		"server":   srv.NodeAddress,
+		"port":     srv.Port,
+		"uuid":     srv.UUID,
+		"alterId":  0,
+		"cipher":   "auto",
+		"udp":      true,
+	}
+
+	// Network type
+	network := srv.Network
+	if network == "" {
+		network = "tcp"
+	}
+	proxy["network"] = network
+
+	// TLS
+	if srv.TLS {
+		proxy["tls"] = true
+		proxy["skip-cert-verify"] = false
+		if srv.SNI != "" {
+			proxy["servername"] = srv.SNI
+		}
+	}
+
+	// ALPN
+	if len(srv.ALPN) > 0 {
+		proxy["alpn"] = srv.ALPN
+	}
+
+	// WebSocket options
+	if network == "ws" {
+		wsOpts := make(map[string]interface{})
+		if srv.Path != "" {
+			wsOpts["path"] = srv.Path
+		}
+		if len(wsOpts) > 0 {
+			proxy["ws-opts"] = wsOpts
+		}
+	}
+
+	// gRPC options
+	if network == "grpc" && srv.Path != "" {
+		grpcOpts := map[string]interface{}{
+			"grpc-service-name": srv.Path,
+		}
+		proxy["grpc-opts"] = grpcOpts
+	}
+
+	return proxy
+}
+
+// renderTrojan generates a Clash Trojan proxy.
+func (r *ClashRenderer) renderTrojan(srv Server) map[string]interface{} {
+	proxy := map[string]interface{}{
+		"name":     srv.NodeName,
+		"type":     "trojan",
+		"server":   srv.NodeAddress,
+		"port":     srv.Port,
+		"password": srv.Password,
+		"udp":      true,
+	}
+
+	// Trojan typically requires TLS
+	if srv.TLS {
+		proxy["skip-cert-verify"] = false
+		if srv.SNI != "" {
+			proxy["sni"] = srv.SNI
+		}
+	}
+
+	// ALPN
+	if len(srv.ALPN) > 0 {
+		proxy["alpn"] = srv.ALPN
+	}
+
+	return proxy
+}
