@@ -18,14 +18,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/httpapi"
+	"github.com/amyrm/antimage/internal/panel/metrics"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/panel/subjects"
 	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
 	"github.com/amyrm/antimage/internal/shared/secrets"
 	"github.com/amyrm/antimage/internal/shared/version"
@@ -85,6 +89,10 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// SP5: Register Prometheus metrics collector
+	collector := metrics.NewCollector(st)
+	prometheus.MustRegister(collector)
+
 	ca, err := nodes.LoadOrCreateCA(ctx, st, box)
 	if err != nil {
 		return err
@@ -93,6 +101,133 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 	now := func() time.Time { return time.Now().UTC() }
 
 	go nodes.NewSweeper(st, now).Run(ctx, 30*time.Second)
+
+	// Expiry is enforced by omission from the desired document; this sweeper
+	// makes it prompt and visible by stamping expired_at and bumping the
+	// revision of every affected node, rather than leaving the removal to
+	// whenever some unrelated change next occurs.
+	go subjects.NewSweeper(st, now, func(nodeID, revision int64) { hub.Notify(nodeID, revision) }, nodes.WithUnsealer(box)).
+		Run(ctx, time.Minute)
+
+	// SP3: quota enforcement sweeper finds subjects over quota and freezes them.
+	// Interval: 5 minutes (frequent enough for prompt enforcement, infrequent enough to avoid database load).
+	quotaEnforcer := &nodes.QuotaEnforcementSweeper{
+		Store: st,
+		Log:   slog.Default(),
+		CommitFunc: func(ctx context.Context, nodeID int64, actor, reason string) error {
+			_, err := nodes.CommitNodeChange(ctx, st, nodeID, audit.SystemActor(actor), "", reason, nil, nodes.WithUnsealer(box))
+			return err
+		},
+	}
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := quotaEnforcer.Run(ctx, now().Unix()); err != nil {
+					slog.ErrorContext(ctx, "quota enforcement sweep failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	// SP3: quota reset sweeper finds subjects past their reset time and resets usage.
+	// Interval: hourly (resets are timestamp-based, no need for high frequency).
+	quotaResetter := &nodes.QuotaResetSweeper{
+		Store: st,
+		Log:   slog.Default(),
+		CommitFunc: func(ctx context.Context, nodeID int64, actor, reason string) error {
+			_, err := nodes.CommitNodeChange(ctx, st, nodeID, audit.SystemActor(actor), "", reason, nil, nodes.WithUnsealer(box))
+			return err
+		},
+	}
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := quotaResetter.Run(ctx, now().Unix()); err != nil {
+					slog.ErrorContext(ctx, "quota reset sweep failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	// SP3: rollup jobs aggregate raw deltas into hourly and daily buckets.
+	// Hourly rollup: runs every hour at :15 past to catch deltas from the previous hour.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		// Initial run after 15 minutes to catch any backlog.
+		time.Sleep(15 * time.Minute)
+		if err := nodes.RollupHourly(ctx, st, now().Unix()); err != nil {
+			slog.ErrorContext(ctx, "initial hourly rollup failed", "error", err)
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := nodes.RollupHourly(ctx, st, now().Unix()); err != nil {
+					slog.ErrorContext(ctx, "hourly rollup failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	// Daily rollup: runs once per day at 00:30 to aggregate the previous day.
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		// Calculate initial delay to 00:30 UTC.
+		nowTime := now()
+		next := time.Date(nowTime.Year(), nowTime.Month(), nowTime.Day(), 0, 30, 0, 0, time.UTC)
+		if nowTime.After(next) {
+			next = next.Add(24 * time.Hour)
+		}
+		initialDelay := next.Sub(nowTime)
+		time.Sleep(initialDelay)
+		if err := nodes.RollupDaily(ctx, st, now().Unix()); err != nil {
+			slog.ErrorContext(ctx, "initial daily rollup failed", "error", err)
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := nodes.RollupDaily(ctx, st, now().Unix()); err != nil {
+					slog.ErrorContext(ctx, "daily rollup failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	// SP3: prune old raw deltas after 7 days (design decision 6: raw deltas brief, rollups indefinite).
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		const retentionDays = 7
+		const retentionSeconds = retentionDays * 24 * 60 * 60
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				deleted, err := nodes.PruneUsageDeltas(ctx, st, retentionSeconds, now().Unix())
+				if err != nil {
+					slog.ErrorContext(ctx, "prune usage deltas failed", "error", err)
+				} else if deleted > 0 {
+					slog.InfoContext(ctx, "pruned old usage deltas", "count", deleted)
+				}
+			}
+		}
+	}()
 
 	// The control plane is mTLS end to end. Without credentials here the
 	// server speaks plaintext HTTP/2 while both agent paths dial with TLS, so
@@ -115,7 +250,11 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 		ClientCAs:  ca.ClientCAPool(),
 	})
 
-	deps := control.Deps{Store: st, CA: ca, Hub: hub, Now: now}
+	// Box lets the control service unseal subject credentials when it builds a
+	// desired document. Without it a node that has subjects cannot fetch a
+	// snapshot at all -- deliberately, since the alternative is serving one
+	// that omits every subject.
+	deps := control.Deps{Store: st, CA: ca, Hub: hub, Now: now, Box: box}
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
 	pb.RegisterEnrollmentServer(grpcServer, control.NewEnrollmentService(deps))
 	pb.RegisterControlServer(grpcServer, control.NewControlService(deps))

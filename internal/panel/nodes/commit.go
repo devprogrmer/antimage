@@ -45,6 +45,7 @@ func CommitNodeChange(
 	requestID string,
 	reason string,
 	mutate func(*sql.Tx) error,
+	opts ...SnapshotOption,
 ) (*CommitResult, error) {
 	var result CommitResult
 
@@ -57,7 +58,7 @@ func CommitNodeChange(
 
 		// Rebuild inside the same transaction so the hash describes the
 		// post-mutation state exactly.
-		snap, err := BuildDesiredSnapshot(ctx, tx, nodeID)
+		snap, err := BuildDesiredSnapshot(ctx, tx, nodeID, opts...)
 		if err != nil {
 			return err
 		}
@@ -85,7 +86,7 @@ func CommitNodeChange(
 			`UPDATE nodes SET desired_revision = ? WHERE id = ?`, next, nodeID); err != nil {
 			return fmt.Errorf("bump desired_revision: %w", err)
 		}
-		final, err := BuildDesiredSnapshot(ctx, tx, nodeID)
+		final, err := BuildDesiredSnapshot(ctx, tx, nodeID, opts...)
 		if err != nil {
 			return err
 		}

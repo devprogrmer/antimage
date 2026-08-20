@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/control"
@@ -142,18 +143,27 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/nodes/{nodeID}/bootstrap-ssh", d.handleSSHBootstrap)
 			private.Get("/nodes/{nodeID}/revisions", d.handleListRevisions)
 			private.Get("/nodes/{nodeID}/apply-runs", d.handleListApplyRuns)
+			private.Get("/nodes/{nodeID}/adapters", d.handleListAdapters) // SP5: adapter registry
+			private.Get("/nodes/{nodeID}/metrics", d.handleNodeMetrics)   // SP5: connection metrics
 
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)
 
+			// Subjects are the people a node serves. Credentials are never
+			// returned by list or get; revealing one needs its own permission
+			// and is audited by kind, never by value.
+			private.Get("/subjects", d.handleListSubjects)
+			private.Post("/subjects", d.handleCreateSubject)
+			private.Get("/subjects/{subjectID}", d.handleGetSubject)
+			private.Put("/subjects/{subjectID}", d.handleUpdateSubject)
+			private.Delete("/subjects/{subjectID}", d.handleDeleteSubject)
+			private.Get("/subjects/{subjectID}/credentials/{kind}", d.handleRevealCredential)
+			private.Post("/subjects/{subjectID}/credentials/{kind}/rotate", d.handleRotateCredential)
+
 			private.Get("/audit", d.handleListAudit)
 			private.Get("/sessions", d.handleListSessions)
 			private.Delete("/sessions/{sessionID}", d.handleRevokeSession)
-
-			// SP4: Subject subscription management
-			private.Get("/subjects/{id}", d.handleGetSubject)
-			private.Post("/subjects/{id}/revoke-token", d.handleRevokeToken)
 
 			private.Get("/events", d.handleEvents)
 		})
@@ -167,6 +177,23 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/download/{name}", d.handleDownload)
 	r.Head("/download/{name}", d.handleDownload)
 
+	// SP5: Prometheus metrics endpoint (no auth, standard for /metrics)
+	r.Handle("/metrics", promhttp.Handler())
+
 	r.Handle("/*", d.uiHandler())
 	return r
+}
+
+// snapshotOpts turns the configured secret box into BuildDesiredSnapshot
+// options, so every commit that rebuilds a desired document can unseal the
+// credentials of subjects on that node.
+//
+// Without this, the first subject created on a node makes every subsequent
+// commit for it fail: the document builder refuses to omit subjects it cannot
+// unseal, which is correct, but it must be given the means to unseal them.
+func (d Deps) snapshotOpts() []nodes.SnapshotOption {
+	if d.Box == nil {
+		return nil
+	}
+	return []nodes.SnapshotOption{nodes.WithUnsealer(d.Box)}
 }

@@ -43,6 +43,7 @@ message AgentMessage {
     Hello hello = 1;
     Heartbeat heartbeat = 2;
     ApplyReport apply_report = 3;
+    UsageReport usage_report = 4;
   }
 }
 
@@ -72,6 +73,7 @@ message AdapterDescriptor {
   // JSON Schema for this adapter's service params. The panel validates
   // writes against it and the UI renders forms from it.
   bytes service_schema = 6;
+  repeated string capabilities = 7;  // SP5: adapter capabilities (e.g., ["tls", "ws", "grpc"])
 }
 
 message Heartbeat {
@@ -130,4 +132,20 @@ message SnapshotResponse {
   // must stay `bytes` rather than a structured message that could re-encode.
   bytes document = 2;
   string sha256 = 3;
+}
+
+// UsageReport carries accounting deltas from one node. SP3 design decision 1:
+// the agent computes deltas; the panel never reasons about raw counters.
+message UsageReport {
+  int64 node_id = 1;
+  // Monotonic per node. Idempotency key: (node_id, sequence).
+  int64 sequence = 2;
+  repeated UsageSample samples = 3;
+}
+
+// UsageSample is one subject's traffic delta since the last report.
+message UsageSample {
+  int64 subject_id = 1;
+  uint64 uplink_bytes = 2;
+  uint64 downlink_bytes = 3;
 }

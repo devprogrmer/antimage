@@ -24,6 +24,20 @@ type Deps struct {
 	Hub         *Hub
 	Now         func() time.Time
 	DownloadURL string
+	// Box unseals per-subject credentials while a desired document is
+	// assembled. A node that has subjects cannot get a snapshot without it,
+	// by design: the alternative is serving a document that omits every
+	// subject, which would deprovision the node and be recorded as a success.
+	Box nodes.Unsealer
+}
+
+// snapshotOpts turns the configured Box into BuildDesiredSnapshot options.
+// Nil stays nil so a panel with no subjects behaves exactly as it did in SP1.
+func (d Deps) snapshotOpts() []nodes.SnapshotOption {
+	if d.Box == nil {
+		return nil
+	}
+	return []nodes.SnapshotOption{nodes.WithUnsealer(d.Box)}
 }
 
 func (d Deps) now() time.Time {
