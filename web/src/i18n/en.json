@@ -32,5 +32,21 @@
   "common.never": "Never",
   "common.close": "Close",
   "common.copy": "Copy",
-  "unit.ms": "ms"
+  "unit.ms": "ms",
+  "observability.title": "Observability",
+  "observability.totalNodes": "Total Nodes",
+  "observability.online": "online",
+  "observability.nodesWithIssues": "Nodes with Issues",
+  "observability.activeAlerts": "Active Alerts",
+  "observability.critical": "critical",
+  "observability.avgFleetRTT": "Avg Fleet RTT",
+  "observability.fleetStatus": "Fleet Status",
+  "observability.fleetRTT": "Fleet RTT",
+  "observability.noData": "No data available",
+  "observability.all": "All",
+  "observability.criticalOnly": "Critical Only",
+  "observability.firstSeen": "First seen",
+  "observability.current": "Current",
+  "observability.threshold": "Threshold",
+  "observability.noActiveAlerts": "No active alerts"
 }

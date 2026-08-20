@@ -2,12 +2,16 @@ import { useState } from "react";
 import { Login } from "./routes/Login";
 import { Nodes } from "./routes/Nodes";
 import { NodeDetail } from "./routes/NodeDetail";
+import { Observability } from "./routes/Observability";
 import { api } from "./lib/api";
 import { getLocale, locales, setLocale, t } from "./i18n";
 import type { Locale } from "./i18n";
 
+type Route = "nodes" | "observability";
+
 export default function App() {
   const [authed, setAuthed] = useState(false);
+  const [route, setRoute] = useState<Route>("nodes");
   const [selected, setSelected] = useState<number | null>(null);
   // setLocale mutates module state and flips <html lang>/<html dir>; this
   // mirrors it into React state so the tree re-renders with the new catalogue.
@@ -27,6 +31,7 @@ export default function App() {
     // the cookie live; dropping the local flag anyway would show a signed-out
     // UI backed by a session that still works.
     await api.post("/api/v1/auth/logout");
+    setRoute("nodes");
     setSelected(null);
     setAuthed(false);
   }
@@ -38,10 +43,23 @@ export default function App() {
         <nav className="flex gap-3 text-xs">
           <button
             type="button"
-            onClick={() => setSelected(null)}
-            className="text-zinc-400 hover:text-zinc-100"
+            onClick={() => {
+              setRoute("nodes");
+              setSelected(null);
+            }}
+            className={route === "nodes" ? "text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}
           >
             {t("nav.nodes")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRoute("observability");
+              setSelected(null);
+            }}
+            className={route === "observability" ? "text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}
+          >
+            {t("observability.title")}
           </button>
         </nav>
         <select
@@ -66,8 +84,13 @@ export default function App() {
       </header>
 
       <main className="p-4">
-        {selected === null ? (
-          <Nodes onSelect={setSelected} />
+        {route === "observability" ? (
+          <Observability />
+        ) : selected === null ? (
+          <Nodes onSelect={(id) => {
+            setRoute("nodes");
+            setSelected(id);
+          }} />
         ) : (
           <NodeDetail nodeId={selected} />
         )}

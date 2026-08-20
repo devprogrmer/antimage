@@ -145,10 +145,15 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/nodes/{nodeID}/apply-runs", d.handleListApplyRuns)
 			private.Get("/nodes/{nodeID}/adapters", d.handleListAdapters) // SP5: adapter registry
 			private.Get("/nodes/{nodeID}/metrics", d.handleNodeMetrics)   // SP5: connection metrics
+			private.Get("/nodes/{nodeID}/history", d.handleNodeHistory)   // SP7: metrics history
 
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)
+
+			// SP7: Observability API
+			private.Get("/alerts", d.handleListAlerts)
+			private.Get("/fleet/summary", d.handleFleetSummary)
 
 			// Subjects are the people a node serves. Credentials are never
 			// returned by list or get; revealing one needs its own permission

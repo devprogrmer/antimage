@@ -32,5 +32,21 @@
   "common.never": "هرگز",
   "common.close": "بستن",
   "common.copy": "کپی",
-  "unit.ms": "میلی‌ثانیه"
+  "unit.ms": "میلی‌ثانیه",
+  "observability.title": "مشاهده‌پذیری",
+  "observability.totalNodes": "مجموع گره‌ها",
+  "observability.online": "آنلاین",
+  "observability.nodesWithIssues": "گره‌های دارای مشکل",
+  "observability.activeAlerts": "هشدارهای فعال",
+  "observability.critical": "بحرانی",
+  "observability.avgFleetRTT": "میانگین RTT ناوگان",
+  "observability.fleetStatus": "وضعیت ناوگان",
+  "observability.fleetRTT": "RTT ناوگان",
+  "observability.noData": "داده‌ای موجود نیست",
+  "observability.all": "همه",
+  "observability.criticalOnly": "فقط بحرانی",
+  "observability.firstSeen": "اولین رویت",
+  "observability.current": "فعلی",
+  "observability.threshold": "حد آستانه",
+  "observability.noActiveAlerts": "هشداری فعال نیست"
 }

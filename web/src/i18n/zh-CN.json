@@ -32,5 +32,21 @@
   "common.never": "从未",
   "common.close": "关闭",
   "common.copy": "复制",
-  "unit.ms": "毫秒"
+  "unit.ms": "毫秒",
+  "observability.title": "可观测性",
+  "observability.totalNodes": "总节点数",
+  "observability.online": "在线",
+  "observability.nodesWithIssues": "有问题的节点",
+  "observability.activeAlerts": "活动告警",
+  "observability.critical": "严重",
+  "observability.avgFleetRTT": "平均舰队RTT",
+  "observability.fleetStatus": "舰队状态",
+  "observability.fleetRTT": "舰队RTT",
+  "observability.noData": "无数据",
+  "observability.all": "全部",
+  "observability.criticalOnly": "仅严重",
+  "observability.firstSeen": "首次发现",
+  "observability.current": "当前",
+  "observability.threshold": "阈值",
+  "observability.noActiveAlerts": "无活动告警"
 }

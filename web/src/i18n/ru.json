@@ -32,5 +32,21 @@
   "common.never": "Никогда",
   "common.close": "Закрыть",
   "common.copy": "Копировать",
-  "unit.ms": "мс"
+  "unit.ms": "мс",
+  "observability.title": "Наблюдаемость",
+  "observability.totalNodes": "Всего узлов",
+  "observability.online": "в сети",
+  "observability.nodesWithIssues": "Узлов с проблемами",
+  "observability.activeAlerts": "Активные оповещения",
+  "observability.critical": "критические",
+  "observability.avgFleetRTT": "Средний RTT флота",
+  "observability.fleetStatus": "Состояние флота",
+  "observability.fleetRTT": "RTT флота",
+  "observability.noData": "Нет данных",
+  "observability.all": "Все",
+  "observability.criticalOnly": "Только критические",
+  "observability.firstSeen": "Впервые замечено",
+  "observability.current": "Текущее",
+  "observability.threshold": "Порог",
+  "observability.noActiveAlerts": "Нет активных оповещений"
 }

@@ -5,7 +5,14 @@ import (
 	"database/sql"
 	"testing"
 	"time"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
 )
+
+// superScope returns a super admin scope for testing
+func superScope() rbac.Scope {
+	return rbac.Scope{AdminID: 1, IsSuper: true}
+}
 
 func TestSweeperCheckCertificates_Warning(t *testing.T) {
 	s := openTestStore(t)
@@ -37,6 +44,7 @@ func TestSweeperCheckCertificates_Warning(t *testing.T) {
 
 	// Verify warning alert created
 	alerts, total, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeCertExpiry,
 		Severity:   SeverityWarning,
@@ -93,6 +101,7 @@ func TestSweeperCheckCertificates_Critical(t *testing.T) {
 
 	// Verify critical alert created
 	alerts, total, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeCertExpiry,
 		Severity:   SeverityCritical,
@@ -146,6 +155,7 @@ func TestSweeperCheckCertificates_Expired(t *testing.T) {
 
 	// Verify critical alert created (expired certs are critical)
 	alerts, total, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeCertExpiry,
 		TargetType: TargetNode,
@@ -201,6 +211,7 @@ func TestSweeperCheckCertificates_Renewed(t *testing.T) {
 
 	// Verify alert exists
 	alerts1, total1, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeCertExpiry,
 		TargetType: TargetNode,
@@ -230,6 +241,7 @@ func TestSweeperCheckCertificates_Renewed(t *testing.T) {
 
 	// Verify alert resolved
 	_, total2, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeCertExpiry,
 		TargetType: TargetNode,
@@ -245,6 +257,7 @@ func TestSweeperCheckCertificates_Renewed(t *testing.T) {
 
 	// Verify alert was resolved, not deleted
 	resolvedAlerts, totalResolved, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateResolved,
 		AlertType:  AlertTypeCertExpiry,
 		TargetType: TargetNode,
@@ -296,6 +309,7 @@ func TestSweeperCheckCertificates_RepeatedSweeps(t *testing.T) {
 
 	// Verify only one alert exists (deduplication works)
 	alerts, total, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeCertExpiry,
 		TargetType: TargetNode,
@@ -348,6 +362,7 @@ func TestSweeperCheckQuotas_Warning(t *testing.T) {
 
 	// Verify warning alert created
 	alerts, total, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		Severity:   SeverityWarning,
@@ -403,6 +418,7 @@ func TestSweeperCheckQuotas_Critical(t *testing.T) {
 
 	// Verify critical alert created
 	alerts, total, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		Severity:   SeverityCritical,
@@ -455,6 +471,7 @@ func TestSweeperCheckQuotas_QuotaReset(t *testing.T) {
 
 	// Verify alert exists
 	_, total1, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		TargetType: TargetSubject,
@@ -484,6 +501,7 @@ func TestSweeperCheckQuotas_QuotaReset(t *testing.T) {
 
 	// Verify alert resolved
 	_, total2, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		TargetType: TargetSubject,
@@ -527,6 +545,7 @@ func TestSweeperCheckQuotas_EscalationAndDeescalation(t *testing.T) {
 
 	// Verify warning alert
 	_, warningTotal, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		Severity:   SeverityWarning,
@@ -557,6 +576,7 @@ func TestSweeperCheckQuotas_EscalationAndDeescalation(t *testing.T) {
 
 	// Verify critical alert exists
 	_, criticalTotal, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		Severity:   SeverityCritical,
@@ -573,6 +593,7 @@ func TestSweeperCheckQuotas_EscalationAndDeescalation(t *testing.T) {
 
 	// Warning alert should still exist (separate dedup_key)
 	_, warningTotal2, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		Severity:   SeverityWarning,
@@ -603,6 +624,7 @@ func TestSweeperCheckQuotas_EscalationAndDeescalation(t *testing.T) {
 
 	// Verify critical alert resolved
 	_, criticalTotal2, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		Severity:   SeverityCritical,
@@ -619,6 +641,7 @@ func TestSweeperCheckQuotas_EscalationAndDeescalation(t *testing.T) {
 
 	// Warning alert should still exist
 	_, warningTotal3, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		Severity:   SeverityWarning,
@@ -663,6 +686,7 @@ func TestSweeperCheckQuotas_SkipsFrozenSubjects(t *testing.T) {
 
 	// Verify no alerts created (frozen subjects skipped)
 	alerts, total, err := ListAlerts(ctx, s, AlertFilters{
+		Scope:      superScope(),
 		State:      StateActive,
 		AlertType:  AlertTypeQuotaWarning,
 		TargetType: TargetSubject,

@@ -32,5 +32,21 @@
   "common.never": "أبدًا",
   "common.close": "إغلاق",
   "common.copy": "نسخ",
-  "unit.ms": "مللي ثانية"
+  "unit.ms": "مللي ثانية",
+  "observability.title": "المراقبة",
+  "observability.totalNodes": "إجمالي العقد",
+  "observability.online": "متصل",
+  "observability.nodesWithIssues": "العقد ذات المشاكل",
+  "observability.activeAlerts": "التنبيهات النشطة",
+  "observability.critical": "حرج",
+  "observability.avgFleetRTT": "متوسط RTT للأسطول",
+  "observability.fleetStatus": "حالة الأسطول",
+  "observability.fleetRTT": "RTT الأسطول",
+  "observability.noData": "لا توجد بيانات",
+  "observability.all": "الكل",
+  "observability.criticalOnly": "الحرجة فقط",
+  "observability.firstSeen": "أول ظهور",
+  "observability.current": "الحالي",
+  "observability.threshold": "الحد",
+  "observability.noActiveAlerts": "لا توجد تنبيهات نشطة"
 }

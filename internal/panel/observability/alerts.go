@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
 )
 
@@ -161,6 +162,7 @@ func ResolveAlert(ctx context.Context, s *store.Store, dedupKey string, now time
 
 // AlertFilters specifies query criteria for ListAlerts.
 type AlertFilters struct {
+	Scope      rbac.Scope  // Required: enforces admin scope filtering
 	State      AlertState  // Filter by state (required: 'active', 'resolved', or empty for all)
 	AlertType  AlertType   // Filter by alert type (optional)
 	Severity   Severity    // Filter by severity (optional)
@@ -170,7 +172,9 @@ type AlertFilters struct {
 	Offset     int         // Pagination offset
 }
 
-// ListAlerts queries alerts with filtering and pagination. Returns (alerts, total_count, error).
+// ListAlerts queries alerts with filtering, pagination, and scope enforcement.
+// Returns (alerts, total_count, error).
+// Enforces admin_scopes: non-super admins only see alerts for accessible nodes/subjects.
 func ListAlerts(ctx context.Context, s *store.Store, filters AlertFilters) ([]Alert, int, error) {
 	// Apply defaults and limits
 	if filters.Limit == 0 {
@@ -255,6 +259,26 @@ func buildCountQuery(filters AlertFilters) string {
 func buildWhereClause(filters AlertFilters) string {
 	var where string
 
+	// Scope filtering: non-super admins only see alerts for their accessible targets
+	if !filters.Scope.IsSuper {
+		// For node targets: filter by admin_scopes.node_id
+		// For subject targets: filter by subjects owned by admin (via admin_scopes on nodes serving those subjects)
+		where += ` AND (
+			(alerts.target_type = 'node' AND EXISTS (
+				SELECT 1 FROM admin_scopes
+				WHERE admin_scopes.admin_id = ? AND admin_scopes.node_id = alerts.target_id
+			))
+			OR
+			(alerts.target_type = 'subject' AND EXISTS (
+				SELECT 1 FROM subjects
+				JOIN services ON services.subject_id = subjects.id
+				JOIN nodes ON services.node_id = nodes.id
+				JOIN admin_scopes ON admin_scopes.node_id = nodes.id
+				WHERE subjects.id = alerts.target_id AND admin_scopes.admin_id = ?
+			))
+		)`
+	}
+
 	if filters.State != "" {
 		where += ` AND state = ?`
 	}
@@ -276,6 +300,11 @@ func buildWhereClause(filters AlertFilters) string {
 
 func buildQueryArgs(filters AlertFilters, includePagination bool) []interface{} {
 	var args []interface{}
+
+	// Add scope args if not super admin
+	if !filters.Scope.IsSuper {
+		args = append(args, filters.Scope.AdminID, filters.Scope.AdminID)
+	}
 
 	if filters.State != "" {
 		args = append(args, string(filters.State))

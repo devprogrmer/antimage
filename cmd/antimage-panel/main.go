@@ -28,6 +28,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/httpapi"
 	"github.com/amyrm/antimage/internal/panel/metrics"
 	"github.com/amyrm/antimage/internal/panel/nodes"
+	"github.com/amyrm/antimage/internal/panel/observability"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/panel/subjects"
 	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
@@ -228,6 +229,20 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 			}
 		}
 	}()
+
+	// SP7: Certificate and quota alert sweeper
+	// Runs every 5 minutes to check for expiring certificates and quota thresholds
+	obsSweeper := observability.NewSweeper(st)
+	go obsSweeper.Run(ctx)
+
+	// SP7: Hourly rollup generator for observability metrics
+	// Aggregates detailed node_health data into hourly summaries
+	obsRollup := observability.NewRollupGenerator(st)
+	go obsRollup.RunHourly(ctx)
+
+	// SP7: Daily rollup generator for observability metrics
+	// Aggregates hourly data into daily summaries
+	go obsRollup.RunDaily(ctx)
 
 	// The control plane is mTLS end to end. Without credentials here the
 	// server speaks plaintext HTTP/2 while both agent paths dial with TLS, so

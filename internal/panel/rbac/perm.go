@@ -27,6 +27,7 @@ const (
 	PermRoleManage    Permission = "role:manage"
 	PermAuditRead     Permission = "audit:read"
 	PermSettingsWrite Permission = "settings:write"
+	PermAlertRead     Permission = "alert:read" // SP7: observability alerts
 )
 
 // IsRead reports whether the permission grants only reads, which the
@@ -42,6 +43,7 @@ func AllPermissions() []Permission {
 		PermSubjectRead, PermSubjectWrite, PermCredReveal,
 		PermAdminManage, PermRoleManage,
 		PermAuditRead, PermSettingsWrite,
+		PermAlertRead,
 	}
 }
 
@@ -55,16 +57,18 @@ func BuiltinRoles() map[string][]Permission {
 			PermNodeRead, PermNodeWrite, PermNodeEnroll,
 			PermServiceRead, PermServiceWrite,
 			PermSubjectRead, PermSubjectWrite, PermCredReveal,
-			PermAuditRead,
+			PermAuditRead, PermAlertRead,
 		},
 		// A reseller manages their own users, which is the whole point of the
 		// role, and may reveal a credential to hand it to that user.
 		"reseller": {
 			PermNodeRead, PermServiceRead, PermServiceWrite,
 			PermSubjectRead, PermSubjectWrite, PermCredReveal,
+			PermAlertRead,
 		},
 		"readonly": {
 			PermNodeRead, PermServiceRead, PermSubjectRead,
+			PermAlertRead,
 		},
 	}
 }

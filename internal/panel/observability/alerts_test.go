@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
 )
 
@@ -53,7 +54,11 @@ func TestCreateOrUpdateAlert_NewAlert(t *testing.T) {
 	}
 
 	// Verify alert exists in database
-	alerts, total, err := ListAlerts(ctx, s, AlertFilters{State: StateActive, Limit: 10})
+	alerts, total, err := ListAlerts(ctx, s, AlertFilters{
+		Scope: rbac.Scope{AdminID: 1, IsSuper: true},
+		State: StateActive,
+		Limit: 10,
+	})
 	if err != nil {
 		t.Fatalf("ListAlerts: %v", err)
 	}
@@ -134,7 +139,7 @@ func TestCreateOrUpdateAlert_UpdateExisting(t *testing.T) {
 	}
 
 	// Verify updated values
-	alerts, total, err := ListAlerts(ctx, s, AlertFilters{State: StateActive, Limit: 10})
+	alerts, total, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, State: StateActive, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListAlerts: %v", err)
 	}
@@ -183,7 +188,7 @@ func TestResolveAlert(t *testing.T) {
 	}
 
 	// Verify resolved
-	alerts, total, err := ListAlerts(ctx, s, AlertFilters{State: StateResolved, Limit: 10})
+	alerts, total, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, State: StateResolved, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListAlerts: %v", err)
 	}
@@ -206,7 +211,7 @@ func TestResolveAlert(t *testing.T) {
 	}
 
 	// Verify no longer in active list
-	activeAlerts, activeTotal, err := ListAlerts(ctx, s, AlertFilters{State: StateActive, Limit: 10})
+	activeAlerts, activeTotal, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, State: StateActive, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListAlerts (active): %v", err)
 	}
@@ -309,7 +314,7 @@ func TestAlertLifecycle_ReAlert(t *testing.T) {
 	}
 
 	// Verify both alerts exist
-	_, total, err := ListAlerts(ctx, s, AlertFilters{Limit: 10})
+	_, total, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListAlerts: %v", err)
 	}
@@ -318,7 +323,7 @@ func TestAlertLifecycle_ReAlert(t *testing.T) {
 	}
 
 	// Verify one active, one resolved
-	activeAlerts, activeTotal, err := ListAlerts(ctx, s, AlertFilters{State: StateActive, Limit: 10})
+	activeAlerts, activeTotal, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, State: StateActive, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListAlerts (active): %v", err)
 	}
@@ -332,7 +337,7 @@ func TestAlertLifecycle_ReAlert(t *testing.T) {
 		t.Errorf("active alert ID = %d, want %d (second alert)", activeAlerts[0].ID, id2)
 	}
 
-	resolvedAlerts, resolvedTotal, err := ListAlerts(ctx, s, AlertFilters{State: StateResolved, Limit: 10})
+	resolvedAlerts, resolvedTotal, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, State: StateResolved, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListAlerts (resolved): %v", err)
 	}
@@ -415,52 +420,52 @@ func TestListAlerts_Filtering(t *testing.T) {
 	}{
 		{
 			name:      "all active",
-			filters:   AlertFilters{State: StateActive, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, State: StateActive, Limit: 10},
 			wantCount: 3,
 		},
 		{
 			name:      "all resolved",
-			filters:   AlertFilters{State: StateResolved, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, State: StateResolved, Limit: 10},
 			wantCount: 1,
 		},
 		{
 			name:      "cert expiry only",
-			filters:   AlertFilters{AlertType: AlertTypeCertExpiry, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, AlertType: AlertTypeCertExpiry, Limit: 10},
 			wantCount: 2,
 		},
 		{
 			name:      "quota warning only",
-			filters:   AlertFilters{AlertType: AlertTypeQuotaWarning, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, AlertType: AlertTypeQuotaWarning, Limit: 10},
 			wantCount: 2,
 		},
 		{
 			name:      "critical severity",
-			filters:   AlertFilters{Severity: SeverityCritical, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, Severity: SeverityCritical, Limit: 10},
 			wantCount: 2,
 		},
 		{
 			name:      "warning severity",
-			filters:   AlertFilters{Severity: SeverityWarning, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, Severity: SeverityWarning, Limit: 10},
 			wantCount: 2,
 		},
 		{
 			name:      "node targets",
-			filters:   AlertFilters{TargetType: TargetNode, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, TargetType: TargetNode, Limit: 10},
 			wantCount: 2,
 		},
 		{
 			name:      "subject targets",
-			filters:   AlertFilters{TargetType: TargetSubject, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, TargetType: TargetSubject, Limit: 10},
 			wantCount: 2,
 		},
 		{
 			name:      "specific target",
-			filters:   AlertFilters{TargetType: TargetSubject, TargetID: intPtr(10), Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, TargetType: TargetSubject, TargetID: intPtr(10), Limit: 10},
 			wantCount: 1,
 		},
 		{
 			name:      "active cert expiry",
-			filters:   AlertFilters{State: StateActive, AlertType: AlertTypeCertExpiry, Limit: 10},
+			filters:   AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, State: StateActive, AlertType: AlertTypeCertExpiry, Limit: 10},
 			wantCount: 1,
 		},
 	}
@@ -504,7 +509,7 @@ func TestListAlerts_Pagination(t *testing.T) {
 	}
 
 	// Query first page (10 results)
-	page1, total1, err := ListAlerts(ctx, s, AlertFilters{Limit: 10, Offset: 0})
+	page1, total1, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, Limit: 10, Offset: 0})
 	if err != nil {
 		t.Fatalf("ListAlerts (page 1): %v", err)
 	}
@@ -516,7 +521,7 @@ func TestListAlerts_Pagination(t *testing.T) {
 	}
 
 	// Query second page
-	page2, total2, err := ListAlerts(ctx, s, AlertFilters{Limit: 10, Offset: 10})
+	page2, total2, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, Limit: 10, Offset: 10})
 	if err != nil {
 		t.Fatalf("ListAlerts (page 2): %v", err)
 	}
@@ -528,7 +533,7 @@ func TestListAlerts_Pagination(t *testing.T) {
 	}
 
 	// Query third page
-	page3, total3, err := ListAlerts(ctx, s, AlertFilters{Limit: 10, Offset: 20})
+	page3, total3, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, Limit: 10, Offset: 20})
 	if err != nil {
 		t.Fatalf("ListAlerts (page 3): %v", err)
 	}
@@ -574,7 +579,7 @@ func TestListAlerts_DefaultLimit(t *testing.T) {
 	}
 
 	// Query with no limit (should default to 50)
-	results, total, err := ListAlerts(ctx, s, AlertFilters{})
+	results, total, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}})
 	if err != nil {
 		t.Fatalf("ListAlerts: %v", err)
 	}
@@ -586,7 +591,7 @@ func TestListAlerts_DefaultLimit(t *testing.T) {
 	}
 
 	// Query with limit > 200 (should cap at 200)
-	results2, total2, err := ListAlerts(ctx, s, AlertFilters{Limit: 500})
+	results2, total2, err := ListAlerts(ctx, s, AlertFilters{Scope: rbac.Scope{AdminID: 1, IsSuper: true}, Limit: 500})
 	if err != nil {
 		t.Fatalf("ListAlerts (limit 500): %v", err)
 	}
