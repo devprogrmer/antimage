@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/control"
@@ -160,6 +161,9 @@ func NewRouter(d Deps) http.Handler {
 	// bootstrap one-liner has no session, and the agent binary is not secret.
 	r.Get("/download/{name}", d.handleDownload)
 	r.Head("/download/{name}", d.handleDownload)
+
+	// SP5: Prometheus metrics endpoint (no auth, standard for /metrics)
+	r.Handle("/metrics", promhttp.Handler())
 
 	r.Handle("/*", d.uiHandler())
 	return r
