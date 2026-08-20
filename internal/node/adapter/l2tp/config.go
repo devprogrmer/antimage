@@ -121,7 +121,7 @@ func renderCHAPSecrets(serviceID int64, subjects []adapter.Subject) string {
 func renderPPPOptions(serviceID int64, params ServiceParams) string {
 	var dnsLines strings.Builder
 	for _, dns := range params.DNSServers {
-		dnsLines.WriteString(fmt.Sprintf("ms-dns %s\n", dns))
+		fmt.Fprintf(&dnsLines, "ms-dns %s\n", dns)
 	}
 
 	payload := fmt.Sprintf(`require-mschap-v2
