@@ -3,6 +3,7 @@ package subjects
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -124,7 +125,7 @@ func TestRevokeToken(t *testing.T) {
 
 	// Old token is invalid.
 	_, err = LookupByToken(ctx, st, "old-token-12345")
-	if err != ErrTokenNotFound {
+	if !errors.Is(err, ErrTokenNotFound) {
 		t.Errorf("old token should be invalid, got error: %v", err)
 	}
 
@@ -173,19 +174,19 @@ func TestLookupByToken(t *testing.T) {
 
 	// Disabled subject returns ErrTokenNotFound.
 	_, err = LookupByToken(ctx, st, "disabled-token-xyz")
-	if err != ErrTokenNotFound {
+	if !errors.Is(err, ErrTokenNotFound) {
 		t.Errorf("disabled subject should return ErrTokenNotFound, got: %v", err)
 	}
 
 	// Non-existent token returns ErrTokenNotFound.
 	_, err = LookupByToken(ctx, st, "nonexistent-token")
-	if err != ErrTokenNotFound {
+	if !errors.Is(err, ErrTokenNotFound) {
 		t.Errorf("nonexistent token should return ErrTokenNotFound, got: %v", err)
 	}
 
 	// Empty token returns ErrTokenNotFound.
 	_, err = LookupByToken(ctx, st, "")
-	if err != ErrTokenNotFound {
+	if !errors.Is(err, ErrTokenNotFound) {
 		t.Errorf("empty token should return ErrTokenNotFound, got: %v", err)
 	}
 }

@@ -83,7 +83,8 @@ func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 	}
 
 	// Transport configuration
-	if network == "ws" {
+	switch network {
+	case "ws":
 		transport := map[string]interface{}{
 			"type": "ws",
 		}
@@ -91,7 +92,7 @@ func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 			transport["path"] = srv.Path
 		}
 		outbound["transport"] = transport
-	} else if network == "grpc" {
+	case "grpc":
 		transport := map[string]interface{}{
 			"type": "grpc",
 		}
@@ -139,7 +140,8 @@ func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 	}
 
 	// Transport configuration
-	if network == "ws" {
+	switch network {
+	case "ws":
 		transport := map[string]interface{}{
 			"type": "ws",
 		}
@@ -147,7 +149,7 @@ func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 			transport["path"] = srv.Path
 		}
 		outbound["transport"] = transport
-	} else if network == "grpc" {
+	case "grpc":
 		transport := map[string]interface{}{
 			"type": "grpc",
 		}

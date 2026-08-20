@@ -129,7 +129,9 @@ func (d Deps) gatherServers(ctx context.Context, subjectID int64) ([]subscriptio
 	if err != nil {
 		return nil, fmt.Errorf("query servers: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var servers []subscriptions.Server
 	credsByKind := make(map[string][]byte)
@@ -200,7 +202,11 @@ func (d Deps) gatherServers(ctx context.Context, subjectID int64) ([]subscriptio
 		})
 	}
 
-	return servers, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return servers, nil
 }
 
 // extractInboundConfig parses service params to extract protocol and port.
