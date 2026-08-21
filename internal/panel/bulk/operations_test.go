@@ -47,9 +47,9 @@ func createTestAdmins(t *testing.T, db *store.Store) {
 	}
 }
 
-func mustItems(t *testing.T, n int) []json.RawMessage {
+func mustItems(t *testing.T, n int) []interface{} {
 	t.Helper()
-	items := make([]json.RawMessage, n)
+	items := make([]interface{}, n)
 	for i := range items {
 		items[i] = json.RawMessage(`{"id":1}`)
 	}

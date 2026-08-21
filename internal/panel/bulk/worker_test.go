@@ -10,12 +10,12 @@ import (
 	"github.com/amyrm/antimage/internal/panel/rbac"
 )
 
-func alwaysSucceed(_ context.Context, _ string, _ json.RawMessage) (json.RawMessage, error) {
-	return json.RawMessage(`{"ok":true}`), nil
+func alwaysSucceed(_ context.Context, _ string, item json.RawMessage) (string, error) {
+	return "item-id", nil
 }
 
-func alwaysFail(_ context.Context, _ string, _ json.RawMessage) (json.RawMessage, error) {
-	return nil, errors.New("processing failed")
+func alwaysFail(_ context.Context, _ string, item json.RawMessage) (string, error) {
+	return "", errors.New("processing failed")
 }
 
 func TestWorker_ProcessesQueuedOperation(t *testing.T) {
@@ -82,12 +82,12 @@ func TestWorker_MixedResults(t *testing.T) {
 
 	// 3 items; alternate success/fail/success
 	calls := 0
-	mixedFn := func(_ context.Context, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	mixedFn := func(_ context.Context, _ string, _ json.RawMessage) (string, error) {
 		calls++
 		if calls%2 == 0 {
-			return nil, errors.New("even item failed")
+			return "", errors.New("even item failed")
 		}
-		return json.RawMessage(`{"ok":true}`), nil
+		return "item-id", nil
 	}
 
 	op, err := CreateBulkOperation(context.Background(), db, actor, "subjects_update", mustItems(t, 3))

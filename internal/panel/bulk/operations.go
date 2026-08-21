@@ -25,14 +25,11 @@ const (
 	StatusCancelled BulkStatus = "cancelled"
 )
 
-// ItemResult records the per-item outcome once the worker has processed an
-// operation.
+// ItemResult records the per-item outcome of a bulk operation.
 type ItemResult struct {
-	Index   int             `json:"index"`
-	Input   json.RawMessage `json:"input"`
-	Output  json.RawMessage `json:"output,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	Success bool            `json:"success"`
+	ItemID string `json:"item_id"`
+	Status string `json:"status"` // "success" or "failed"
+	Error  string `json:"error,omitempty"`
 }
 
 // BulkOperation mirrors a row in bulk_operations.
@@ -44,7 +41,8 @@ type BulkOperation struct {
 	CompletedItems int
 	FailedItems    int
 	Status         BulkStatus
-	ResultsJSON    string
+	Results        []ItemResult // populated for completed/failed ops; nil for queued/running
+	ResultsJSON    string       // raw column value (internal use)
 	CreatedAt      int64
 	StartedAt      *int64
 	CompletedAt    *int64
@@ -75,7 +73,7 @@ func CreateBulkOperation(
 	db *store.Store,
 	actor rbac.Actor,
 	kind string,
-	items []json.RawMessage,
+	items []interface{},
 ) (*BulkOperation, error) {
 	if len(items) == 0 {
 		return nil, errors.New("items must not be empty")
@@ -129,6 +127,12 @@ func GetBulkOperation(
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query bulk operation: %w", err)
+	}
+
+	if op.Status == StatusCompleted || op.Status == StatusFailed {
+		if err := json.Unmarshal([]byte(op.ResultsJSON), &op.Results); err != nil {
+			return nil, fmt.Errorf("unmarshal results: %w", err)
+		}
 	}
 
 	return &op, nil

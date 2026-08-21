@@ -12,20 +12,23 @@ import (
 )
 
 // ProcessFunc is invoked once per item in a bulk operation.
-// It receives the operation type and a serialised item, returning either a
-// result payload or an error.
-type ProcessFunc func(ctx context.Context, kind string, item json.RawMessage) (json.RawMessage, error)
+// It receives the operation type and a serialised item, returning the item ID
+// or an error.
+type ProcessFunc func(ctx context.Context, kind string, item json.RawMessage) (itemID string, err error)
+
+const DefaultBatchSize = 10
 
 // Worker polls for queued bulk operations and processes them sequentially.
 type Worker struct {
 	db        *store.Store
 	processFn ProcessFunc
+	BatchSize int
 }
 
 // NewWorker creates a Worker that uses db for persistence and processFn to
 // handle each item.
 func NewWorker(db *store.Store, processFn ProcessFunc) *Worker {
-	return &Worker{db: db, processFn: processFn}
+	return &Worker{db: db, processFn: processFn, BatchSize: DefaultBatchSize}
 }
 
 // Run loops until ctx is cancelled, claiming and processing queued operations
@@ -67,7 +70,7 @@ func (w *Worker) processNext(ctx context.Context) error {
 			SELECT id, operation_type, total_items, results_json
 			FROM bulk_operations
 			WHERE status = 'queued'
-			ORDER BY created_at ASC
+			ORDER BY created_at ASC, id ASC
 			LIMIT 1
 		`).Scan(&op.ID, &op.OperationType, &op.TotalItems, &op.ResultsJSON)
 		if err != nil {
@@ -91,17 +94,20 @@ func (w *Worker) processNext(ctx context.Context) error {
 	}
 
 	results := make([]ItemResult, 0, len(items))
-	for i, item := range items {
-		res := ItemResult{Index: i, Input: item}
-		out, err := w.processFn(ctx, op.OperationType, item)
-		if err != nil {
-			res.Error = err.Error()
-			res.Success = false
-		} else {
-			res.Output = out
-			res.Success = true
+	for i := 0; i < len(items); i += w.BatchSize {
+		end := i + w.BatchSize
+		if end > len(items) {
+			end = len(items)
 		}
-		results = append(results, res)
+		batch := items[i:end]
+		for _, item := range batch {
+			itemID, err := w.processFn(ctx, op.OperationType, item)
+			if err != nil {
+				results = append(results, ItemResult{ItemID: itemID, Status: "failed", Error: err.Error()})
+			} else {
+				results = append(results, ItemResult{ItemID: itemID, Status: "success"})
+			}
+		}
 	}
 
 	return w.writeResults(ctx, op.ID, results)
@@ -117,7 +123,7 @@ func (w *Worker) writeResults(ctx context.Context, id int64, results []ItemResul
 	completed := 0
 	failed := 0
 	for _, r := range results {
-		if r.Success {
+		if r.Status == "success" {
 			completed++
 		} else {
 			failed++
@@ -144,7 +150,10 @@ func (w *Worker) writeResults(ctx context.Context, id int64, results []ItemResul
 // prevents processing (e.g. unmarshal failure).
 func (w *Worker) markFailed(ctx context.Context, id int64, reason string) error {
 	now := time.Now().Unix()
-	raw, _ := json.Marshal([]ItemResult{{Error: reason, Success: false}})
+	raw, err := json.Marshal([]ItemResult{{Status: "failed", Error: reason}})
+	if err != nil {
+		raw = []byte(`[{"status":"failed","error":"internal marshal error"}]`)
+	}
 	return w.db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			UPDATE bulk_operations
