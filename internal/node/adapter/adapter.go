@@ -53,6 +53,7 @@ const (
 	CredUUID     CredentialKind = "uuid"
 	CredX509     CredentialKind = "x509"
 	CredPassword CredentialKind = "password"
+	CredKeypair  CredentialKind = "keypair" // WireGuard public/private key pair
 )
 
 // Caps lets the panel and later sub-projects adapt without hardcoding
