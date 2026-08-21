@@ -161,7 +161,7 @@ func TestRealityGeneration(t *testing.T) {
 		t.Errorf("expected dest www.microsoft.com:443, got %v", reality["dest"])
 	}
 
-	serverNames, ok := reality["serverNames"].([]string)
+	serverNames, ok := reality["serverNames"].([]any)
 	if !ok || len(serverNames) != 2 {
 		t.Errorf("expected 2 server names, got %v", reality["serverNames"])
 	}
@@ -170,7 +170,7 @@ func TestRealityGeneration(t *testing.T) {
 		t.Errorf("expected privateKey to match, got %v", reality["privateKey"])
 	}
 
-	shortIds, ok := reality["shortIds"].([]string)
+	shortIds, ok := reality["shortIds"].([]any)
 	if !ok || len(shortIds) != 2 {
 		t.Errorf("expected 2 short IDs, got %v", reality["shortIds"])
 	}
