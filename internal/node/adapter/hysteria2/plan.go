@@ -2,8 +2,6 @@ package hysteria2
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 )

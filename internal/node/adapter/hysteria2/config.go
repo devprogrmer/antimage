@@ -2,11 +2,8 @@ package hysteria2
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
-	"text/template"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 	"gopkg.in/yaml.v3"
@@ -128,9 +125,9 @@ func GenerateConfig(serviceID int64, params ServiceParams, users []UserAuth) (st
 
 	// Optional: Masquerade
 	if params.Masquerade != "" {
-		config["masquerade"] = map[string]string{
+		config["masquerade"] = map[string]interface{}{
 			"type": "proxy",
-			"proxy": map[string]string{
+			"proxy": map[string]interface{}{
 				"url": params.Masquerade,
 			},
 		}

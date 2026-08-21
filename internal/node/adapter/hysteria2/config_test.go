@@ -3,6 +3,8 @@ package hysteria2
 import (
 	"strings"
 	"testing"
+
+	"github.com/amyrm/antimage/internal/node/adapter"
 )
 
 func TestServiceParams_Validate(t *testing.T) {
@@ -268,5 +270,3 @@ func TestUserAuthFromSubjects(t *testing.T) {
 		t.Errorf("user 1 incorrect: %+v", users[1])
 	}
 }
-
-import "github.com/amyrm/antimage/internal/node/adapter"
