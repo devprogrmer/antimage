@@ -118,7 +118,9 @@ func GenerateConfig(serviceID int64, params ServiceParams, peers []PeerConfig) (
 	return marker + body, nil
 }
 
-var configTemplate = template.Must(template.New("wg").Parse(`# WireGuard configuration managed by antimage
+var configTemplate = template.Must(template.New("wg").Funcs(template.FuncMap{
+	"join": strings.Join,
+}).Parse(`# WireGuard configuration managed by antimage
 # Service ID: {{.ServiceID}}
 # DO NOT EDIT - changes will be detected as drift and overwritten
 
@@ -141,12 +143,6 @@ PersistentKeepalive = {{.Keepalive}}
 {{- end}}
 {{- end}}
 `))
-
-func init() {
-	configTemplate.Funcs(template.FuncMap{
-		"join": strings.Join,
-	})
-}
 
 // checksumConfigBody computes SHA-256 of the config body (without the marker line).
 func checksumConfigBody(body string) string {
