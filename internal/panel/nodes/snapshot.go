@@ -173,7 +173,36 @@ func buildSubjects(
 		if err != nil {
 			return nil, err
 		}
-		subjects = append(subjects, Subject{ID: id, Credentials: creds})
+
+		// Fetch enforcement policies (schema v2)
+		var maxDevices, maxIPs, maxConns, speedUp, speedDown sql.NullInt64
+		err = tx.QueryRowContext(ctx,
+			`SELECT max_devices, max_ips, max_connections,
+			        speed_limit_up_kbps, speed_limit_down_kbps
+			 FROM subjects WHERE id = ?`, id).
+			Scan(&maxDevices, &maxIPs, &maxConns, &speedUp, &speedDown)
+		if err != nil {
+			return nil, fmt.Errorf("read enforcement policies for subject %d: %w", id, err)
+		}
+
+		subj := Subject{ID: id, Credentials: creds}
+		if maxDevices.Valid {
+			subj.MaxDevices = &maxDevices.Int64
+		}
+		if maxIPs.Valid {
+			subj.MaxIPs = &maxIPs.Int64
+		}
+		if maxConns.Valid {
+			subj.MaxConnections = &maxConns.Int64
+		}
+		if speedUp.Valid {
+			subj.SpeedLimitUpKbps = &speedUp.Int64
+		}
+		if speedDown.Valid {
+			subj.SpeedLimitDownKbps = &speedDown.Int64
+		}
+
+		subjects = append(subjects, subj)
 	}
 	return subjects, nil
 }
