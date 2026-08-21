@@ -155,6 +155,11 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/alerts", d.handleListAlerts)
 			private.Get("/fleet/summary", d.handleFleetSummary)
 
+			// Premium: Dashboard endpoints
+			private.Get("/dashboard/overview", d.handleDashboardOverview)
+			private.Get("/dashboard/traffic-chart", d.handleDashboardTrafficChart)
+			private.Get("/dashboard/top-users", d.handleDashboardTopUsers)
+
 			// Subjects are the people a node serves. Credentials are never
 			// returned by list or get; revealing one needs its own permission
 			// and is audited by kind, never by value.
