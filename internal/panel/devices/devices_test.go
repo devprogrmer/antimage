@@ -1,19 +1,10 @@
 package devices
 
 import (
-	"context"
-	"database/sql"
 	"testing"
-	"time"
-
-	"github.com/amyrm/antimage/internal/panel/store"
 )
 
 func TestRegisterDevice(t *testing.T) {
-	// This is a skeleton test - full implementation would use test database
-	ctx := context.Background()
-	_ = ctx
-
 	t.Run("register new device", func(t *testing.T) {
 		t.Skip("requires test database setup")
 	})
