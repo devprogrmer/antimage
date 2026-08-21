@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
+	"github.com/amyrm/antimage/internal/node/enforcement"
 	"github.com/amyrm/antimage/internal/node/sysinfo"
 	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
 	"github.com/amyrm/antimage/internal/shared/version"
@@ -76,18 +77,20 @@ func jitter(d time.Duration) time.Duration {
 
 // Client holds the control stream and drives reconciliation.
 type Client struct {
-	cfg   *Config
-	ad    adapter.Adapter
-	clk   Clock
-	rec   *Reconciler
-	cert  tls.Certificate
-	caDER []byte
+	cfg      *Config
+	ad       adapter.Adapter
+	clk      Clock
+	rec      *Reconciler
+	cert     tls.Certificate
+	caDER    []byte
+	enforcer *enforcement.Enforcer
 }
 
 func NewClient(cfg *Config, ad adapter.Adapter, clk Clock, cert tls.Certificate, caDER []byte) *Client {
 	return &Client{
 		cfg: cfg, ad: ad, clk: clk, cert: cert, caDER: caDER,
 		rec: NewReconciler(ad, clk, ReconcileOptions{MaxRetries: 3, RetryBase: 2 * time.Second}),
+		enforcer: enforcement.New(),
 	}
 }
 
@@ -231,6 +234,9 @@ func (c *Client) runSession(
 		go c.AccountingLoop(sessionCtx, stream, 30*time.Second)
 	}
 
+	// Start enforcement stats loop.
+	go c.EnforcementStatsLoop(sessionCtx, stream, 60*time.Second)
+
 	for {
 		select {
 		case <-sessionCtx.Done():
@@ -294,6 +300,9 @@ func (c *Client) reconcileOnce(ctx context.Context, client pb.ControlClient, str
 	if err := json.Unmarshal(snap.Document, &desired); err != nil {
 		return fmt.Errorf("decode desired document: %w", err)
 	}
+
+	// Sync enforcement policies before convergence
+	c.syncEnforcement(desired)
 
 	run, runErr := c.rec.Converge(ctx, desired)
 

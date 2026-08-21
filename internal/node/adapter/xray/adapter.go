@@ -303,6 +303,8 @@ type stepPayload struct {
 	// Users is the tag set this config serves, carried through to the applied
 	// sidecar so a later Plan can tell whether anybody is being removed.
 	Users []string `json:"users,omitempty"`
+	// PolicyConfig is the speed limit policy configuration (enforcement).
+	PolicyConfig string `json:"policy_config,omitempty"`
 }
 
 // Step kinds. These reach the panel's node_apply_steps.step_kind and are what
@@ -337,6 +339,16 @@ func (a *Adapter) Plan(
 	users, err := usersFrom(desired)
 	if err != nil {
 		return plan, err
+	}
+
+	// Generate policy configuration for speed limits (if any subjects have limits)
+	var policyConfigData string
+	if len(desired.Subjects) > 0 {
+		policyBytes, err := GeneratePolicyConfig(desired.Subjects)
+		if err != nil {
+			return plan, fmt.Errorf("generate policy config: %w", err)
+		}
+		policyConfigData = string(policyBytes)
 	}
 
 	desiredIDs := make(map[int64]struct{}, len(desired.Services))
@@ -382,7 +394,7 @@ func (a *Adapter) Plan(
 			// New inbound: a new listener cannot appear without a restart.
 			seq++
 			plan.Steps = append(plan.Steps,
-				a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users))
+				a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users, policyConfigData))
 
 		case !o.Managed:
 			// Somebody else's file occupies our name. Refusing is safer than
@@ -399,7 +411,7 @@ func (a *Adapter) Plan(
 				Seq: seq, Kind: StepRestartService,
 				Disruption: adapter.DisruptRestart, ServiceID: svc.ID,
 				Payload: mustPayload(stepPayload{
-					Config: string(rendered), Shape: want, Users: userTags(users),
+					Config: string(rendered), Shape: want, Users: userTags(users), PolicyConfig: policyConfigData,
 				}),
 			})
 
@@ -436,11 +448,11 @@ func (a *Adapter) Plan(
 				// the users were added through the API; the file is brought
 				// into line so the next Observe does not report drift.
 				plan.Steps = append(plan.Steps,
-					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptNone, users))
+					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptNone, users, policyConfigData))
 			} else {
 				seq++
 				plan.Steps = append(plan.Steps,
-					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users))
+					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users, policyConfigData))
 			}
 		}
 	}
@@ -491,7 +503,7 @@ func (a *Adapter) userOnlyChange(serviceID int64, in Inbound) bool {
 }
 
 func (a *Adapter) writeStep(
-	seq int, serviceID int64, in Inbound, rendered []byte, d adapter.Disruption, users []User,
+	seq int, serviceID int64, in Inbound, rendered []byte, d adapter.Disruption, users []User, policyConfig string,
 ) adapter.Step {
 	shell, err := in.Generate(nil)
 	shape := ""
@@ -499,9 +511,12 @@ func (a *Adapter) writeStep(
 		shape = checksumOf(shell)
 	}
 	return adapter.Step{
-		Seq: seq, Kind: StepWriteService, Disruption: d, ServiceID: serviceID,
+		Seq:        seq,
+		Kind:       StepWriteService,
+		Disruption: d,
+		ServiceID:  serviceID,
 		Payload: mustPayload(stepPayload{
-			Config: string(rendered), Tag: in.Tag(), Shape: shape, Users: userTags(users),
+			Config: string(rendered), Shape: shape, Users: userTags(users), PolicyConfig: policyConfig,
 		}),
 	}
 }
@@ -597,6 +612,12 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 			if err := a.ensureStatsConfig(ctx); err != nil {
 				return fail(fmt.Errorf("ensure stats config: %w", err))
 			}
+			// Ensure policy config is present before restart (enforcement).
+			if p.PolicyConfig != "" {
+				if err := a.ensurePolicyConfig(ctx, []byte(p.PolicyConfig)); err != nil {
+					return fail(fmt.Errorf("ensure policy config: %w", err))
+				}
+			}
 			if err := a.rt.Restart(ctx); err != nil {
 				return fail(fmt.Errorf("restart after writing service %d: %w", step.ServiceID, err))
 			}
@@ -610,6 +631,12 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		// Ensure stats config is present before restart (SP3).
 		if err := a.ensureStatsConfig(ctx); err != nil {
 			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
+		// Ensure policy config is present before restart (enforcement).
+		if p.PolicyConfig != "" {
+			if err := a.ensurePolicyConfig(ctx, []byte(p.PolicyConfig)); err != nil {
+				return fail(fmt.Errorf("ensure policy config: %w", err))
+			}
 		}
 		if err := a.rt.Restart(ctx); err != nil {
 			return fail(fmt.Errorf("restart service %d: %w", step.ServiceID, err))
@@ -629,6 +656,12 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		// Ensure stats config is present before restart (SP3).
 		if err := a.ensureStatsConfig(ctx); err != nil {
 			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
+		// Ensure policy config is present before restart (enforcement).
+		if p.PolicyConfig != "" {
+			if err := a.ensurePolicyConfig(ctx, []byte(p.PolicyConfig)); err != nil {
+				return fail(fmt.Errorf("ensure policy config: %w", err))
+			}
 		}
 		if err := a.rt.Restart(ctx); err != nil {
 			return fail(fmt.Errorf("restart after removing service %d: %w", step.ServiceID, err))
