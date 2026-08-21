@@ -377,4 +377,3 @@ func TestGetSpeedLimits(t *testing.T) {
 	})
 }
 
-import "fmt"
