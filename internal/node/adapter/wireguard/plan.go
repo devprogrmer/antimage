@@ -151,7 +151,7 @@ func onlyMembershipChanged(params ServiceParams, oldChecksum, newChecksum string
 	}
 
 	// If the structural part matches, then the difference is only membership
-	lines := splitLines(structuralConfig)
+	lines := strings.Split(structuralConfig, "\n")
 	if len(lines) < 2 {
 		return false
 	}
