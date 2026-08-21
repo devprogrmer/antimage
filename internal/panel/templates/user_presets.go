@@ -187,11 +187,11 @@ func UpdatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int
 		}
 		if input.AutoAssignServicesJSON != nil {
 			updates = append(updates, "auto_assign_services_json = ?")
-			args = append(args, *input.AutoAssignServicesJSON)
+			args = append(args, string(*input.AutoAssignServicesJSON))
 		}
 		if input.AutoAssignNodeTagsJSON != nil {
 			updates = append(updates, "auto_assign_node_tags_json = ?")
-			args = append(args, *input.AutoAssignNodeTagsJSON)
+			args = append(args, string(*input.AutoAssignNodeTagsJSON))
 		}
 		if input.IsPublic != nil {
 			updates = append(updates, "is_public = ?")
@@ -207,12 +207,15 @@ func UpdatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int
 		args = append(args, now)
 		args = append(args, id)
 
-		query := "UPDATE user_presets SET " + strings.Join(updates, ", ") + " WHERE id = ? RETURNING *"
+		query := "UPDATE user_presets SET " + strings.Join(updates, ", ") + " WHERE id = ? RETURNING id, name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at"
 
-		err = tx.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.AutoAssignServicesJSON, &p.AutoAssignNodeTagsJSON, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+		var servicesRaw, tagsRaw string
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("update preset: %w", err)
 		}
+		p.AutoAssignServicesJSON = json.RawMessage(servicesRaw)
+		p.AutoAssignNodeTagsJSON = json.RawMessage(tagsRaw)
 		return nil
 	})
 
