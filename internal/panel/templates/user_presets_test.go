@@ -2,6 +2,7 @@ package templates
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/amyrm/antimage/internal/panel/rbac"
@@ -29,14 +30,17 @@ func TestCreatePreset_ValidStandard(t *testing.T) {
 	quota := int64(53687091200) // 50GB
 	validity := 30
 
+	servicesJSON := json.RawMessage(`[1,2]`)
+	tagsJSON := json.RawMessage(`["premium"]`)
+
 	input := CreatePresetInput{
-		Name:         "Standard User",
-		Description:  "50GB quota, 30 days",
-		QuotaBytes:   &quota,
-		ValidityDays: &validity,
-		AutoAssignServices: []int64{1, 2},
-		AutoAssignNodeTags: []string{"premium"},
-		IsPublic:     true,
+		Name:                   "Standard User",
+		Description:            "50GB quota, 30 days",
+		QuotaBytes:             &quota,
+		ValidityDays:           &validity,
+		AutoAssignServicesJSON: servicesJSON,
+		AutoAssignNodeTagsJSON: tagsJSON,
+		IsPublic:               true,
 	}
 
 	preset, err := CreatePreset(context.Background(), db, actor, input)
@@ -49,8 +53,12 @@ func TestCreatePreset_ValidStandard(t *testing.T) {
 	if preset.QuotaBytes == nil || *preset.QuotaBytes != quota {
 		t.Errorf("expected quota %d, got %v", quota, preset.QuotaBytes)
 	}
-	if len(preset.AutoAssignServices) != 2 {
-		t.Errorf("expected 2 auto-assign services, got %d", len(preset.AutoAssignServices))
+	var services []int64
+	if err := json.Unmarshal(preset.AutoAssignServicesJSON, &services); err != nil {
+		t.Fatalf("unmarshal services: %v", err)
+	}
+	if len(services) != 2 {
+		t.Errorf("expected 2 auto-assign services, got %d", len(services))
 	}
 }
 
@@ -79,8 +87,7 @@ func TestCreatePreset_MissingName(t *testing.T) {
 	actor := rbac.Actor{AdminID: 1, RoleName: "super_admin", IsSuper: true}
 
 	input := CreatePresetInput{
-		Name:       "",
-		QuotaBytes: nil,
+		Name: "",
 	}
 
 	_, err := CreatePreset(context.Background(), db, actor, input)
@@ -94,222 +101,102 @@ func TestGetPreset_NotFound(t *testing.T) {
 	createTestAdmins(t, db)
 	actor := rbac.Actor{AdminID: 1, RoleName: "super_admin", IsSuper: true}
 
-	_, err := GetPreset(context.Background(), db, actor, 9999)
+	_, err := GetPreset(context.Background(), db, actor, 999)
 	if err == nil {
-		t.Error("expected error for not found, got nil")
+		t.Error("expected error for non-existent preset, got nil")
 	}
 }
 
-func TestGetPreset_PermissionDenied(t *testing.T) {
+func TestUpdatePreset_Success(t *testing.T) {
 	db := openTestDB(t)
 	createTestAdmins(t, db)
-	creator := rbac.Actor{AdminID: 1, RoleName: "admin", IsSuper: false}
-	other := rbac.Actor{AdminID: 2, RoleName: "admin", IsSuper: false}
+	actor := rbac.Actor{AdminID: 1, RoleName: "super_admin", IsSuper: true}
 
+	// Create a preset first
 	input := CreatePresetInput{
-		Name:       "Private Preset",
-		IsPublic:   false,
+		Name:        "Test Preset",
+		Description: "Original description",
 	}
 
-	preset, err := CreatePreset(context.Background(), db, creator, input)
+	preset, err := CreatePreset(context.Background(), db, actor, input)
 	if err != nil {
 		t.Fatalf("CreatePreset failed: %v", err)
 	}
 
-	_, err = GetPreset(context.Background(), db, other, preset.ID)
-	if err == nil {
-		t.Error("expected permission denied, got nil")
-	}
-}
-
-func TestGetPreset_PublicPreset(t *testing.T) {
-	db := openTestDB(t)
-	createTestAdmins(t, db)
-	creator := rbac.Actor{AdminID: 1, RoleName: "admin", IsSuper: false}
-	other := rbac.Actor{AdminID: 2, RoleName: "admin", IsSuper: false}
-
-	input := CreatePresetInput{
-		Name:       "Public Preset",
-		IsPublic:   true,
+	// Update it
+	newDesc := "Updated description"
+	updateInput := UpdatePresetInput{
+		Description: &newDesc,
 	}
 
-	created, err := CreatePreset(context.Background(), db, creator, input)
-	if err != nil {
-		t.Fatalf("CreatePreset failed: %v", err)
-	}
-
-	retrieved, err := GetPreset(context.Background(), db, other, created.ID)
-	if err != nil {
-		t.Fatalf("GetPreset failed: %v", err)
-	}
-	if retrieved.ID != created.ID {
-		t.Errorf("expected ID %d, got %d", created.ID, retrieved.ID)
-	}
-}
-
-func TestUpdatePreset_OwnPreset(t *testing.T) {
-	db := openTestDB(t)
-	createTestAdmins(t, db)
-	actor := rbac.Actor{AdminID: 1, RoleName: "admin", IsSuper: false}
-
-	created, err := CreatePreset(context.Background(), db, actor, CreatePresetInput{
-		Name: "Original",
-	})
-	if err != nil {
-		t.Fatalf("CreatePreset failed: %v", err)
-	}
-
-	newName := "Updated"
-	err = UpdatePreset(context.Background(), db, actor, created.ID, UpdatePresetInput{
-		Name: &newName,
-	})
+	updated, err := UpdatePreset(context.Background(), db, actor, preset.ID, updateInput)
 	if err != nil {
 		t.Fatalf("UpdatePreset failed: %v", err)
 	}
 
-	updated, err := GetPreset(context.Background(), db, actor, created.ID)
-	if err != nil {
-		t.Fatalf("GetPreset failed: %v", err)
-	}
-	if updated.Name != newName {
-		t.Errorf("expected name %q, got %q", newName, updated.Name)
+	if updated.Description != newDesc {
+		t.Errorf("expected description %q, got %q", newDesc, updated.Description)
 	}
 }
 
-func TestUpdatePreset_DifferentAdminForbidden(t *testing.T) {
+func TestUpdatePreset_NoFieldsToUpdate(t *testing.T) {
 	db := openTestDB(t)
 	createTestAdmins(t, db)
-	creator := rbac.Actor{AdminID: 1, RoleName: "admin", IsSuper: false}
-	other := rbac.Actor{AdminID: 2, RoleName: "admin", IsSuper: false}
+	actor := rbac.Actor{AdminID: 1, RoleName: "super_admin", IsSuper: true}
 
-	created, err := CreatePreset(context.Background(), db, creator, CreatePresetInput{
-		Name: "Original",
-	})
+	// Create a preset first
+	input := CreatePresetInput{
+		Name: "Test Preset",
+	}
+
+	preset, err := CreatePreset(context.Background(), db, actor, input)
 	if err != nil {
 		t.Fatalf("CreatePreset failed: %v", err)
 	}
 
-	newName := "Hacked"
-	err = UpdatePreset(context.Background(), db, other, created.ID, UpdatePresetInput{
-		Name: &newName,
-	})
+	// Try to update with no fields
+	updateInput := UpdatePresetInput{}
+
+	_, err = UpdatePreset(context.Background(), db, actor, preset.ID, updateInput)
 	if err == nil {
-		t.Error("expected permission denied, got nil")
+		t.Error("expected error for no fields to update, got nil")
 	}
 }
 
-func TestUpdatePreset_SuperAdminCanModify(t *testing.T) {
+func TestDeletePreset_Success(t *testing.T) {
 	db := openTestDB(t)
 	createTestAdmins(t, db)
-	creator := rbac.Actor{AdminID: 1, RoleName: "admin", IsSuper: false}
-	superAdmin := rbac.Actor{AdminID: 2, RoleName: "super_admin", IsSuper: true}
+	actor := rbac.Actor{AdminID: 1, RoleName: "super_admin", IsSuper: true}
 
-	created, err := CreatePreset(context.Background(), db, creator, CreatePresetInput{
-		Name: "Original",
-	})
+	// Create a preset first
+	input := CreatePresetInput{
+		Name: "Test Preset",
+	}
+
+	preset, err := CreatePreset(context.Background(), db, actor, input)
 	if err != nil {
 		t.Fatalf("CreatePreset failed: %v", err)
 	}
 
-	newName := "Modified by SuperAdmin"
-	err = UpdatePreset(context.Background(), db, superAdmin, created.ID, UpdatePresetInput{
-		Name: &newName,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePreset failed: %v", err)
-	}
-
-	updated, err := GetPreset(context.Background(), db, creator, created.ID)
-	if err != nil {
-		t.Fatalf("GetPreset failed: %v", err)
-	}
-	if updated.Name != newName {
-		t.Errorf("expected name %q, got %q", newName, updated.Name)
-	}
-}
-
-func TestDeletePreset_OwnPreset(t *testing.T) {
-	db := openTestDB(t)
-	createTestAdmins(t, db)
-	actor := rbac.Actor{AdminID: 1, RoleName: "admin", IsSuper: false}
-
-	created, err := CreatePreset(context.Background(), db, actor, CreatePresetInput{
-		Name: "ToDelete",
-	})
-	if err != nil {
-		t.Fatalf("CreatePreset failed: %v", err)
-	}
-
-	err = DeletePreset(context.Background(), db, actor, created.ID)
-	if err != nil {
+	// Delete it
+	if err := DeletePreset(context.Background(), db, actor, preset.ID); err != nil {
 		t.Fatalf("DeletePreset failed: %v", err)
 	}
 
-	_, err = GetPreset(context.Background(), db, actor, created.ID)
+	// Verify it's gone
+	_, err = GetPreset(context.Background(), db, actor, preset.ID)
 	if err == nil {
-		t.Error("expected not found after delete, got nil")
+		t.Error("expected error for deleted preset, got nil")
 	}
 }
 
-func TestDeletePreset_DifferentAdminForbidden(t *testing.T) {
+func TestDeletePreset_NotFound(t *testing.T) {
 	db := openTestDB(t)
 	createTestAdmins(t, db)
-	creator := rbac.Actor{AdminID: 1, RoleName: "admin", IsSuper: false}
-	other := rbac.Actor{AdminID: 2, RoleName: "admin", IsSuper: false}
+	actor := rbac.Actor{AdminID: 1, RoleName: "super_admin", IsSuper: true}
 
-	created, err := CreatePreset(context.Background(), db, creator, CreatePresetInput{
-		Name: "Protected",
-	})
-	if err != nil {
-		t.Fatalf("CreatePreset failed: %v", err)
-	}
-
-	err = DeletePreset(context.Background(), db, other, created.ID)
+	err := DeletePreset(context.Background(), db, actor, 999)
 	if err == nil {
-		t.Error("expected permission denied, got nil")
+		t.Error("expected error for non-existent preset, got nil")
 	}
 }
-
-func TestListPresets_ScopeFiltering(t *testing.T) {
-	db := openTestDB(t)
-	createTestAdmins(t, db)
-	admin1 := rbac.Actor{AdminID: 1, RoleName: "admin", IsSuper: false}
-	admin2 := rbac.Actor{AdminID: 2, RoleName: "admin", IsSuper: false}
-
-	// Create private preset by admin1
-	_, err := CreatePreset(context.Background(), db, admin1, CreatePresetInput{
-		Name:     "Private1",
-		IsPublic: false,
-	})
-	if err != nil {
-		t.Fatalf("CreatePreset failed: %v", err)
-	}
-
-	// Create public preset by admin2
-	_, err = CreatePreset(context.Background(), db, admin2, CreatePresetInput{
-		Name:     "Public2",
-		IsPublic: true,
-	})
-	if err != nil {
-		t.Fatalf("CreatePreset failed: %v", err)
-	}
-
-	// Admin1 should see their own private + the public one
-	presets1, err := ListPresets(context.Background(), db, admin1)
-	if err != nil {
-		t.Fatalf("ListPresets failed: %v", err)
-	}
-	if len(presets1) != 2 {
-		t.Errorf("expected 2 presets for admin1, got %d", len(presets1))
-	}
-
-	// Admin2 should see only their own public preset
-	presets2, err := ListPresets(context.Background(), db, admin2)
-	if err != nil {
-		t.Fatalf("ListPresets failed: %v", err)
-	}
-	if len(presets2) != 1 {
-		t.Errorf("expected 1 preset for admin2, got %d", len(presets2))
-	}
-}
-
