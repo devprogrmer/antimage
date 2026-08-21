@@ -3,7 +3,7 @@ package wireguard
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"strings"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 )
