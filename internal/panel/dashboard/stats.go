@@ -20,7 +20,7 @@ const StaleAfter = 60 * time.Second
 // DashboardStats holds aggregated metrics for the admin dashboard.
 type DashboardStats struct {
 	AdminID             *int64
-	ComputedAt          time.Time
+	ComputedAt          int64
 	NodesTotal          int64
 	NodesOnline         int64
 	NodesDegraded       int64
@@ -32,7 +32,7 @@ type DashboardStats struct {
 	Traffic24hUplink    int64
 	Traffic24hDownlink  int64
 	QuotaTotalBytes     *int64
-	QuotaUsedBytes      int64
+	QuotaUsedBytes      *int64
 	QuotaUtilizationPct *float64
 }
 
@@ -40,13 +40,13 @@ type DashboardStats struct {
 // adminID may be nil for global (super-admin) stats; a non-nil value scopes
 // nothing differently today but is stored so per-admin caches are possible.
 func ComputeStats(ctx context.Context, db *store.Store, adminID *int64) (DashboardStats, error) {
-	now := time.Now().UTC()
+	now := time.Now()
 	nowUnix := now.Unix()
 	cutoff24h := now.Add(-24 * time.Hour).Unix()
 
 	var s DashboardStats
 	s.AdminID = adminID
-	s.ComputedAt = now
+	s.ComputedAt = nowUnix
 
 	// Node counts — status column holds the canonical node state.
 	// 'online' maps to healthy, 'degraded' maps to degraded, everything else
@@ -101,23 +101,23 @@ func ComputeStats(ctx context.Context, db *store.Store, adminID *int64) (Dashboa
 	// Quota aggregates from subjects.
 	// quota_bytes IS NULL means "unlimited" for that subject; the aggregate is
 	// NULL when any subject has no cap, since total capacity is then unbounded.
-	var quotaTotal sql.NullInt64
+	var quotaTotal, quotaUsed sql.NullInt64
 	err = db.Read().QueryRowContext(ctx, `
 		SELECT
 			SUM(quota_bytes),
-			COALESCE(SUM(quota_used_bytes), 0)
+			SUM(quota_used_bytes)
 		FROM subjects
-	`).Scan(&quotaTotal, &s.QuotaUsedBytes)
+	`).Scan(&quotaTotal, &quotaUsed)
 	if err != nil {
 		return DashboardStats{}, fmt.Errorf("query quota: %w", err)
 	}
-	if quotaTotal.Valid {
+	if quotaTotal.Valid && quotaTotal.Int64 > 0 {
 		v := quotaTotal.Int64
 		s.QuotaTotalBytes = &v
-		if v > 0 {
-			pct := float64(s.QuotaUsedBytes) / float64(v) * 100.0
-			s.QuotaUtilizationPct = &pct
-		}
+		used := quotaUsed.Int64 // zero when NULL
+		s.QuotaUsedBytes = &used
+		pct := float64(used) / float64(v) * 100.0
+		s.QuotaUtilizationPct = &pct
 	}
 
 	return s, nil
@@ -141,7 +141,7 @@ func GetStats(ctx context.Context, db *store.Store, actor rbac.Actor) (Dashboard
 		return DashboardStats{}, fmt.Errorf("read cached stats: %w", err)
 	}
 
-	if err == nil && time.Since(cached.ComputedAt) <= StaleAfter {
+	if err == nil && time.Since(time.Unix(cached.ComputedAt, 0)) <= StaleAfter {
 		return cached, nil
 	}
 
@@ -161,8 +161,8 @@ func GetStats(ctx context.Context, db *store.Store, actor rbac.Actor) (Dashboard
 func readCachedStats(ctx context.Context, db *store.Store, adminID *int64) (DashboardStats, error) {
 	var (
 		s                   DashboardStats
-		computedAt          int64
 		quotaTotalBytes     sql.NullInt64
+		quotaUsedBytes      sql.NullInt64
 		quotaUtilizationPct sql.NullFloat64
 	)
 	s.AdminID = adminID
@@ -178,11 +178,11 @@ func readCachedStats(ctx context.Context, db *store.Store, adminID *int64) (Dash
 			FROM dashboard_stats
 			WHERE admin_id IS NULL
 		`).Scan(
-			&computedAt,
+			&s.ComputedAt,
 			&s.NodesTotal, &s.NodesOnline, &s.NodesDegraded, &s.NodesOffline,
 			&s.SubjectsTotal, &s.SubjectsActive, &s.SubjectsExpired, &s.SubjectsFrozen,
 			&s.Traffic24hUplink, &s.Traffic24hDownlink,
-			&quotaTotalBytes, &s.QuotaUsedBytes, &quotaUtilizationPct,
+			&quotaTotalBytes, &quotaUsedBytes, &quotaUtilizationPct,
 		)
 	} else {
 		err = db.Read().QueryRowContext(ctx, `
@@ -194,21 +194,24 @@ func readCachedStats(ctx context.Context, db *store.Store, adminID *int64) (Dash
 			FROM dashboard_stats
 			WHERE admin_id IS ?
 		`, *adminID).Scan(
-			&computedAt,
+			&s.ComputedAt,
 			&s.NodesTotal, &s.NodesOnline, &s.NodesDegraded, &s.NodesOffline,
 			&s.SubjectsTotal, &s.SubjectsActive, &s.SubjectsExpired, &s.SubjectsFrozen,
 			&s.Traffic24hUplink, &s.Traffic24hDownlink,
-			&quotaTotalBytes, &s.QuotaUsedBytes, &quotaUtilizationPct,
+			&quotaTotalBytes, &quotaUsedBytes, &quotaUtilizationPct,
 		)
 	}
 	if err != nil {
 		return DashboardStats{}, err
 	}
 
-	s.ComputedAt = time.Unix(computedAt, 0).UTC()
 	if quotaTotalBytes.Valid {
 		v := quotaTotalBytes.Int64
 		s.QuotaTotalBytes = &v
+	}
+	if quotaUsedBytes.Valid {
+		v := quotaUsedBytes.Int64
+		s.QuotaUsedBytes = &v
 	}
 	if quotaUtilizationPct.Valid {
 		v := quotaUtilizationPct.Float64
@@ -249,7 +252,7 @@ func upsertStats(ctx context.Context, db *store.Store, s DashboardStats) error {
 				quota_total_bytes, quota_used_bytes, quota_utilization_pct
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
-			s.AdminID, s.ComputedAt.Unix(),
+			s.AdminID, s.ComputedAt,
 			s.NodesTotal, s.NodesOnline, s.NodesDegraded, s.NodesOffline,
 			s.SubjectsTotal, s.SubjectsActive, s.SubjectsExpired, s.SubjectsFrozen,
 			s.Traffic24hUplink, s.Traffic24hDownlink,

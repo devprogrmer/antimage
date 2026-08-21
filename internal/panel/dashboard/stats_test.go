@@ -72,10 +72,10 @@ func TestComputeStats_EmptyDB(t *testing.T) {
 	if stats.QuotaTotalBytes != nil {
 		t.Errorf("QuotaTotalBytes: want nil, got %v", *stats.QuotaTotalBytes)
 	}
-	if stats.QuotaUsedBytes != 0 {
-		t.Errorf("QuotaUsedBytes: want 0, got %d", stats.QuotaUsedBytes)
+	if stats.QuotaUsedBytes != nil {
+		t.Errorf("QuotaUsedBytes: want nil, got %v", *stats.QuotaUsedBytes)
 	}
-	if stats.ComputedAt.IsZero() {
+	if stats.ComputedAt == 0 {
 		t.Error("ComputedAt should not be zero")
 	}
 }
@@ -105,7 +105,7 @@ func TestGetStats_SuperAdminComputesFresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
-	if stats.ComputedAt.IsZero() {
+	if stats.ComputedAt == 0 {
 		t.Error("ComputedAt should not be zero")
 	}
 	// Super admin gets global stats (no admin_id).
@@ -135,9 +135,9 @@ func TestGetStats_CacheHit_PerAdmin(t *testing.T) {
 	}
 
 	// ComputedAt is stored at Unix second precision. The cached row's timestamp
-	// must match the first call's (truncated to second).
-	if second.ComputedAt.Unix() != first.ComputedAt.Unix() {
-		t.Errorf("cache hit expected: first=%v second=%v", first.ComputedAt, second.ComputedAt)
+	// must match the first call's.
+	if second.ComputedAt != first.ComputedAt {
+		t.Errorf("cache hit expected: first=%d second=%d", first.ComputedAt, second.ComputedAt)
 	}
 }
 

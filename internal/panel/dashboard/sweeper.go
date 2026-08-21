@@ -6,6 +6,7 @@ package dashboard
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/store"
@@ -16,7 +17,9 @@ const RefreshInterval = 60 * time.Second
 
 // StartSweeper launches a background goroutine that refreshes the global
 // (admin_id IS NULL) dashboard stats every RefreshInterval until ctx is done.
-func StartSweeper(ctx context.Context, db *store.Store) {
+// It returns nil immediately after launching the goroutine; the goroutine runs
+// until ctx is cancelled.
+func StartSweeper(ctx context.Context, db *store.Store) error {
 	go func() {
 		ticker := time.NewTicker(RefreshInterval)
 		defer ticker.Stop()
@@ -25,10 +28,13 @@ func StartSweeper(ctx context.Context, db *store.Store) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = RefreshStats(ctx, db)
+				if err := RefreshStats(ctx, db); err != nil {
+					log.Printf("dashboard sweeper: refresh failed: %v", err)
+				}
 			}
 		}
 	}()
+	return nil
 }
 
 // RefreshStats computes fresh global stats and persists them to the cache.

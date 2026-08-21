@@ -12,7 +12,9 @@ func TestStartSweeper_CancelStops(t *testing.T) {
 	s := openTestStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	dashboard.StartSweeper(ctx, s)
+	if err := dashboard.StartSweeper(ctx, s); err != nil {
+		t.Fatalf("StartSweeper: %v", err)
+	}
 
 	// Give the goroutine time to start, then cancel.
 	time.Sleep(20 * time.Millisecond)
@@ -49,6 +51,8 @@ func TestStartSweeper_DoesNotPanicOnEmptyDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	dashboard.StartSweeper(ctx, s)
+	if err := dashboard.StartSweeper(ctx, s); err != nil {
+		t.Fatalf("StartSweeper: %v", err)
+	}
 	<-ctx.Done()
 }
