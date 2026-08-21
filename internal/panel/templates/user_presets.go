@@ -64,9 +64,12 @@ func ListPresets(ctx context.Context, db *store.Store, actor rbac.Actor) ([]User
 	var presets []UserPreset
 	for rows.Next() {
 		var p UserPreset
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.AutoAssignServicesJSON, &p.AutoAssignNodeTagsJSON, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var servicesRaw, tagsRaw string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan preset: %w", err)
 		}
+		p.AutoAssignServicesJSON = json.RawMessage(servicesRaw)
+		p.AutoAssignNodeTagsJSON = json.RawMessage(tagsRaw)
 		presets = append(presets, p)
 	}
 
@@ -78,26 +81,33 @@ func CreatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, input 
 		return UserPreset{}, errors.New("preset name is required")
 	}
 
-	// Default empty JSON arrays if not provided
-	servicesJSON := input.AutoAssignServicesJSON
-	if len(servicesJSON) == 0 {
-		servicesJSON = json.RawMessage("[]")
+	// Default empty JSON arrays if not provided, convert to string for STRICT table
+	servicesJSON := string(input.AutoAssignServicesJSON)
+	if servicesJSON == "" {
+		servicesJSON = "[]"
 	}
-	tagsJSON := input.AutoAssignNodeTagsJSON
-	if len(tagsJSON) == 0 {
-		tagsJSON = json.RawMessage("[]")
+	tagsJSON := string(input.AutoAssignNodeTagsJSON)
+	if tagsJSON == "" {
+		tagsJSON = "[]"
 	}
 
 	var p UserPreset
 	err := db.Write(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
 
+		var servicesRaw, tagsRaw string
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO user_presets (name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			RETURNING *
+			RETURNING id, name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at
 		`, input.Name, input.Description, input.QuotaBytes, input.ValidityDays, servicesJSON, tagsJSON, input.IsPublic, actor.AdminID, now, now).
-			Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.AutoAssignServicesJSON, &p.AutoAssignNodeTagsJSON, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+			Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+
+		if err != nil {
+			return fmt.Errorf("insert preset: %w", err)
+		}
+		p.AutoAssignServicesJSON = json.RawMessage(servicesRaw)
+		p.AutoAssignNodeTagsJSON = json.RawMessage(tagsRaw)
 
 		if err != nil {
 			return fmt.Errorf("insert preset: %w", err)
@@ -114,11 +124,12 @@ func CreatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, input 
 
 func GetPreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int64) (UserPreset, error) {
 	var p UserPreset
+	var servicesRaw, tagsRaw string
 	err := db.Read().QueryRowContext(ctx, `
 		SELECT id, name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at
 		FROM user_presets
 		WHERE id = ? AND (is_public = 1 OR created_by = ?)
-	`, id, actor.AdminID).Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.AutoAssignServicesJSON, &p.AutoAssignNodeTagsJSON, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+	`, id, actor.AdminID).Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return UserPreset{}, fmt.Errorf("preset not found or access denied")
@@ -126,6 +137,9 @@ func GetPreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int64)
 	if err != nil {
 		return UserPreset{}, fmt.Errorf("query preset: %w", err)
 	}
+
+	p.AutoAssignServicesJSON = json.RawMessage(servicesRaw)
+	p.AutoAssignNodeTagsJSON = json.RawMessage(tagsRaw)
 
 	return p, nil
 }
