@@ -38,8 +38,9 @@ const (
 type Security string
 
 const (
-	SecurityNone Security = "none"
-	SecurityTLS  Security = "tls"
+	SecurityNone    Security = "none"
+	SecurityTLS     Security = "tls"
+	SecurityReality Security = "reality"
 )
 
 // ErrInvalidInbound means the service params do not describe a usable inbound.
@@ -62,6 +63,14 @@ type Inbound struct {
 	CertFile string `json:"cert_file"`
 	KeyFile  string `json:"key_file"`
 	SNI      string `json:"sni"`
+
+	// Reality material, required when Security is reality.
+	// Reality is an anti-censorship protocol that disguises traffic as
+	// legitimate TLS to a real destination without requiring certificates.
+	Dest        string   `json:"dest"`          // destination address (e.g., "example.com:443")
+	ServerNames []string `json:"server_names"`  // SNI values to accept
+	PrivateKey  string   `json:"private_key"`   // x25519 private key (base64)
+	ShortIDs    []string `json:"short_ids"`     // client authentication short IDs
 
 	// Transport detail.
 	Path string `json:"path"` // ws and grpc
@@ -123,13 +132,27 @@ func (in Inbound) Validate() error {
 		return fmt.Errorf("%w: network %q is not supported", ErrInvalidInbound, in.Network)
 	}
 	switch in.Security {
-	case "", SecurityNone, SecurityTLS:
+	case "", SecurityNone, SecurityTLS, SecurityReality:
 	default:
 		return fmt.Errorf("%w: security %q is not supported", ErrInvalidInbound, in.Security)
 	}
 	if in.Security == SecurityTLS {
 		if in.CertFile == "" || in.KeyFile == "" {
 			return fmt.Errorf("%w: tls requires cert_file and key_file", ErrInvalidInbound)
+		}
+	}
+	if in.Security == SecurityReality {
+		if in.Dest == "" {
+			return fmt.Errorf("%w: reality requires dest", ErrInvalidInbound)
+		}
+		if len(in.ServerNames) == 0 {
+			return fmt.Errorf("%w: reality requires server_names", ErrInvalidInbound)
+		}
+		if in.PrivateKey == "" {
+			return fmt.Errorf("%w: reality requires private_key", ErrInvalidInbound)
+		}
+		if len(in.ShortIDs) == 0 {
+			return fmt.Errorf("%w: reality requires short_ids", ErrInvalidInbound)
 		}
 	}
 	// Trojan without TLS is trivially fingerprintable and is almost always a
@@ -208,9 +231,13 @@ func (in Inbound) Generate(users []User) ([]byte, error) {
 		} else {
 			entry.ID = u.Credential
 		}
-		if in.Protocol == VLESS && in.Network == TCP && in.Security == SecurityTLS {
-			// XTLS vision is only valid on raw TCP with TLS.
-			entry.Flow = "xtls-rprx-vision"
+		// XTLS flow is valid on VLESS with TCP transport and TLS/Reality security
+		if in.Protocol == VLESS && in.Network == TCP {
+			if in.Security == SecurityTLS {
+				entry.Flow = "xtls-rprx-vision"
+			} else if in.Security == SecurityReality {
+				entry.Flow = "xtls-rprx-vision"
+			}
 		}
 		clients = append(clients, entry)
 	}
@@ -234,6 +261,23 @@ func (in Inbound) Generate(users []User) ([]byte, error) {
 			tls["serverName"] = in.SNI
 		}
 		stream["tlsSettings"] = tls
+	}
+	if in.Security == SecurityReality {
+		reality := map[string]any{
+			"show": false,
+			"dest": in.Dest,
+			"xver": 0,
+		}
+		if len(in.ServerNames) > 0 {
+			reality["serverNames"] = in.ServerNames
+		}
+		if in.PrivateKey != "" {
+			reality["privateKey"] = in.PrivateKey
+		}
+		if len(in.ShortIDs) > 0 {
+			reality["shortIds"] = in.ShortIDs
+		}
+		stream["realitySettings"] = reality
 	}
 	switch in.Network {
 	case WS:
