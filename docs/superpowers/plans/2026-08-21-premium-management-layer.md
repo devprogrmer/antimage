@@ -726,12 +726,15 @@ git commit -m "feat(premium): implement service template CRUD with scope filteri
 **Interfaces:**
 - Consumes: `store.Store`, `rbac.Actor`
 - Produces:
-  - `type UserPreset struct { ID int64; Name string; Description string; QuotaBytes *int64; ValidityDays *int; AutoAssignServices []int64; AutoAssignNodeTags []string; IsPublic bool; CreatedBy *int64; CreatedAt, UpdatedAt int64 }`
+  - `type UserPreset struct { ID int64; Name string; Description string; QuotaBytes *int64; ValidityDays *int; AutoAssignServicesJSON json.RawMessage; AutoAssignNodeTagsJSON json.RawMessage; IsPublic bool; CreatedBy *int64; CreatedAt, UpdatedAt int64 }`
+  - `type CreatePresetInput struct { Name string; Description string; QuotaBytes *int64; ValidityDays *int; AutoAssignServicesJSON json.RawMessage; AutoAssignNodeTagsJSON json.RawMessage; IsPublic bool }`
+  - `type UpdatePresetInput struct { Name *string; Description *string; QuotaBytes **int64; ValidityDays **int; AutoAssignServicesJSON *json.RawMessage; AutoAssignNodeTagsJSON *json.RawMessage; IsPublic *bool }`
   - `func ListPresets(ctx context.Context, db *store.Store, actor rbac.Actor) ([]UserPreset, error)`
-  - `func CreatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, input CreatePresetInput) (UserPreset, error)`
+  - `func CreatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, input CreatePresetInput) (UserPreset, error)` — uses `RETURNING *` inside `db.Write()`
   - `func GetPreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int64) (UserPreset, error)`
-  - `func UpdatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int64, input UpdatePresetInput) error`
+  - `func UpdatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int64, input UpdatePresetInput) (UserPreset, error)` — returns updated preset via `RETURNING *`
   - `func DeletePreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int64) error`
+- **Design note:** JSON array fields use `json.RawMessage` for flexible passthrough — callers marshal/unmarshal at their layer. `CreatePreset` and `UpdatePreset` use SQLite `RETURNING *` inside `db.Write()` transactions instead of `LastInsertId` / re-query patterns.
 
 - [ ] **Step 1: Write failing test for ListPresets**
 
@@ -1098,14 +1101,22 @@ git commit -m "feat(premium): implement user preset CRUD with scope filtering"
 - Create: `internal/panel/bulk/worker_test.go`
 
 **Interfaces:**
-- Consumes: `store.Store`, `rbac.Actor`, `subjects.Manager` (for actual operations)
+- Consumes: `store.Store`, `rbac.Actor`
 - Produces:
-  - `type BulkOperation struct { ID int64; OperationType string; ActorAdminID *int64; TotalItems, CompletedItems, FailedItems int; Status string; Results []ItemResult; CreatedAt, StartedAt, CompletedAt *int64 }`
-  - `type ItemResult struct { ItemID string; Status string; Error string }`
-  - `func CreateBulkOperation(ctx context.Context, db *store.Store, actor rbac.Actor, opType string, items []interface{}) (int64, error)`
-  - `func GetBulkOperation(ctx context.Context, db *store.Store, actor rbac.Actor, id int64) (BulkOperation, error)`
+  - `type BulkStatus string` — typed constants `StatusQueued`, `StatusRunning`, `StatusCompleted`, `StatusFailed`, `StatusCancelled`
+  - `type ItemResult struct { ItemID string \`json:"item_id"\`; Status string \`json:"status"\`; Error string \`json:"error,omitempty"\` }` — Status is `"success"` or `"failed"`
+  - `type BulkOperation struct { ID int64; OperationType string; ActorAdminID *int64; TotalItems, CompletedItems, FailedItems int; Status BulkStatus; Results []ItemResult; ResultsJSON string; CreatedAt int64; StartedAt, CompletedAt *int64 }` — Results populated for completed/failed ops
+  - `func CreateBulkOperation(ctx context.Context, db *store.Store, actor rbac.Actor, opType string, items []interface{}) (*BulkOperation, error)`
+  - `func GetBulkOperation(ctx context.Context, db *store.Store, actor rbac.Actor, id int64) (*BulkOperation, error)` — unmarshals Results for completed/failed
+  - `func ListBulkOperations(ctx context.Context, db *store.Store, actor rbac.Actor) ([]*BulkOperation, error)` — super sees all, non-super sees own
   - `func CancelBulkOperation(ctx context.Context, db *store.Store, actor rbac.Actor, id int64) error`
-  - `func StartWorker(ctx context.Context, db *store.Store, deps WorkerDeps) error` (background goroutine)
+  - **Worker (struct-based design — chosen over `StartWorker`/`WorkerDeps` for idiomatic Go):**
+    - `const DefaultBatchSize = 10`
+    - `type ProcessFunc func(ctx context.Context, kind string, item json.RawMessage) (itemID string, err error)`
+    - `type Worker struct { db *store.Store; processFn ProcessFunc; BatchSize int }`
+    - `func NewWorker(db *store.Store, processFn ProcessFunc) *Worker` — BatchSize defaults to DefaultBatchSize
+    - `func (w *Worker) Run(ctx context.Context)` — polls, backs off on sql.ErrNoRows, processes in batches
+  - **Task 9 wiring:** `w := bulk.NewWorker(db, myProcessFn); go w.Run(ctx)` — no `StartWorker` function exists
 
 - [ ] **Step 1: Write failing test for CreateBulkOperation**
 

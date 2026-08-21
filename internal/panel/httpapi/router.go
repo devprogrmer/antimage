@@ -160,6 +160,20 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/dashboard/traffic-chart", d.handleDashboardTrafficChart)
 			private.Get("/dashboard/top-users", d.handleDashboardTopUsers)
 
+			// Service template routes
+			private.Get("/templates/services", d.handleListServiceTemplates)
+			private.Post("/templates/services", d.handleCreateServiceTemplate)
+			private.Get("/templates/services/{id}", d.handleGetServiceTemplate)
+			private.Put("/templates/services/{id}", d.handleUpdateServiceTemplate)
+			private.Delete("/templates/services/{id}", d.handleDeleteServiceTemplate)
+
+			// User preset routes
+			private.Get("/presets/users", d.handleListUserPresets)
+			private.Post("/presets/users", d.handleCreateUserPreset)
+			private.Get("/presets/users/{id}", d.handleGetUserPreset)
+			private.Put("/presets/users/{id}", d.handleUpdateUserPreset)
+			private.Delete("/presets/users/{id}", d.handleDeleteUserPreset)
+
 			// Subjects are the people a node serves. Credentials are never
 			// returned by list or get; revealing one needs its own permission
 			// and is audited by kind, never by value.

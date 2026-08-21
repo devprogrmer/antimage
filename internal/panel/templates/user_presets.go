@@ -78,6 +78,16 @@ func CreatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, input 
 		return UserPreset{}, errors.New("preset name is required")
 	}
 
+	// Default empty JSON arrays if not provided
+	servicesJSON := input.AutoAssignServicesJSON
+	if len(servicesJSON) == 0 {
+		servicesJSON = json.RawMessage("[]")
+	}
+	tagsJSON := input.AutoAssignNodeTagsJSON
+	if len(tagsJSON) == 0 {
+		tagsJSON = json.RawMessage("[]")
+	}
+
 	var p UserPreset
 	err := db.Write(ctx, func(tx *sql.Tx) error {
 		now := time.Now().Unix()
@@ -86,7 +96,7 @@ func CreatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, input 
 			INSERT INTO user_presets (name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			RETURNING *
-		`, input.Name, input.Description, input.QuotaBytes, input.ValidityDays, input.AutoAssignServicesJSON, input.AutoAssignNodeTagsJSON, input.IsPublic, actor.AdminID, now, now).
+		`, input.Name, input.Description, input.QuotaBytes, input.ValidityDays, servicesJSON, tagsJSON, input.IsPublic, actor.AdminID, now, now).
 			Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.AutoAssignServicesJSON, &p.AutoAssignNodeTagsJSON, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
 
 		if err != nil {
