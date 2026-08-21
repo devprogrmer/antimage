@@ -2,10 +2,13 @@ package templates
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/rbac"
@@ -186,7 +189,7 @@ func UpdateTemplate(ctx context.Context, db *store.Store, actor rbac.Actor, id i
 
 		if !createdBy.Valid || createdBy.Int64 != actor.AdminID {
 			// Only super admin can modify another admin's template
-			if actor.RoleName != "super_admin" {
+			if !actor.IsSuper {
 				return fmt.Errorf("cannot modify another admin's template")
 			}
 		}
@@ -261,7 +264,7 @@ func DeleteTemplate(ctx context.Context, db *store.Store, actor rbac.Actor, id i
 
 		if !createdBy.Valid || createdBy.Int64 != actor.AdminID {
 			// Only super admin can delete another admin's template
-			if actor.RoleName != "super_admin" {
+			if !actor.IsSuper {
 				return fmt.Errorf("cannot delete another admin's template")
 			}
 		}
@@ -273,4 +276,71 @@ func DeleteTemplate(ctx context.Context, db *store.Store, actor rbac.Actor, id i
 
 		return nil
 	})
+}
+
+// ListByAdapterKind returns templates filtered by adapter kind.
+func ListByAdapterKind(ctx context.Context, db *store.Store, actor rbac.Actor, adapterKind string) ([]ServiceTemplate, error) {
+	filters := TemplateFilters{AdapterKind: adapterKind}
+	return ListTemplates(ctx, db, actor, filters)
+}
+
+// ApplyToNode applies a template to a node, expanding template variables.
+// Supported variables: {{GENERATE_UUID}}, {{GENERATE_PASSWORD}}, {{GENERATE_SECRET}}
+func ApplyToNode(ctx context.Context, db *store.Store, actor rbac.Actor, templateID, nodeID int64) error {
+	// Get the template
+	template, err := GetTemplate(ctx, db, actor, templateID)
+	if err != nil {
+		return fmt.Errorf("get template: %w", err)
+	}
+
+	// Expand template variables
+	expandedParams := expandTemplateVariables(template.ParamsJSON)
+
+	// TODO: Apply the expanded params to the node
+	// This would involve updating the node's service configuration
+	// For now, we'll store it as a placeholder implementation
+	_ = expandedParams
+	_ = nodeID
+
+	return fmt.Errorf("ApplyToNode not yet implemented")
+}
+
+// expandTemplateVariables replaces template variables with generated values.
+func expandTemplateVariables(paramsJSON string) string {
+	result := paramsJSON
+
+	// Replace {{GENERATE_UUID}} with a new UUID
+	for strings.Contains(result, "{{GENERATE_UUID}}") {
+		result = strings.Replace(result, "{{GENERATE_UUID}}", generateUUID(), 1)
+	}
+
+	// Replace {{GENERATE_PASSWORD}} with a 16-character random password
+	for strings.Contains(result, "{{GENERATE_PASSWORD}}") {
+		password := generateRandomString(16)
+		result = strings.Replace(result, "{{GENERATE_PASSWORD}}", password, 1)
+	}
+
+	// Replace {{GENERATE_SECRET}} with a 32-character random secret
+	for strings.Contains(result, "{{GENERATE_SECRET}}") {
+		secret := generateRandomString(32)
+		result = strings.Replace(result, "{{GENERATE_SECRET}}", secret, 1)
+	}
+
+	return result
+}
+
+// generateUUID generates a new UUID v4.
+func generateUUID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40 // Version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // Variant RFC4122
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// generateRandomString generates a random hex string of the specified length.
+func generateRandomString(length int) string {
+	bytes := make([]byte, (length+1)/2)
+	_, _ = rand.Read(bytes)
+	return hex.EncodeToString(bytes)[:length]
 }

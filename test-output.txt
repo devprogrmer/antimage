@@ -1,0 +1,27 @@
+ok  	github.com/amyrm/antimage/cmd/antimage-ctl	(cached)
+?   	github.com/amyrm/antimage/cmd/antimage-node	[no test files]
+?   	github.com/amyrm/antimage/cmd/antimage-panel	[no test files]
+ok  	github.com/amyrm/antimage/internal/node/adapter	(cached)
+ok  	github.com/amyrm/antimage/internal/node/adapter/l2tp	(cached)
+ok  	github.com/amyrm/antimage/internal/node/adapter/singbox	(cached)
+ok  	github.com/amyrm/antimage/internal/node/adapter/stub	(cached)
+ok  	github.com/amyrm/antimage/internal/node/adapter/xray	(cached)
+ok  	github.com/amyrm/antimage/internal/node/agent	(cached)
+ok  	github.com/amyrm/antimage/internal/node/sysinfo	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/audit	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/auth	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/control	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/httpapi	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/metrics	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/nodes	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/observability	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/rbac	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/store	(cached)
+?   	github.com/amyrm/antimage/internal/panel/store/migrations	[no test files]
+ok  	github.com/amyrm/antimage/internal/panel/subjects	(cached)
+ok  	github.com/amyrm/antimage/internal/panel/subscriptions	(cached)
+?   	github.com/amyrm/antimage/internal/panel/webui	[no test files]
+ok  	github.com/amyrm/antimage/internal/shared/canonical	(cached)
+ok  	github.com/amyrm/antimage/internal/shared/proto/antimage/v1	(cached)
+ok  	github.com/amyrm/antimage/internal/shared/secrets	(cached)
+ok  	github.com/amyrm/antimage/internal/shared/version	(cached)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/amyrm/antimage/internal/panel/rbac"
@@ -449,5 +450,127 @@ func TestCreateTemplate_MissingParamsJSON(t *testing.T) {
 	_, err := CreateTemplate(context.Background(), db, actor, input)
 	if err == nil {
 		t.Error("expected error for missing params_json, got nil")
+	}
+}
+
+func TestListByAdapterKind(t *testing.T) {
+	db := openTestDB(t)
+	createTestAdmins(t, db)
+	actor := rbac.Actor{AdminID: 1, RoleName: "super_admin", IsSuper: true}
+
+	// Create templates with different adapter kinds
+	xrayInput := CreateTemplateInput{
+		Name:        "Xray Template",
+		AdapterKind: "xray",
+		ParamsJSON:  `{"listen_port":443}`,
+		IsPublic:    true,
+	}
+	_, err := CreateTemplate(context.Background(), db, actor, xrayInput)
+	if err != nil {
+		t.Fatalf("CreateTemplate failed: %v", err)
+	}
+
+	singboxInput := CreateTemplateInput{
+		Name:        "Singbox Template",
+		AdapterKind: "singbox",
+		ParamsJSON:  `{"listen_port":8080}`,
+		IsPublic:    true,
+	}
+	_, err = CreateTemplate(context.Background(), db, actor, singboxInput)
+	if err != nil {
+		t.Fatalf("CreateTemplate failed: %v", err)
+	}
+
+	// List only xray templates
+	templates, err := ListByAdapterKind(context.Background(), db, actor, "xray")
+	if err != nil {
+		t.Fatalf("ListByAdapterKind failed: %v", err)
+	}
+
+	if len(templates) != 1 {
+		t.Errorf("expected 1 xray template, got %d", len(templates))
+	}
+
+	if len(templates) > 0 && templates[0].AdapterKind != "xray" {
+		t.Errorf("expected adapter_kind 'xray', got %q", templates[0].AdapterKind)
+	}
+}
+
+func TestApplyToNode(t *testing.T) {
+	db := openTestDB(t)
+	createTestAdmins(t, db)
+	actor := rbac.Actor{AdminID: 1, RoleName: "super_admin", IsSuper: true}
+
+	// Create a template with variables
+	input := CreateTemplateInput{
+		Name:        "Template With Variables",
+		AdapterKind: "xray",
+		ParamsJSON:  `{"uuid":"{{GENERATE_UUID}}","password":"{{GENERATE_PASSWORD}}"}`,
+		IsPublic:    true,
+	}
+	tmpl, err := CreateTemplate(context.Background(), db, actor, input)
+	if err != nil {
+		t.Fatalf("CreateTemplate failed: %v", err)
+	}
+
+	// Try to apply to a node (should return "not yet implemented" error)
+	err = ApplyToNode(context.Background(), db, actor, tmpl.ID, 1)
+	if err == nil {
+		t.Error("expected error (not implemented), got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("expected 'not yet implemented' error, got: %v", err)
+	}
+}
+
+func TestExpandTemplateVariables(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		validate func(string) bool
+	}{
+		{
+			name:  "UUID generation",
+			input: `{"uuid":"{{GENERATE_UUID}}"}`,
+			validate: func(result string) bool {
+				return strings.Contains(result, `"uuid":"`) &&
+					!strings.Contains(result, "{{GENERATE_UUID}}")
+			},
+		},
+		{
+			name:  "Password generation",
+			input: `{"password":"{{GENERATE_PASSWORD}}"}`,
+			validate: func(result string) bool {
+				return strings.Contains(result, `"password":"`) &&
+					!strings.Contains(result, "{{GENERATE_PASSWORD}}")
+			},
+		},
+		{
+			name:  "Secret generation",
+			input: `{"secret":"{{GENERATE_SECRET}}"}`,
+			validate: func(result string) bool {
+				return strings.Contains(result, `"secret":"`) &&
+					!strings.Contains(result, "{{GENERATE_SECRET}}")
+			},
+		},
+		{
+			name:  "Multiple variables",
+			input: `{"uuid":"{{GENERATE_UUID}}","password":"{{GENERATE_PASSWORD}}","secret":"{{GENERATE_SECRET}}"}`,
+			validate: func(result string) bool {
+				return !strings.Contains(result, "{{GENERATE_") &&
+					strings.Contains(result, `"uuid":"`) &&
+					strings.Contains(result, `"password":"`) &&
+					strings.Contains(result, `"secret":"`)
+			},
+		},
+	}
+
+		for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := expandTemplateVariables(tt.input)
+			if !tt.validate(result) {
+				t.Errorf("expandTemplateVariables(%q) = %q, validation failed", tt.input, result)
+			}
+		})
 	}
 }
