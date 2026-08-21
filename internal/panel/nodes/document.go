@@ -11,7 +11,9 @@ import "encoding/json"
 
 // DocumentSchemaVersion is carried in every document. Bump it when the shape
 // changes, and ship a migration that recomputes node_revisions.doc_sha256.
-const DocumentSchemaVersion = 1
+// v1: Initial schema (SP1-SP2)
+// v2: Added enforcement policies to Subject (User Management Enhancements)
+const DocumentSchemaVersion = 2
 
 type Credential struct {
 	Kind  string `json:"kind"`
@@ -19,9 +21,18 @@ type Credential struct {
 }
 
 // Subject is wired but stays empty in SP1. SP2 populates it.
+// Subject represents a user/device that may connect.
+// Schema v1: ID + Credentials only
+// Schema v2: Added enforcement policies (MaxDevices, MaxIPs, etc.)
 type Subject struct {
 	ID          int64        `json:"id"`
 	Credentials []Credential `json:"credentials"`
+	// Enforcement policies (schema v2+)
+	MaxDevices      *int64 `json:"max_devices,omitempty"`
+	MaxIPs          *int64 `json:"max_ips,omitempty"`
+	MaxConnections  *int64 `json:"max_connections,omitempty"`
+	SpeedLimitUpKbps   *int64 `json:"speed_limit_up_kbps,omitempty"`
+	SpeedLimitDownKbps *int64 `json:"speed_limit_down_kbps,omitempty"`
 }
 
 type Service struct {
