@@ -6,6 +6,7 @@
   "auth.signIn": "Sign in",
   "auth.invalid": "Invalid credentials",
   "auth.rateLimited": "Too many attempts. Try again later.",
+  "nav.dashboard": "Dashboard",
   "nav.nodes": "Nodes",
   "nav.audit": "Audit",
   "nav.sessions": "Sessions",
