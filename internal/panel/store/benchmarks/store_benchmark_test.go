@@ -379,10 +379,13 @@ func BenchmarkConcurrentReads(b *testing.B) {
 
 // BenchmarkMetricAggregation measures hourly metric rollup performance
 func BenchmarkMetricAggregation(b *testing.B) {
-	st, _, cleanup := setupBenchDB(b)
+	st, box, cleanup := setupBenchDB(b)
 	defer cleanup()
 
 	ctx := context.Background()
+
+	// Seed subjects first (foreign key requirement)
+	seedSubjects(b, st, box, 100)
 
 	// Seed hourly rollups (simulate 7 days of hourly data for 100 subjects)
 	now := time.Now().Unix()
@@ -432,16 +435,47 @@ func BenchmarkSessionValidation(b *testing.B) {
 
 	ctx := context.Background()
 
-	// Seed sessions
-	sessionTokens := make([]string, 100)
+	// Create role and admin (foreign key requirements)
+	var adminID int64
 	err := st.Write(ctx, func(tx *sql.Tx) error {
+		// Create role first
+		roleResult, err := tx.ExecContext(ctx,
+			`INSERT INTO roles (name, is_builtin, permissions)
+			 VALUES (?, ?, ?)`,
+			"bench_role", 1, "[]")
+		if err != nil {
+			return err
+		}
+		roleID, err := roleResult.LastInsertId()
+		if err != nil {
+			return err
+		}
+
+		// Create admin with role_id
+		adminResult, err := tx.ExecContext(ctx,
+			`INSERT INTO admins (username, password_hash, role_id, status, created_at)
+			 VALUES (?, ?, ?, ?, ?)`,
+			"bench-admin", "$argon2id$v=19$m=65536,t=3,p=4$test$testhash", roleID, "active", time.Now().Unix())
+		if err != nil {
+			return err
+		}
+		adminID, err = adminResult.LastInsertId()
+		return err
+	})
+	if err != nil {
+		b.Fatalf("create admin: %v", err)
+	}
+
+	// Seed sessions
+	sessionTokenHashes := make([][]byte, 100)
+	err = st.Write(ctx, func(tx *sql.Tx) error {
 		for i := 0; i < 100; i++ {
-			token := fmt.Sprintf("session-token-%d", i)
-			sessionTokens[i] = token
+			tokenHash := []byte(fmt.Sprintf("session-hash-%d", i))
+			sessionTokenHashes[i] = tokenHash
 			_, err := tx.ExecContext(ctx,
-				`INSERT INTO sessions (token, admin_id, created_at, last_seen_at, expires_at)
-				 VALUES (?, 1, ?, ?, ?)`,
-				token, time.Now().Unix(), time.Now().Unix(), time.Now().Add(4*time.Hour).Unix())
+				`INSERT INTO sessions (admin_id, token_hash, ip, user_agent, created_at, expires_at, last_used_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				adminID, tokenHash, "192.0.2.1", "test-agent", time.Now().Unix(), time.Now().Add(4*time.Hour).Unix(), time.Now().Unix())
 			if err != nil {
 				return err
 			}
@@ -455,12 +489,12 @@ func BenchmarkSessionValidation(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		token := sessionTokens[i%len(sessionTokens)]
-		var adminID int64
+		tokenHash := sessionTokenHashes[i%len(sessionTokenHashes)]
+		var aid int64
 		err := st.Read().QueryRowContext(ctx,
-			`SELECT admin_id FROM sessions WHERE token = ? AND expires_at > ?`,
-			token, time.Now().Unix(),
-		).Scan(&adminID)
+			`SELECT admin_id FROM sessions WHERE token_hash = ? AND expires_at > ?`,
+			tokenHash, time.Now().Unix(),
+		).Scan(&aid)
 		if err != nil {
 			b.Fatalf("validate session: %v", err)
 		}
