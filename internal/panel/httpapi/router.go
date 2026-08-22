@@ -161,6 +161,7 @@ func NewRouter(d Deps) http.Handler {
 
 			// Premium: Dashboard endpoints
 			private.Get("/dashboard/overview", d.handleDashboardOverview)
+			private.Get("/dashboard/stream", d.handleDashboardStream)
 			private.Get("/dashboard/traffic-chart", d.handleDashboardTrafficChart)
 			private.Get("/dashboard/top-users", d.handleDashboardTopUsers)
 
