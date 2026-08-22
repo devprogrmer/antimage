@@ -228,6 +228,13 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/sessions", d.handleListSessions)
 			private.Delete("/sessions/{sessionID}", d.handleRevokeSession)
 
+			// Deployment orchestration endpoints
+			private.Post("/deployments/validate", d.handleDeploymentValidate)
+			private.Post("/deployments/preview", d.handleDeploymentPreview)
+			private.Post("/deployments", d.handleDeploymentCreate)
+			private.Get("/deployments", d.handleDeploymentList)
+			private.Get("/deployments/{id}", d.handleDeploymentGet)
+
 			private.Get("/events", d.handleEvents)
 		})
 	})
