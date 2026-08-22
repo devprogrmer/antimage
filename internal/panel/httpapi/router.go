@@ -193,6 +193,10 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/subjects/export", d.handleExportSubjects)
 			private.Post("/subjects/import", d.handleImportSubjects)
 			private.Post("/subjects/bulk/delete", d.handleBulkDeleteSubjects)
+			private.Post("/subjects/bulk/enable", d.handleBulkEnableSubjects)
+			private.Post("/subjects/bulk/extend", d.handleBulkExtendSubjects)
+			private.Post("/subjects/bulk/reset-traffic", d.handleBulkResetTraffic)
+			private.Post("/subjects/bulk/set-quota", d.handleBulkSetQuota)
 
 			// Subject lifecycle operations
 			private.Post("/subjects/{subjectID}/freeze", d.handleFreezeSubject)
