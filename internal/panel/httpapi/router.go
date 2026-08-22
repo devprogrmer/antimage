@@ -162,6 +162,9 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/nodes/{nodeID}/enable", d.handleEnableNode)
 			private.Post("/nodes/{nodeID}/disable", d.handleDisableNode)
 
+			// Bulk node operations (M7)
+			private.Post("/nodes/bulk/action", d.handleBulkNodeAction)
+
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)
