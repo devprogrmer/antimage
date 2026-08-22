@@ -304,7 +304,19 @@ func TestRecordNodeEvent(t *testing.T) {
 		t.Fatalf("failed to create parent node: %v", err)
 	}
 
-	// Create admin record (required by foreign key on admin_id)
+	// Create role record (required by FK on admin.role_id)
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO roles (id, name, permissions, created_at)
+			VALUES (?, ?, ?, ?)
+		`, 1, "test_role", "[]", time.Now().Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to create role: %v", err)
+	}
+
+	// Create admin record (required by FK on node_events.admin_id)
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO admins (id, username, password_hash, role_id, status, created_at)
