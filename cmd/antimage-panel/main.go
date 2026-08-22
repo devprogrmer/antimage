@@ -110,6 +110,24 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 
 	go nodes.NewSweeper(st, now).Run(ctx, 30*time.Second)
 
+	// Deployment timeout enforcement sweeper
+	// Runs every 2 minutes to detect and fail deployments exceeding their timeout
+	timeoutConfig := deployment.DefaultTimeoutConfig()
+	go func() {
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := orchestrator.EnforceTimeouts(ctx, timeoutConfig, now()); err != nil {
+					slog.ErrorContext(ctx, "deployment timeout enforcement failed", "error", err)
+				}
+			}
+		}
+	}()
+
 	// Expiry is enforced by omission from the desired document; this sweeper
 	// makes it prompt and visible by stamping expired_at and bumping the
 	// revision of every affected node, rather than leaving the removal to
