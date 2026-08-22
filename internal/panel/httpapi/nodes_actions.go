@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -8,7 +9,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 )
@@ -24,21 +24,20 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load actor for RBAC
-	adminID := auth.AdminIDFromContext(ctx)
-	actor, err := d.loadActor(ctx, adminID)
-	if err != nil {
+	// Authorization via middleware - already checked by requireAuth
+	actor := rbac.ActorFromContext(r.Context())
+	if actor == nil {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
-	// Authorization: nodes:write permission + node in scope
-	if !actor.Has(rbac.NodesWrite) {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	// Check nodes:write permission
+	target := rbac.Target{Kind: rbac.TargetNode, ID: nodeID}
+	if !d.authorize(w, r, actor, rbac.NodesWrite, target) {
 		return
 	}
 
-	// Verify node exists and is in scope
+	// Verify node exists
 	var nodeName string
 	err = d.Store.Read().QueryRowContext(ctx, `SELECT name FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName)
 	if err != nil {
@@ -46,14 +45,8 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
-		if _, ok := actor.NodeIDs[nodeID]; !ok {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-	}
-
 	// Record node event for audit trail
+	adminID := actor.AdminID
 	details := map[string]interface{}{
 		"action":    "restart",
 		"admin_id":  adminID,
