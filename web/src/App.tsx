@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Login } from "./routes/Login";
+import { Dashboard } from "./routes/Dashboard";
 import { Nodes } from "./routes/Nodes";
 import { NodeDetail } from "./routes/NodeDetail";
 import { Observability } from "./routes/Observability";
@@ -9,11 +10,11 @@ import { api } from "./lib/api";
 import { getLocale, locales, setLocale, t } from "./i18n";
 import type { Locale } from "./i18n";
 
-type Route = "nodes" | "observability" | "subjects";
+type Route = "dashboard" | "nodes" | "observability" | "subjects";
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
-  const [route, setRoute] = useState<Route>("nodes");
+  const [route, setRoute] = useState<Route>("dashboard");
   const [selected, setSelected] = useState<number | null>(null);
   // setLocale mutates module state and flips <html lang>/<html dir>; this
   // mirrors it into React state so the tree re-renders with the new catalogue.
@@ -43,6 +44,16 @@ export default function App() {
       <header className="flex items-center gap-4 border-b border-zinc-800 px-4 py-2">
         <h1 className="font-mono text-sm font-semibold">{t("app.name")}</h1>
         <nav className="flex gap-3 text-xs">
+          <button
+            type="button"
+            onClick={() => {
+              setRoute("dashboard");
+              setSelected(null);
+            }}
+            className={route === "dashboard" ? "text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}
+          >
+            {t("nav.dashboard")}
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -96,7 +107,9 @@ export default function App() {
       </header>
 
       <main className="p-4">
-        {route === "observability" ? (
+        {route === "dashboard" ? (
+          <Dashboard />
+        ) : route === "observability" ? (
           <Observability />
         ) : route === "subjects" ? (
           selected === null ? (
