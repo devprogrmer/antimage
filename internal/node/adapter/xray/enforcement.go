@@ -173,3 +173,15 @@ func (ct *ConnectionTracker) EnforcementLoop(ctx context.Context, inboundTag str
 		}
 	}
 }
+
+// StartEnforcement is called by the node agent to start enforcement for this adapter.
+// This implements the interface expected by the agent's startXrayEnforcementIfSupported.
+func (a *Adapter) StartEnforcement(ctx context.Context, enforcer *enforcement.Enforcer, interval time.Duration) {
+	tracker := NewConnectionTracker(a, enforcer)
+
+	// Start enforcement for all services
+	// Note: We use a generic inbound tag since we're tracking all users via stats
+	// The actual inbound tag doesn't matter for RemoveUser calls as long as
+	// we use the correct email identifier
+	go tracker.EnforcementLoop(ctx, "antimage-inbound", interval)
+}

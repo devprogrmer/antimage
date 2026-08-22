@@ -74,3 +74,20 @@ func (c *Client) EnforcementStatsLoop(ctx context.Context, stream pb.Control_Str
 func (c *Client) GetEnforcer() *enforcement.Enforcer {
 	return c.enforcer
 }
+
+// startXrayEnforcementIfSupported starts the Xray enforcement loop if the adapter is Xray.
+// This integrates the ConnectionTracker with the node agent runtime.
+func (c *Client) startXrayEnforcementIfSupported(ctx context.Context) {
+	// Check if adapter is Xray by attempting type assertion
+	// We need to import the xray package, but to avoid circular dependencies,
+	// we'll use a runtime interface check instead
+	type xrayEnforcementStarter interface {
+		StartEnforcement(ctx context.Context, enforcer *enforcement.Enforcer, interval time.Duration)
+	}
+
+	if starter, ok := c.ad.(xrayEnforcementStarter); ok {
+		// Xray adapter supports enforcement - start the loop
+		go starter.StartEnforcement(ctx, c.enforcer, 5*time.Second)
+		slog.InfoContext(ctx, "started Xray enforcement loop", "interval", "5s")
+	}
+}

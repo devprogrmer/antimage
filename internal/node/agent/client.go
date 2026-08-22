@@ -237,6 +237,9 @@ func (c *Client) runSession(
 	// Start enforcement stats loop.
 	go c.EnforcementStatsLoop(sessionCtx, stream, 60*time.Second)
 
+	// Start Xray enforcement loop if adapter is Xray (SP7).
+	c.startXrayEnforcementIfSupported(sessionCtx)
+
 	for {
 		select {
 		case <-sessionCtx.Done():
