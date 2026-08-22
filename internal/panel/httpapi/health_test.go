@@ -4,17 +4,24 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/store"
 )
 
 func TestHealthEndpoint(t *testing.T) {
-	st := store.NewMemory()
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer st.Close()
+
 	deps := Deps{
 		Store: st,
-		Hub:   control.NewHub(st),
+		Hub:   control.NewHub(),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -33,10 +40,16 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestReadyEndpoint(t *testing.T) {
-	st := store.NewMemory()
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer st.Close()
+
 	deps := Deps{
 		Store: st,
-		Hub:   control.NewHub(st),
+		Hub:   control.NewHub(),
+		Now:   time.Now,
 	}
 
 	// Initialize database schema
