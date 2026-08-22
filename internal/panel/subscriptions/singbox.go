@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// SingBoxRenderer renders sing-box-format JSON subscriptions.
+// SingBoxRenderer renders sing-box format JSON subscriptions.
 type SingBoxRenderer struct{}
 
 // Render returns sing-box JSON config and content-type.
@@ -16,6 +16,8 @@ func (r *SingBoxRenderer) Render(ctx context.Context, servers []Server) ([]byte,
 	}
 
 	var outbounds []map[string]interface{}
+
+	// Add each server as an outbound
 	for _, srv := range servers {
 		outbound, err := r.renderServer(srv)
 		if err != nil {
@@ -24,8 +26,46 @@ func (r *SingBoxRenderer) Render(ctx context.Context, servers []Server) ([]byte,
 		outbounds = append(outbounds, outbound)
 	}
 
+	// Build selector outbound that includes all servers
+	var outboundTags []string
+	for _, srv := range servers {
+		outboundTags = append(outboundTags, srv.NodeName)
+	}
+
+	selector := map[string]interface{}{
+		"type":     "selector",
+		"tag":      "proxy",
+		"outbounds": outboundTags,
+		"default":   outboundTags[0],
+	}
+
+	outbounds = append([]map[string]interface{}{selector}, outbounds...)
+
+	// Add direct and block outbounds
+	outbounds = append(outbounds,
+		map[string]interface{}{"type": "direct", "tag": "direct"},
+		map[string]interface{}{"type": "block", "tag": "block"},
+	)
+
 	config := map[string]interface{}{
 		"outbounds": outbounds,
+		"route": map[string]interface{}{
+			"rules": []map[string]interface{}{
+				{
+					"geoip":    []string{"private"},
+					"outbound": "direct",
+				},
+				{
+					"geoip":    []string{"cn"},
+					"outbound": "direct",
+				},
+				{
+					"geosite":  []string{"cn"},
+					"outbound": "direct",
+				},
+			},
+			"final": "proxy",
+		},
 	}
 
 	jsonBytes, err := json.MarshalIndent(config, "", "  ")
@@ -53,11 +93,11 @@ func (r *SingBoxRenderer) renderServer(srv Server) (map[string]interface{}, erro
 // renderVLESS generates a sing-box VLESS outbound.
 func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
-		"type":        "vless",
-		"tag":         srv.NodeName,
-		"server":      srv.NodeAddress,
+		"type":   "vless",
+		"tag":    srv.NodeName,
+		"server": srv.NodeAddress,
 		"server_port": srv.Port,
-		"uuid":        srv.UUID,
+		"uuid":   srv.UUID,
 	}
 
 	// Network type
@@ -67,11 +107,10 @@ func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 	}
 	outbound["network"] = network
 
-	// TLS configuration
+	// TLS
 	if srv.TLS {
 		tls := map[string]interface{}{
-			"enabled":  true,
-			"insecure": false,
+			"enabled": true,
 		}
 		if srv.SNI != "" {
 			tls["server_name"] = srv.SNI
@@ -82,9 +121,8 @@ func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 		outbound["tls"] = tls
 	}
 
-	// Transport configuration
-	switch network {
-	case "ws":
+	// Transport
+	if network == "ws" {
 		transport := map[string]interface{}{
 			"type": "ws",
 		}
@@ -92,7 +130,7 @@ func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 			transport["path"] = srv.Path
 		}
 		outbound["transport"] = transport
-	case "grpc":
+	} else if network == "grpc" {
 		transport := map[string]interface{}{
 			"type": "grpc",
 		}
@@ -108,13 +146,13 @@ func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 // renderVMess generates a sing-box VMess outbound.
 func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
-		"type":        "vmess",
-		"tag":         srv.NodeName,
-		"server":      srv.NodeAddress,
+		"type":   "vmess",
+		"tag":    srv.NodeName,
+		"server": srv.NodeAddress,
 		"server_port": srv.Port,
-		"uuid":        srv.UUID,
-		"alter_id":    0,
-		"security":    "auto",
+		"uuid":   srv.UUID,
+		"alter_id": 0,
+		"security": "auto",
 	}
 
 	// Network type
@@ -124,11 +162,10 @@ func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 	}
 	outbound["network"] = network
 
-	// TLS configuration
+	// TLS
 	if srv.TLS {
 		tls := map[string]interface{}{
-			"enabled":  true,
-			"insecure": false,
+			"enabled": true,
 		}
 		if srv.SNI != "" {
 			tls["server_name"] = srv.SNI
@@ -139,9 +176,8 @@ func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 		outbound["tls"] = tls
 	}
 
-	// Transport configuration
-	switch network {
-	case "ws":
+	// Transport
+	if network == "ws" {
 		transport := map[string]interface{}{
 			"type": "ws",
 		}
@@ -149,7 +185,7 @@ func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 			transport["path"] = srv.Path
 		}
 		outbound["transport"] = transport
-	case "grpc":
+	} else if network == "grpc" {
 		transport := map[string]interface{}{
 			"type": "grpc",
 		}
@@ -165,18 +201,17 @@ func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 // renderTrojan generates a sing-box Trojan outbound.
 func (r *SingBoxRenderer) renderTrojan(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
-		"type":        "trojan",
-		"tag":         srv.NodeName,
-		"server":      srv.NodeAddress,
+		"type":     "trojan",
+		"tag":      srv.NodeName,
+		"server":   srv.NodeAddress,
 		"server_port": srv.Port,
-		"password":    srv.Password,
+		"password": srv.Password,
 	}
 
-	// Trojan typically requires TLS
+	// TLS (Trojan requires TLS)
 	if srv.TLS {
 		tls := map[string]interface{}{
-			"enabled":  true,
-			"insecure": false,
+			"enabled": true,
 		}
 		if srv.SNI != "" {
 			tls["server_name"] = srv.SNI

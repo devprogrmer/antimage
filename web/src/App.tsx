@@ -3,11 +3,13 @@ import { Login } from "./routes/Login";
 import { Nodes } from "./routes/Nodes";
 import { NodeDetail } from "./routes/NodeDetail";
 import { Observability } from "./routes/Observability";
+import { Subjects } from "./routes/Subjects";
+import { SubjectDetail } from "./routes/SubjectDetail";
 import { api } from "./lib/api";
 import { getLocale, locales, setLocale, t } from "./i18n";
 import type { Locale } from "./i18n";
 
-type Route = "nodes" | "observability";
+type Route = "nodes" | "observability" | "subjects";
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
@@ -54,6 +56,16 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
+              setRoute("subjects");
+              setSelected(null);
+            }}
+            className={route === "subjects" ? "text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}
+          >
+            {t("nav.subjects")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setRoute("observability");
               setSelected(null);
             }}
@@ -86,6 +98,12 @@ export default function App() {
       <main className="p-4">
         {route === "observability" ? (
           <Observability />
+        ) : route === "subjects" ? (
+          selected === null ? (
+            <Subjects onSelect={(id) => setSelected(id)} />
+          ) : (
+            <SubjectDetail subjectId={selected} />
+          )
         ) : selected === null ? (
           <Nodes onSelect={(id) => {
             setRoute("nodes");
