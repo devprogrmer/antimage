@@ -5,7 +5,7 @@
 -- Persistent alerts with lifecycle tracking
 CREATE TABLE alerts (
     id              INTEGER PRIMARY KEY,
-    alert_type      TEXT NOT NULL CHECK (alert_type IN ('cert_expiry', 'quota_warning')),
+    alert_type      TEXT NOT NULL CHECK (alert_type IN ('cert_expiry', 'quota_warning', 'quota_exceeded')),
     severity        TEXT NOT NULL CHECK (severity IN ('warning', 'critical')),
     target_type     TEXT NOT NULL CHECK (target_type IN ('node', 'subject')),
     target_id       INTEGER NOT NULL,

@@ -351,7 +351,7 @@ func (sw *Sweeper) enforceQuotaFreeze(ctx context.Context, now time.Time) error 
 				},
 			}
 
-			if _, _, err := CreateOrUpdateAlert(ctx, sw.store, alert, now); err != nil {
+			if _, _, err := CreateOrUpdateAlertTx(ctx, tx, alert, now); err != nil {
 				log.Printf("[observability] create quota exceeded alert for subject %d: %v", s.id, err)
 			}
 

@@ -63,6 +63,68 @@ type Alert struct {
 	Metadata       map[string]interface{}
 }
 
+// createOrUpdateAlertTx is the internal transaction-based implementation.
+func createOrUpdateAlertTx(ctx context.Context, tx *sql.Tx, a Alert, now time.Time) (int64, bool, error) {
+	// Check if active alert with this dedup_key already exists
+	var existingID sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
+		SELECT id FROM alerts
+		WHERE dedup_key = ? AND state = 'active'`,
+		a.DedupKey).Scan(&existingID)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		// No active alert exists, create new one
+		metadataJSON, err := json.Marshal(a.Metadata)
+		if err != nil {
+			return 0, false, fmt.Errorf("marshal metadata: %w", err)
+		}
+
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO alerts (
+				alert_type, severity, target_type, target_id,
+				state, dedup_key, first_seen_at, last_seen_at,
+				threshold_value, current_value, metadata
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			string(a.AlertType), string(a.Severity), string(a.TargetType), a.TargetID,
+			string(StateActive), a.DedupKey, now.Unix(), now.Unix(),
+			a.ThresholdValue, a.CurrentValue, string(metadataJSON))
+		if err != nil {
+			return 0, false, fmt.Errorf("insert alert: %w", err)
+		}
+
+		alertID, err := res.LastInsertId()
+		if err != nil {
+			return 0, false, fmt.Errorf("get last insert id: %w", err)
+		}
+		return alertID, true, nil
+	}
+
+	if err != nil {
+		return 0, false, fmt.Errorf("check existing alert: %w", err)
+	}
+
+	// Active alert exists, update last_seen_at and current values
+	alertID := existingID.Int64
+
+	metadataJSON, err := json.Marshal(a.Metadata)
+	if err != nil {
+		return 0, false, fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE alerts
+		SET last_seen_at = ?,
+		    current_value = ?,
+		    metadata = ?
+		WHERE id = ?`,
+		now.Unix(), a.CurrentValue, string(metadataJSON), alertID)
+	if err != nil {
+		return 0, false, fmt.Errorf("update alert: %w", err)
+	}
+
+	return alertID, false, nil
+}
+
 // CreateOrUpdateAlert creates a new alert or updates last_seen_at if already active.
 // Returns (alert_id, created=true/false, error).
 //
@@ -75,66 +137,9 @@ func CreateOrUpdateAlert(ctx context.Context, s *store.Store, a Alert, now time.
 	var created bool
 
 	err := s.Write(ctx, func(tx *sql.Tx) error {
-		// Check if active alert with this dedup_key already exists
-		var existingID sql.NullInt64
-		err := tx.QueryRowContext(ctx, `
-			SELECT id FROM alerts
-			WHERE dedup_key = ? AND state = 'active'`,
-			a.DedupKey).Scan(&existingID)
-
-		if errors.Is(err, sql.ErrNoRows) {
-			// No active alert exists, create new one
-			metadataJSON, err := json.Marshal(a.Metadata)
-			if err != nil {
-				return fmt.Errorf("marshal metadata: %w", err)
-			}
-
-			res, err := tx.ExecContext(ctx, `
-				INSERT INTO alerts (
-					alert_type, severity, target_type, target_id,
-					state, dedup_key, first_seen_at, last_seen_at,
-					threshold_value, current_value, metadata
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				string(a.AlertType), string(a.Severity), string(a.TargetType), a.TargetID,
-				string(StateActive), a.DedupKey, now.Unix(), now.Unix(),
-				a.ThresholdValue, a.CurrentValue, string(metadataJSON))
-			if err != nil {
-				return fmt.Errorf("insert alert: %w", err)
-			}
-
-			alertID, err = res.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("get last insert id: %w", err)
-			}
-			created = true
-			return nil
-		}
-
-		if err != nil {
-			return fmt.Errorf("check existing alert: %w", err)
-		}
-
-		// Active alert exists, update last_seen_at and current values
-		alertID = existingID.Int64
-		created = false
-
-		metadataJSON, err := json.Marshal(a.Metadata)
-		if err != nil {
-			return fmt.Errorf("marshal metadata: %w", err)
-		}
-
-		_, err = tx.ExecContext(ctx, `
-			UPDATE alerts
-			SET last_seen_at = ?,
-			    current_value = ?,
-			    metadata = ?
-			WHERE id = ?`,
-			now.Unix(), a.CurrentValue, string(metadataJSON), alertID)
-		if err != nil {
-			return fmt.Errorf("update alert: %w", err)
-		}
-
-		return nil
+		var err error
+		alertID, created, err = createOrUpdateAlertTx(ctx, tx, a, now)
+		return err
 	})
 
 	if err != nil {
@@ -142,6 +147,11 @@ func CreateOrUpdateAlert(ctx context.Context, s *store.Store, a Alert, now time.
 	}
 
 	return alertID, created, nil
+}
+
+// CreateOrUpdateAlertTx is a transaction-based version that can be called within an existing transaction.
+func CreateOrUpdateAlertTx(ctx context.Context, tx *sql.Tx, a Alert, now time.Time) (int64, bool, error) {
+	return createOrUpdateAlertTx(ctx, tx, a, now)
 }
 
 // ResolveAlert marks an active alert as resolved. Idempotent: if the alert is already
