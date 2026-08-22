@@ -1,484 +1,409 @@
-# Enforcement Capability Matrix
+# Enforcement Capability Matrix - Production Audit
 
-**Last Updated:** 2026-08-22  
+**Date:** 2026-08-22  
 **Branch:** sp7-observability  
-**Status:** Foundation implemented, protocol-specific enforcement in progress
+**Auditor:** Autonomous production verification  
 
-## Classification Legend
+---
 
-- **CONFIGURED**: Policy exists in database and propagates to nodes
-- **PROPAGATED**: Policy reaches node agent via gRPC desired state
-- **OBSERVED**: Node agent tracks metric but does not enforce
-- **ENFORCED**: Runtime actively blocks/terminates connections violating policy
-- **BEST_EFFORT**: Advisory enforcement without hard guarantees
-- **UNSUPPORTED**: Protocol architecture prevents enforcement
+## Executive Summary
 
-## Capability Matrix by Protocol
+**Critical Finding:** Enforcement is BEST_EFFORT, not real-time prevention.
 
-| Feature            | Xray     | Sing-box | WireGuard | Hysteria2 | L2TP/IPsec |
-|--------------------|----------|----------|-----------|-----------|------------|
-| **Speed Limit Up** | ENFORCED | TODO     | TODO      | TODO      | TODO       |
-| **Speed Limit Down** | ENFORCED | TODO   | TODO      | TODO      | TODO       |
-| **Device Limit**   | ENFORCED | TODO     | TODO      | TODO      | TODO       |
-| **IP Limit**       | ENFORCED | TODO     | TODO      | TODO      | TODO       |
-| **Connection Limit** | ENFORCED | TODO   | TODO      | TODO      | TODO       |
-| **Traffic Quota**  | OBSERVED | TODO     | TODO      | TODO      | TODO       |
-| **Revocation**     | ENFORCED | TODO     | TODO      | TODO      | TODO       |
-| **Real-time Stats** | OBSERVED | TODO    | TODO      | TODO      | TODO       |
+**Classification System:**
+- ✅ **ENFORCED** - Real-time admission control, cannot be bypassed
+- ⚠️ **BEST_EFFORT** - Reactive termination within sync window (5-10s)
+- 🔄 **PROPAGATED** - Configuration delivered to node, runtime integration incomplete
+- 📋 **CONFIGURED** - Database/API exists, not yet propagated to runtime
+- ❌ **UNSUPPORTED** - Protocol limitation, cannot be implemented
 
-## Current Implementation Status
+---
 
-### ✅ Core Infrastructure (COMPLETE)
+## Enforcement Architecture Analysis
 
-**Database Layer:**
-- ✅ Schema migration 00017 adds enforcement columns to subjects table
-- ✅ Columns: max_devices, max_ips, max_connections, speed_limit_up_kbps, speed_limit_down_kbps
-- ✅ Migration tested and validated
-
-**Desired State Propagation:**
-- ✅ Schema v2 extends Subject type with enforcement fields
-- ✅ Policy fields propagate from panel → gRPC → node agent
-- ✅ BuildDesiredSnapshot includes enforcement policies
-- ✅ Migration 00018 invalidates cached document hashes to force regeneration
-
-**Node-Side Enforcement Engine:**
-- ✅ Package `internal/node/enforcement` implements cross-protocol enforcement
-- ✅ Atomic CheckAndRegisterConnection prevents TOCTOU races
-- ✅ Connection tracking by subject/device/IP
-- ✅ Policy updates trigger automatic connection termination when limits reduced
-- ✅ Concurrent access safe (mutex-protected)
-- ✅ Memory-efficient index structures
-- ✅ Stale connection cleanup
-- ✅ Comprehensive test coverage (15 tests, all passing)
-
-**Agent Integration:**
-- ✅ Client.syncEnforcement converts desired state → enforcement policies
-- ✅ Enforcer lifecycle managed by agent
-- ✅ Periodic stats reporting
-- ✅ Stale connection cleanup (10 minute threshold)
-
-### 🚧 Xray Protocol Integration (IN PROGRESS)
-
-**Speed Limits:**
-- ✅ Policy configuration generation (policy.go)
-- ✅ Per-subject level mapping
-- ✅ kbps → bytes/sec conversion
-- ✅ Config merging with inbound documents
-- ✅ Applied on restart (DisruptRestart steps)
-- ⚠️ **STATUS**: CONFIGURED + PROPAGATED, enforcement mechanism exists but E2E verification pending
-
-**Connection/Device/IP Limits:**
-- ✅ Enforcer tracks connections
-- ✅ CheckAndRegisterConnection provides atomic admission control
-- ❌ **MISSING**: Xray adapter does not call enforcer on connection attempts
-- ❌ **MISSING**: Connection registration hooks in runtime
-- ❌ **MISSING**: Device ID extraction from connection metadata
-
-**Revocation:**
-- ✅ Policy removal triggers terminateSubjectLocked
-- ❌ **MISSING**: Runtime integration to actually drop connections
-- ❌ **MISSING**: gRPC API call to disconnect specific users
-
-### ❌ Panel API Integration (INCOMPLETE)
-
-**Device Management API:**
-- ✅ Package `internal/panel/devices` exists
-- ✅ Database methods: RegisterDevice, RevokeDevice, ListDevices
-- ✅ Limit checks: CheckIPLimit, CheckConnectionLimit
-- ✅ Active connection tracking schema
-- ❌ **MISSING**: HTTP routes not registered in httpapi
-- ❌ **MISSING**: Authentication/authorization middleware
-- ❌ **MISSING**: Subject ownership validation
-- ❌ **MISSING**: API integration tests
-
-**Revocation:**
-- ✅ RevokeDevice deletes from active_connections table
-- ❌ **MISSING**: gRPC notification to nodes
-- ❌ **MISSING**: Runtime enforcement of revocation
-
-### ❌ Other Protocols (NOT STARTED)
-
-**Sing-box, WireGuard, Hysteria2, L2TP:**
-- All protocols currently TODO
-- Architecture varies significantly between protocols
-- Each requires protocol-specific enforcement strategy
-
-## Data Flow Analysis
-
-### Complete Path: Speed Limits (Xray)
+### Current Flow (Xray)
 
 ```
-Database (subjects.speed_limit_up_kbps)
-  ↓
-Panel: nodes.BuildDesiredSnapshot
-  ↓
-gRPC: adapter.Subject{SpeedLimitUpKbps: *int64}
-  ↓
-Node Agent: syncEnforcement → enforcement.Policy
-  ↓
-Xray Adapter: GeneratePolicyConfig → policy.json
-  ↓
-Xray Runtime: loads policy config, applies per-user limits
-  ↓
-Actual network I/O throttled by Xray
+User connects
+    ↓
+Xray accepts connection (NO admission control)
+    ↓
+Connection established and serving traffic
+    ↓
+Stats sync loop runs (every 5-10 seconds)
+    ↓
+Enforcer checks policy retroactively
+    ↓
+If violation: RemoveUser() terminates connection
 ```
 
-**Status:** ENFORCED (mechanism present, E2E test pending)
+**Gap:** 5-10 second window where policy violations can connect and use service.
 
-### Complete Path: Connection Limits (Xray)
-
-```
-Database (subjects.max_connections)
-  ↓
-Panel: nodes.BuildDesiredSnapshot
-  ↓
-gRPC: adapter.Subject{MaxConnections: *int64}
-  ↓
-Node Agent: syncEnforcement → enforcement.Policy
-  ↓
-Enforcer: policy stored, ready to enforce
-  ↓
-❌ MISSING: Xray connection hook → CheckAndRegisterConnection
-  ↓
-❌ MISSING: ErrPolicyViolation → reject connection
-```
-
-**Status:** CONFIGURED + PROPAGATED (enforcement hook missing)
-
-### Incomplete Path: Revocation
+### Ideal Flow (Not Implemented)
 
 ```
-Panel API: POST /api/devices/:id/revoke
-  ↓
-❌ MISSING: Route not registered
-  ↓
-devices.RevokeDevice(tx, deviceID, reason)
-  ↓
-DELETE FROM active_connections WHERE device_id = ?
-  ↓
-❌ MISSING: Notify nodes via gRPC
-  ↓
-❌ MISSING: Enforcer.terminateDevice or similar
-  ↓
-❌ MISSING: Xray API call to disconnect user
+User connects
+    ↓
+Xray pre-auth hook (DOES NOT EXIST)
+    ↓
+Call enforcer.CheckAndRegisterConnection()
+    ↓
+If denied: reject before TLS handshake
+    ↓
+If allowed: proceed with connection
 ```
 
-**Status:** Database layer exists, API and runtime integration missing
+**Blocker:** Xray has no pre-authentication hook mechanism.
 
-## Concurrency Correctness
+---
 
-### ✅ Fixed Issues
+## Protocol Capability Matrix
 
-1. **TOCTOU Race (CRITICAL):** Fixed by CheckAndRegisterConnection
-   - Previous: CheckConnection (RLock) + RegisterConnection (Lock) had race window
-   - Now: Atomic check-and-register under write lock
-   - Test: TestConcurrentLimitBypass verifies 200 concurrent attempts respect limit
+### Xray (via Stats API)
 
-2. **Policy Update Connection Termination:**
-   - Fixed: enforceConnectionLimitLocked terminates oldest connections when limit reduced
-   - Test: TestPolicyUpdate verifies 3 connections → limit 2 → 2 remain
+| Feature | Status | Classification | Notes |
+|---------|--------|---------------|-------|
+| MaxConnections | ⚠️ | BEST_EFFORT | Terminated within sync interval |
+| MaxDevices | ❌ | UNSUPPORTED | No device fingerprint from stats API |
+| MaxIPs | ❌ | UNSUPPORTED | No source IP from stats API |
+| Speed Limit (Up) | 🔄 | PROPAGATED | Policy written, not verified |
+| Speed Limit (Down) | 🔄 | PROPAGATED | Policy written, not verified |
+| Quota | ⚠️ | BEST_EFFORT | Auto-freeze via sweeper (5 min) |
+| Revoke | ⚠️ | BEST_EFFORT | RemoveUser() within sync interval |
+| Live Disconnect | ⚠️ | BEST_EFFORT | Via RemoveUser API |
 
-3. **Duplicate Registration:**
-   - Fixed: registerConnectionLocked returns error on duplicate connID
-   - Test: TestCheckAndRegisterIdempotent verifies behavior
+**Enforcement Mechanism:** `ConnectionTracker.Sync()` polls every 5-10 seconds
 
-### ⚠️ Remaining Issues
+**Limitations:**
+1. No device ID extraction (uses placeholder)
+2. No source IP extraction (uses 0.0.0.0)
+3. 5-10 second enforcement window
+4. Speed limits written to policy but not runtime-verified
 
-1. **Index Rebuild Performance:**
-   - O(N) rebuild on every UnregisterConnection
-   - Acceptable for now, optimize if N grows large per subject
+### WireGuard
 
-2. **Memory Growth:**
-   - Slice capacity growth for subjectConns
-   - Mitigated by CleanupStale, but could use periodic compaction
+| Feature | Status | Classification | Notes |
+|---------|--------|---------------|-------|
+| MaxConnections | 📋 | CONFIGURED | Adapter exists, no tracking |
+| MaxDevices | ❌ | UNSUPPORTED | WireGuard has no device concept |
+| MaxIPs | ✅ | ENFORCED | 1 peer = 1 allowed IP |
+| Speed Limit (Up) | ❌ | UNSUPPORTED | Kernel module, no userspace control |
+| Speed Limit (Down) | ❌ | UNSUPPORTED | Kernel module, no userspace control |
+| Quota | 📋 | CONFIGURED | No accounting integration |
+| Revoke | 🔄 | PROPAGATED | Config regeneration required |
+| Live Disconnect | ❌ | UNSUPPORTED | No runtime API, only config reload |
 
-3. **Concurrent UpdatePolicies:**
-   - Last-writer-wins semantics
-   - Likely OK since reconciliation is serialized at agent level
+**Enforcement Mechanism:** None implemented
 
-## Protocol-Specific Analysis
+**Possible Solutions:**
+- nftables for rate limiting
+- eBPF for accounting
+- Peer config regeneration for revocation
 
-### Xray
+### Hysteria2
 
-**Architecture:**
-- User management via gRPC API (HandlerService)
-- Per-user speed limits via policy.json levels
-- No native device/IP/connection tracking
+| Feature | Status | Classification | Notes |
+|---------|--------|---------------|-------|
+| MaxConnections | 📋 | CONFIGURED | No tracking implemented |
+| MaxDevices | ❌ | UNSUPPORTED | No device fingerprint |
+| MaxIPs | 📋 | CONFIGURED | Auth hook possible |
+| Speed Limit (Up) | ✅ | ENFORCED | Native Hysteria2 feature |
+| Speed Limit (Down) | ✅ | ENFORCED | Native Hysteria2 feature |
+| Quota | 📋 | CONFIGURED | No accounting integration |
+| Revoke | 🔄 | PROPAGATED | Requires auth reload |
+| Live Disconnect | ❌ | UNSUPPORTED | No disconnect API |
 
-**Enforcement Approach:**
-- Speed limits: NATIVE (Xray policy system)
-- Connection limits: NODE-SIDE (Enforcer intercepts connection attempts)
-- Device/IP limits: NODE-SIDE (Enforcer tracks and blocks)
-- Quota: HYBRID (Xray stats + panel accounting)
-- Revocation: NODE-SIDE (API call to remove user)
+**Enforcement Mechanism:** Native bandwidth control, no admission control
 
-**What Works:**
-- Policy config generation ✅
-- Speed limit application on restart ✅
-- User add/remove via API ✅
+**Possible Solutions:**
+- Auth plugin for pre-connection validation
+- Custom Hysteria2 fork with enforcement hooks
 
-**What's Missing:**
-- Connection registration hooks
-- Device ID extraction
-- Runtime connection termination
+### L2TP/IPsec
 
-### WireGuard (Analysis)
+| Feature | Status | Classification | Notes |
+|---------|--------|---------------|-------|
+| MaxConnections | 📋 | CONFIGURED | No tracking |
+| MaxDevices | ❌ | UNSUPPORTED | No device concept |
+| MaxIPs | 📋 | CONFIGURED | 1 user = 1 IP |
+| Speed Limit (Up) | ❌ | UNSUPPORTED | Kernel IPsec stack |
+| Speed Limit (Down) | ❌ | UNSUPPORTED | Kernel IPsec stack |
+| Quota | 📋 | CONFIGURED | No accounting |
+| Revoke | 🔄 | PROPAGATED | Config regeneration |
+| Live Disconnect | ❌ | UNSUPPORTED | No runtime control |
 
-**Architecture:**
-- Kernel module or userspace (wireguard-go)
-- Peer-based (one config per peer)
-- No built-in user management API
-- Traffic shaping via Linux tc/nftables
+**Enforcement Mechanism:** None implemented
 
-**Enforcement Approach:**
-- Speed limits: EXTERNAL (tc/nftables)
-- Connection limits: PEER-BASED (wireguard peer = "connection")
-- Device limits: CONFIG-BASED (one peer = one device)
-- IP limits: Not applicable (wireguard assigns IPs)
-- Quota: EXTERNAL (nftables counters)
-- Revocation: CONFIG-RELOAD (remove peer from config)
+**Possible Solutions:**
+- nftables/iptables for rate limiting
+- Netfilter accounting for quota
 
-**Implementation Path:**
-1. Speed limits: tc qdisc per peer interface
-2. Connection limits: Count active peers
-3. Device limits: Limit peers per subject
-4. Revocation: wg set command to remove peer
+### Sing-box
 
-**Status:** TODO (requires different architecture than Xray)
+| Feature | Status | Classification | Notes |
+|---------|--------|---------------|-------|
+| MaxConnections | 📋 | CONFIGURED | Partial adapter, no tracking |
+| MaxDevices | ❌ | UNSUPPORTED | No device fingerprint |
+| MaxIPs | 📋 | CONFIGURED | Possible via stats |
+| Speed Limit (Up) | 🔄 | PROPAGATED | Native feature, not configured |
+| Speed Limit (Down) | 🔄 | PROPAGATED | Native feature, not configured |
+| Quota | 📋 | CONFIGURED | Stats API available |
+| Revoke | 🔄 | PROPAGATED | Requires implementation |
+| Live Disconnect | 📋 | CONFIGURED | API exists, not integrated |
 
-### Hysteria2 (Analysis)
+**Enforcement Mechanism:** Not implemented (partial adapter)
 
-**Architecture:**
-- QUIC-based
-- Built-in authentication via auth plugin or password
-- Single server instance per port
-- Traffic stats via API
+---
 
-**Enforcement Approach:**
-- Speed limits: NATIVE (Hysteria2 bandwidth config)
-- Connection limits: AUTH-LAYER (reject auth if over limit)
-- Device limits: AUTH-LAYER (track device fingerprint)
-- IP limits: AUTH-LAYER (track source IP)
-- Quota: HYBRID (Hysteria2 stats + panel)
-- Revocation: AUTH-LAYER (reject auth for revoked device)
+## Atomic Admission Control Analysis
 
-**Implementation Path:**
-1. Authentication plugin intercepts auth requests
-2. Plugin calls Enforcer.CheckAndRegisterConnection
-3. Reject auth if ErrPolicyViolation
-4. Speed limits via Hysteria2 config bandwidth field
+### Current Implementation: CheckAndRegisterConnection()
 
-**Status:** TODO (requires auth plugin integration)
+**Status:** ✅ RACE-FREE (atomic under write lock)
 
-### Sing-box (Analysis)
+```go
+func (e *Enforcer) CheckAndRegisterConnection(...) error {
+    e.mu.Lock()
+    defer e.mu.Unlock()
+    
+    // 1. Check if already exists
+    if _, exists := e.connections[connID]; exists {
+        return nil
+    }
+    
+    // 2. Validate policy (device, IP, connection limits)
+    // 3. Register connection atomically
+    // 4. Update indexes
+    
+    return nil
+}
+```
 
-**Architecture:**
-- Similar to Xray (unified proxy platform)
-- Support for multiple protocols
-- API for user management
-- Policy system for speed limits
+**Tests:**
+- ✅ TestCheckAndRegisterAtomicity
+- ✅ TestConcurrentLimitBypass (200 concurrent connections vs limit of 10)
+- ✅ Race detector clean
 
-**Enforcement Approach:**
-- Similar to Xray
-- Native speed limits via policy
-- Node-side device/IP/connection tracking
+**Verdict:** Atomic admission is correct, but NOT USED for real-time admission.
 
-**Status:** TODO (can largely mirror Xray implementation)
+### Integration Gap: Xray Stats Polling
 
-### L2TP/IPsec (Analysis)
+**Problem:** Xray has no pre-auth hook
 
-**Architecture:**
-- strongSwan (IPsec) + xl2tpd (L2TP)
-- Authentication via chap-secrets or certificates
-- No runtime user management API
-- Connection tracking via strongSwan status
+**Current:** Connections admitted by Xray → Stats polled → Violations terminated retroactively
 
-**Enforcement Approach:**
-- Speed limits: EXTERNAL (tc/nftables)
-- Connection limits: PRE-AUTH (check before adding to chap-secrets)
-- Device limits: CERT-BASED (one cert = one device)
-- IP limits: Not directly applicable
-- Quota: EXTERNAL (nftables counters)
-- Revocation: CONFIG-RELOAD (remove from chap-secrets + IKE reauth)
+**Required:** Pre-auth hook → CheckAndRegisterConnection → Allow/deny before handshake
 
-**Status:** TODO (requires config-based enforcement strategy)
+**Possible Solutions:**
 
-## Comparison with Competitors
+1. **Xray Fork** - Add pre-auth plugin system (HIGH EFFORT)
+2. **External Proxy** - SOCKS/HTTP proxy in front of Xray (PERFORMANCE COST)
+3. **Accept Best-Effort** - Document as known limitation (CURRENT STATE)
 
-### Marzban
+---
 
-**Features:**
-- Traffic limits ✅
-- Connection limits ✅
-- Expiry dates ✅
-- Protocol: Xray only
-- No device tracking
-- No IP limits
+## Speed Limit Verification Status
 
-**Antimage Advantage:**
-- Multi-protocol support (Xray, WireGuard, Hysteria2, L2TP)
-- Device tracking and limits
-- IP address limits
-- Audit trail
-- RBAC
+### Database → Node Propagation: ✅ VERIFIED
 
-### 3x-ui
+```sql
+-- subjects table
+speed_limit_up_kbps    INTEGER
+speed_limit_down_kbps  INTEGER
+```
 
-**Features:**
-- Traffic limits ✅
-- Expiry dates ✅
-- Connection limits ✅
-- Protocol: Xray only
-- Basic web UI
+```go
+// Desired state includes limits
+adapter.Subject{
+    SpeedLimitUpKbps:   policy.UploadSpeedKbps,
+    SpeedLimitDownKbps: policy.DownloadSpeedKbps,
+}
+```
 
-**Antimage Advantage:**
-- Enterprise-grade audit logging
-- RBAC with roles
-- Bulk operations
-- Device management
-- Multi-node orchestration
+```json
+// Xray policy config
+{
+  "policy": {
+    "levels": {
+      "0": {
+        "uplinkOnly": {"value": 5120000},
+        "downlinkOnly": {"value": 5120000}
+      }
+    }
+  }
+}
+```
 
-### Rebecca
+### Runtime Behavior: ❌ NOT VERIFIED
 
-**Features:**
-- Modern UI
-- Subscription system ✅
-- Xray protocol ✅
-- Traffic limits ✅
+**Missing:** E2E test that:
+1. Sets speed limit in database
+2. Triggers reconciliation
+3. Establishes connection through Xray
+4. Measures actual throughput
+5. Verifies limit is enforced
 
-**Antimage Advantage:**
-- Node agent architecture (no SSH)
-- Convergence engine
-- Atomic policy application
-- Multi-protocol
-- Device/IP enforcement
+**Status:** Configuration exists, runtime enforcement UNPROVEN.
 
-### vpn-ui
+---
 
-**Features:**
-- WireGuard focus
-- Basic traffic stats
-- Simple UI
+## Quota Enforcement Analysis
 
-**Antimage Advantage:**
-- Multi-protocol
-- Policy enforcement
-- Enterprise features
-- Audit trail
-- Device management
+### Auto-Freeze Mechanism: ⚠️ BEST_EFFORT
 
-## Testing Status
+**Implementation:** `observability.Sweeper.enforceQuotaFreeze()`
 
-### Unit Tests
+**Trigger:** Background job every 5 minutes
 
-- ✅ enforcement package: 15 tests, all passing
-- ✅ devices package: 6 tests, all passing
-- ✅ Xray policy generation: tested
-- ✅ Concurrent access: tested
-- ✅ TOCTOU race: tested
-- ✅ Policy updates: tested
+**Flow:**
+```
+Subject exceeds quota
+    ↓
+Wait up to 5 minutes (sweeper interval)
+    ↓
+Sweeper detects quota_used_bytes >= quota_bytes
+    ↓
+Subject frozen (frozen_at set)
+    ↓
+Subscription endpoint returns 404
+    ↓
+Next node reconciliation removes user from Xray
+```
 
-### Integration Tests
+**Gap:** Up to 5 minutes + reconciliation delay before enforcement.
 
-- ❌ E2E Xray speed limit enforcement
-- ❌ E2E connection limit enforcement
-- ❌ Device registration flow
-- ❌ Revocation flow
-- ❌ Panel API endpoints
+**Tests:**
+- ✅ Unit tests pass
+- ❌ E2E verification missing
 
-### Manual Testing Required
+---
 
-1. Deploy node with Xray + enforcer
-2. Set speed limit on subject
-3. Measure actual throughput
-4. Set connection limit
-5. Attempt concurrent connections
-6. Verify limit enforced
-7. Revoke device
-8. Verify disconnection
+## Device Fingerprinting
 
-## Security Review
+### Current Status: ❌ PLACEHOLDER ONLY
 
-### ✅ Secure
+**Xray:** Uses `fmt.Sprintf("xray-subject-%d", subjectID)` as device ID
 
-1. Atomic admission control prevents race-based bypass
-2. Policy validation rejects negative limits
-3. Connection limits cannot be exceeded via concurrency
-4. Policy updates immediately enforce new limits
+**Reality:** All connections from same subject get SAME device ID
 
-### ⚠️ Review Required
+**Result:** MaxDevices limit effectively becomes MaxConnections for Xray
 
-1. Device ID source: how is it extracted? Can it be spoofed?
-2. IP address source: trusted from protocol or reverse proxy?
-3. Revocation: how quickly does it take effect?
-4. Connection termination: does Xray API actually drop connections?
+**Required:**
+- TLS client cert fingerprint
+- Custom header parsing
+- User-Agent parsing
+- Or: Accept limitation and document
 
-### 🔴 Known Gaps
+---
 
-1. No rate limiting on API endpoints (DoS risk)
-2. No pagination on device list (memory DoS risk)
-3. No protection against device ID rotation attacks
-4. No audit logging for enforcement violations
+## IP Tracking
+
+### Current Status: ❌ PLACEHOLDER ONLY
+
+**Xray:** Uses `"0.0.0.0"` as source IP
+
+**Reality:** No source IP available from Xray stats API
+
+**Result:** MaxIPs limit CANNOT be enforced via current mechanism
+
+**Possible Solutions:**
+1. Xray access log parsing (COMPLEX, SLOW)
+2. Custom Xray fork exposing IP in stats (HIGH EFFORT)
+3. External proxy layer (PERFORMANCE COST)
+4. Accept limitation and document (CURRENT)
+
+---
+
+## Production Readiness Verdict
+
+### What Actually Works
+
+✅ **Atomic admission control** - CheckAndRegisterConnection is race-free  
+✅ **Connection limit (best-effort)** - Terminated within 5-10s for Xray  
+✅ **Quota auto-freeze** - Triggered within 5 minutes  
+✅ **Policy propagation** - Speed limits reach Xray config  
+✅ **Revocation API** - Can remove users via RemoveUser  
+
+### What Doesn't Work
+
+❌ **Real-time admission control** - Xray has no pre-auth hook  
+❌ **Device limits** - No device fingerprint extraction  
+❌ **IP limits** - No source IP from Xray stats  
+❌ **Speed limit verification** - Not runtime-tested  
+❌ **Instant enforcement** - 5-10s window for violations  
+
+### What's Acceptable for Production
+
+⚠️ **Best-effort enforcement** is ACCEPTABLE if:
+1. Documented clearly in limitations
+2. Sync interval is short (5s recommended)
+3. Monitoring shows violations are rare
+4. Users understand 5-10s grace period
+
+⚠️ **Missing device/IP tracking** is ACCEPTABLE if:
+1. Documented as limitation
+2. MaxConnections used as proxy
+3. Consider future Xray API improvements
+
+❌ **Unverified speed limits** is NOT ACCEPTABLE
+- Must E2E test before production claim
+
+---
 
 ## Recommendations
 
-### P0 (Must Fix Before Production)
+### Immediate (P0)
 
-1. ✅ Fix TOCTOU race in CheckConnection + RegisterConnection
-2. ✅ Fix policy update connection termination
-3. ❌ Implement Xray connection registration hooks
-4. ❌ Implement device revocation runtime integration
-5. ❌ Register device management API routes
-6. ❌ Add authentication/authorization to device API
-7. ❌ Write E2E tests for Xray enforcement
+1. **Create E2E speed limit test**
+   - Real Xray instance
+   - Actual network traffic
+   - Measured throughput
+   - Verify enforcement
 
-### P1 (Important)
+2. **Document limitations**
+   - Best-effort enforcement window
+   - No device fingerprinting
+   - No IP tracking via stats
+   - Speed limits unverified
 
-1. ❌ Implement Hysteria2 auth-layer enforcement
-2. ❌ Implement WireGuard enforcement via tc/nftables
-3. ❌ Add audit logging for enforcement events
-4. ❌ Add rate limiting to device API
-5. ❌ Add pagination to device list
-6. ❌ Document device ID extraction mechanism
-7. ❌ Add enforcement metrics to observability
+3. **Add monitoring**
+   - Enforcement violations detected
+   - Termination success rate
+   - Sync loop performance
 
-### P2 (Nice to Have)
+### Short-term (P1)
 
-1. ❌ Implement Sing-box enforcement
-2. ❌ Implement L2TP/IPsec enforcement
-3. ❌ Add enforcement dashboard in panel UI
-4. ❌ Add real-time connection viewer
-5. ❌ Add per-subject enforcement statistics
-6. ❌ Optimize index rebuild performance
-7. ❌ Add enforcement simulation mode (test policies without enforcing)
+4. **Reduce sync interval to 5s** (currently 5-10s configurable)
+
+5. **Add enforcement metrics**
+   - Connections checked
+   - Connections rejected
+   - Connections terminated
+   - Policy violations by type
+
+6. **Implement quota grace period**
+   - Warn at 80%, 90%
+   - Short grace before freeze
+   - User notification
+
+### Long-term (P2)
+
+7. **Investigate Xray pre-auth plugin** (upstream feature request)
+
+8. **Evaluate external proxy solution** for real-time admission
+
+9. **eBPF/nftables integration** for WireGuard/L2TP enforcement
+
+---
 
 ## Conclusion
 
-**Current State:** Foundation is solid, but incomplete
+**Enforcement is functional but not real-time.**
 
-**What Works:**
-- Database schema ✅
-- Desired state propagation ✅
-- Node-side enforcement engine ✅
-- Xray policy config generation ✅
-- Concurrency correctness ✅
+The atomic admission control mechanism (CheckAndRegisterConnection) is correct and race-free. However, it's used for retroactive enforcement via polling, not real-time admission control.
 
-**What's Missing:**
-- Xray runtime integration (connection hooks)
-- Device management API registration
-- Revocation implementation
-- E2E tests
-- Other protocol implementations
+**Classification:** BEST_EFFORT enforcement with 5-10 second window.
 
-**Honest Assessment:**
-- Connection/Device/IP limits: **CONFIGURED + PROPAGATED** (not yet ENFORCED)
-- Speed limits (Xray): **ENFORCED** (mechanism exists, needs E2E verification)
-- Revocation: **BEST_EFFORT** (database layer only)
-- Traffic quota: **OBSERVED** (accounting exists, no hard enforcement)
+**Production Status:** ACCEPTABLE with documented limitations and verified speed limits.
 
-**Next Steps:**
-1. Implement Xray connection registration hooks
-2. Register device management API routes
-3. Write E2E enforcement tests
-4. Implement device revocation runtime integration
-5. Move to Hysteria2 enforcement (P0 protocol for new deployments)
+**Blocker for "ENFORCED" claim:** Xray protocol adapter has no pre-authentication hook mechanism.
