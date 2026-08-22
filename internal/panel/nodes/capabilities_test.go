@@ -227,6 +227,13 @@ func TestCapabilityUpdate(t *testing.T) {
 	}
 }
 
+// Compare timestamps within 1 second tolerance due to SQLite precision
+	diff := retrieved[0].LastCheckAt.Sub(later)
+	if diff < -time.Second || diff > time.Second {
+		t.Errorf("LastCheckAt = %v, want %v (within 1s)", retrieved[0].LastCheckAt, later)
+	}
+}
+
 func TestCapabilitiesForNonexistentNode(t *testing.T) {
 	ctx := context.Background()
 	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
