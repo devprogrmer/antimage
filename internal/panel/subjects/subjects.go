@@ -498,3 +498,80 @@ func (s *Store) NodeIDsForRead(ctx context.Context, subjectID int64) ([]int64, e
 	}
 	return ids, rows.Err()
 }
+
+// Freeze freezes a subject, preventing access until unfrozen.
+// Sets frozen_at timestamp and reason. Typically used for quota enforcement or violations.
+func (s *Store) Freeze(ctx context.Context, tx *sql.Tx, subjectID int64, reason string) error {
+	now := s.now().UTC().Unix()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE subjects SET frozen_at = ?, frozen_reason = ? WHERE id = ?`,
+		now, reason, subjectID)
+	if err != nil {
+		return fmt.Errorf("freeze subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// Unfreeze unfreezes a subject, restoring access.
+// Clears frozen_at and frozen_reason.
+func (s *Store) Unfreeze(ctx context.Context, tx *sql.Tx, subjectID int64) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE subjects SET frozen_at = NULL, frozen_reason = NULL WHERE id = ?`,
+		subjectID)
+	if err != nil {
+		return fmt.Errorf("unfreeze subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// Disable disables a subject, setting enabled = 0.
+// This is different from freeze: disable is manual admin action, freeze is automatic quota enforcement.
+func (s *Store) Disable(ctx context.Context, tx *sql.Tx, subjectID int64) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE subjects SET enabled = 0 WHERE id = ?`,
+		subjectID)
+	if err != nil {
+		return fmt.Errorf("disable subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// Enable enables a subject, setting enabled = 1 and clearing expired_at.
+func (s *Store) Enable(ctx context.Context, tx *sql.Tx, subjectID int64) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE subjects SET enabled = 1, expired_at = NULL WHERE id = ?`,
+		subjectID)
+	if err != nil {
+		return fmt.Errorf("enable subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
