@@ -19,6 +19,8 @@ type Policy struct {
 	MaxConnections     *int64
 	SpeedLimitUpKbps   *int64
 	SpeedLimitDownKbps *int64
+	QuotaBytes         *int64 // Total quota in bytes
+	QuotaUsedBytes     *int64 // Current usage in bytes
 }
 
 // Connection represents an active connection being tracked.
@@ -160,6 +162,15 @@ func (e *Enforcer) CheckAndRegisterConnection(connID string, subjectID int64, de
 			if len(conns) >= int(*policy.MaxConnections) {
 				return &ErrPolicyViolation{
 					Reason: fmt.Sprintf("connection limit reached (%d/%d)", len(conns), *policy.MaxConnections),
+				}
+			}
+		}
+
+		// Check quota (immediate enforcement)
+		if policy.QuotaBytes != nil && policy.QuotaUsedBytes != nil {
+			if *policy.QuotaUsedBytes >= *policy.QuotaBytes {
+				return &ErrPolicyViolation{
+					Reason: fmt.Sprintf("quota exhausted (%d/%d bytes)", *policy.QuotaUsedBytes, *policy.QuotaBytes),
 				}
 			}
 		}
