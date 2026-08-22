@@ -1,13 +1,10 @@
 package xray
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
