@@ -11,7 +11,7 @@ import (
 // handleExportSubjects exports all subjects to CSV.
 // GET /api/v1/subjects/export
 func (d Deps) handleExportSubjects(w http.ResponseWriter, r *http.Request) {
-	rows, err := d.DB.QueryContext(r.Context(), `
+	rows, err := d.Store.Read().QueryContext(r.Context(), `
 		SELECT id, name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at
 		FROM subjects
 		ORDER BY created_at DESC

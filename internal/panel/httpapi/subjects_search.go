@@ -103,7 +103,7 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	// Count total
 	countQuery := "SELECT COUNT(*) FROM (" + baseQuery + ") AS filtered"
 	var total int
-	err := d.DB.QueryRowContext(r.Context(), countQuery, args...).Scan(&total)
+	err := d.Store.Read().QueryRowContext(r.Context(), countQuery, args...).Scan(&total)
 	if err != nil {
 		http.Error(w, "failed to count subjects", http.StatusInternalServerError)
 		return
@@ -113,7 +113,7 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	query := baseQuery + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
 	args = append(args, pageSize, offset)
 
-	rows, err := d.DB.QueryContext(r.Context(), query, args...)
+	rows, err := d.Store.Read().QueryContext(r.Context(), query, args...)
 	if err != nil {
 		http.Error(w, "failed to query subjects", http.StatusInternalServerError)
 		return
