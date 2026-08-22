@@ -33,7 +33,7 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Authorization: nodes:write permission + node in scope
-	if !actor.Can(rbac.NodesWrite) {
+	if !actor.Has(rbac.NodesWrite) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -46,9 +46,11 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !actor.CanAccessNode(nodeID) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
+	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
+		if _, ok := actor.NodeIDs[nodeID]; !ok {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Record node event for audit trail
@@ -96,17 +98,24 @@ func (d Deps) handleSyncNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !actor.Can(rbac.NodesWrite) || !actor.CanAccessNode(nodeID) {
+	if !actor.Has(rbac.NodesWrite) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
-	// Verify node exists
+	// Verify node exists and is in scope
 	var nodeName string
 	err = d.Store.Read().QueryRowContext(ctx, `SELECT name FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName)
 	if err != nil {
 		http.Error(w, "node not found", http.StatusNotFound)
 		return
+	}
+
+	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
+		if _, ok := actor.NodeIDs[nodeID]; !ok {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Record sync request
@@ -161,9 +170,16 @@ func (d Deps) handleSetNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !actor.Can(rbac.NodesWrite) || !actor.CanAccessNode(nodeID) {
+	if !actor.Has(rbac.NodesWrite) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
+	}
+
+	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
+		if _, ok := actor.NodeIDs[nodeID]; !ok {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Update maintenance mode in database
@@ -242,9 +258,16 @@ func (d Deps) handleEnableNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !actor.Can(rbac.NodesWrite) || !actor.CanAccessNode(nodeID) {
+	if !actor.Has(rbac.NodesWrite) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
+	}
+
+	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
+		if _, ok := actor.NodeIDs[nodeID]; !ok {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Update node status from disabled to pending
@@ -311,9 +334,16 @@ func (d Deps) handleDisableNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !actor.Can(rbac.NodesWrite) || !actor.CanAccessNode(nodeID) {
+	if !actor.Has(rbac.NodesWrite) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
+	}
+
+	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
+		if _, ok := actor.NodeIDs[nodeID]; !ok {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Update node status to disabled
