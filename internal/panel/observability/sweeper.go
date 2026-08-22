@@ -68,6 +68,10 @@ func (sw *Sweeper) sweep(ctx context.Context) {
 	if err := sw.enforceQuotaFreeze(ctx, now); err != nil {
 		log.Printf("[observability] quota freeze enforcement failed: %v", err)
 	}
+
+	if err := sw.enforceQuotaWarnings(ctx); err != nil {
+		log.Printf("[observability] quota warnings failed: %v", err)
+	}
 }
 
 func (sw *Sweeper) checkCertificates(ctx context.Context, now time.Time) error {
