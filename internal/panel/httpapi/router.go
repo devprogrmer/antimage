@@ -155,6 +155,13 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/nodes/{nodeID}/reconciliation", d.handleGetNodeReconciliation)
 			private.Get("/nodes/{nodeID}/capabilities", d.handleGetNodeCapabilities)
 
+			// Node actions (M6)
+			private.Post("/nodes/{nodeID}/restart", d.handleRestartNode)
+			private.Post("/nodes/{nodeID}/sync", d.handleSyncNode)
+			private.Post("/nodes/{nodeID}/maintenance", d.handleSetNodeMaintenance)
+			private.Post("/nodes/{nodeID}/enable", d.handleEnableNode)
+			private.Post("/nodes/{nodeID}/disable", d.handleDisableNode)
+
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)
