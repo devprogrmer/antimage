@@ -14,11 +14,10 @@ import (
 // handleFreezeSubject freezes a subject (quota enforcement, violations)
 // POST /api/v1/subjects/:id/freeze
 func (d Deps) handleFreezeSubject(w http.ResponseWriter, r *http.Request) {
-	actor := ActorFrom(r.Context())
-	if err := rbac.Check(actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}); err != nil {
-		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	actor := ActorFrom(r.Context())
 
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "subjectID"), 10, 64)
 	if err != nil {
@@ -66,11 +65,10 @@ func (d Deps) handleFreezeSubject(w http.ResponseWriter, r *http.Request) {
 // handleUnfreezeSubject unfreezes a subject
 // POST /api/v1/subjects/:id/unfreeze
 func (d Deps) handleUnfreezeSubject(w http.ResponseWriter, r *http.Request) {
-	actor := ActorFrom(r.Context())
-	if err := rbac.Check(actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}); err != nil {
-		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	actor := ActorFrom(r.Context())
 
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "subjectID"), 10, 64)
 	if err != nil {
@@ -106,11 +104,10 @@ func (d Deps) handleUnfreezeSubject(w http.ResponseWriter, r *http.Request) {
 // handleDisableSubject disables a subject (manual admin action)
 // POST /api/v1/subjects/:id/disable
 func (d Deps) handleDisableSubject(w http.ResponseWriter, r *http.Request) {
-	actor := ActorFrom(r.Context())
-	if err := rbac.Check(actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}); err != nil {
-		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	actor := ActorFrom(r.Context())
 
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "subjectID"), 10, 64)
 	if err != nil {
@@ -146,11 +143,10 @@ func (d Deps) handleDisableSubject(w http.ResponseWriter, r *http.Request) {
 // handleEnableSubject enables a subject
 // POST /api/v1/subjects/:id/enable
 func (d Deps) handleEnableSubject(w http.ResponseWriter, r *http.Request) {
-	actor := ActorFrom(r.Context())
-	if err := rbac.Check(actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}); err != nil {
-		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	actor := ActorFrom(r.Context())
 
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "subjectID"), 10, 64)
 	if err != nil {
