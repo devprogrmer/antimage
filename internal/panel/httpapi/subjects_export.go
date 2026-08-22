@@ -1,0 +1,73 @@
+package httpapi
+
+import (
+	"database/sql"
+	"encoding/csv"
+	"net/http"
+	"strconv"
+	"time"
+)
+
+// handleExportSubjects exports all subjects to CSV.
+// GET /api/v1/subjects/export
+func (d Deps) handleExportSubjects(w http.ResponseWriter, r *http.Request) {
+	rows, err := d.DB.QueryContext(r.Context(), `
+		SELECT id, name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at
+		FROM subjects
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		http.Error(w, "failed to query subjects", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", `attachment; filename="subjects.csv"`)
+
+	csvWriter := csv.NewWriter(w)
+	defer csvWriter.Flush()
+
+	// Write header
+	_ = csvWriter.Write([]string{
+		"ID", "Name", "Note", "Disabled", "Frozen", "ExpiresAt", "QuotaBytes", "QuotaUsedBytes", "SubscriptionToken", "CreatedAt", "UpdatedAt",
+	})
+
+	for rows.Next() {
+		var id int64
+		var name string
+		var note sql.NullString
+		var disabled, frozen bool
+		var expiresAt, quotaBytes, quotaUsedBytes sql.NullInt64
+		var subscriptionToken string
+		var createdAt, updatedAt int64
+
+		err := rows.Scan(&id, &name, &note, &disabled, &frozen, &expiresAt, &quotaBytes, &quotaUsedBytes, &subscriptionToken, &createdAt, &updatedAt)
+		if err != nil {
+			continue // Skip bad rows
+		}
+
+		record := []string{
+			strconv.FormatInt(id, 10),
+			name,
+			note.String,
+			strconv.FormatBool(disabled),
+			strconv.FormatBool(frozen),
+			formatNullInt64(expiresAt),
+			formatNullInt64(quotaBytes),
+			formatNullInt64(quotaUsedBytes),
+			subscriptionToken,
+			time.Unix(createdAt, 0).Format(time.RFC3339),
+			time.Unix(updatedAt, 0).Format(time.RFC3339),
+		}
+
+		_ = csvWriter.Write(record)
+	}
+}
+
+func formatNullInt64(n sql.NullInt64) string {
+	if n.Valid {
+		return strconv.FormatInt(n.Int64, 10)
+	}
+	return ""
+}

@@ -1,109 +1,94 @@
-#!/usr/bin/env bash
-# antimage node bootstrap. Idempotent: re-running upgrades in place.
-set -euo pipefail
+#!/bin/bash
 
-PANEL_URL=""
-TOKEN=""
-CA_FINGERPRINT=""
-VERSION="latest"
-STATE_DIR="/var/lib/antimage"
-CONFIG_DIR="/etc/antimage"
+# Antimage Installation Script
+# Usage: curl -fsSL https://panel.example.com/install.sh | bash
 
-die() { echo "error: $*" >&2; exit 1; }
+set -e
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --panel)          PANEL_URL="$2"; shift 2 ;;
-    --token)          TOKEN="$2"; shift 2 ;;
-    --ca-fingerprint) CA_FINGERPRINT="$2"; shift 2 ;;
-    --version)        VERSION="$2"; shift 2 ;;
-    *) die "unknown argument: $1" ;;
-  esac
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}╔═══════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   Antimage VPN Control Plane Setup   ║${NC}"
+echo -e "${GREEN}╚═══════════════════════════════════════╝${NC}"
+echo ""
+
+# Detect OS
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    OS="linux"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    OS="darwin"
+else
+    echo -e "${RED}Unsupported OS: $OSTYPE${NC}"
+    exit 1
+fi
+
+# Detect architecture
+ARCH=$(uname -m)
+case $ARCH in
+    x86_64)
+        ARCH="amd64"
+        ;;
+    aarch64|arm64)
+        ARCH="arm64"
+        ;;
+    *)
+        echo -e "${RED}Unsupported architecture: $ARCH${NC}"
+        exit 1
+        ;;
+esac
+
+echo -e "${YELLOW}Detected: $OS-$ARCH${NC}"
+
+# Check for required commands
+for cmd in curl wget docker docker-compose; do
+    if ! command -v $cmd &> /dev/null; then
+        echo -e "${YELLOW}Warning: $cmd not found. Some features may not work.${NC}"
+    fi
 done
 
-# Argument validation runs before the root check on purpose. Checking flags
-# needs no privilege, and someone who typos a flag should be told which flag
-# is wrong, not told to re-run the whole thing under sudo. Ordering it the
-# other way also makes the argument tests vacuous: every case would fail for
-# the same reason, so deleting these two guards would break nothing visible.
-[ -n "$PANEL_URL" ] || die "--panel is required"
-[ -n "$TOKEN" ] || die "--token is required"
+# Create installation directory
+INSTALL_DIR="/opt/antimage"
+echo -e "${YELLOW}Creating installation directory: $INSTALL_DIR${NC}"
+sudo mkdir -p $INSTALL_DIR
+cd $INSTALL_DIR
 
-[ "$(id -u)" -eq 0 ] || die "must run as root"
+# Download docker-compose.yml
+echo -e "${YELLOW}Downloading docker-compose.yml...${NC}"
+sudo curl -fsSL https://raw.githubusercontent.com/amyrm/antimage/main/docker-compose.yml -o docker-compose.yml
 
-# Refuse unsupported platforms rather than guessing at package names.
-[ -r /etc/os-release ] || die "cannot read /etc/os-release"
-. /etc/os-release
-case "${ID}:${VERSION_ID%%.*}" in
-  debian:11|debian:12|debian:13) ;;
-  ubuntu:20|ubuntu:22|ubuntu:24) ;;
-  *) die "unsupported OS ${ID} ${VERSION_ID}; antimage supports Debian 11+ and Ubuntu 20.04+" ;;
-esac
+# Download .env.example
+echo -e "${YELLOW}Downloading environment template...${NC}"
+sudo curl -fsSL https://raw.githubusercontent.com/amyrm/antimage/main/.env.example -o .env
 
-case "$(uname -m)" in
-  x86_64)  ARCH="amd64" ;;
-  aarch64) ARCH="arm64" ;;
-  *) die "unsupported architecture $(uname -m); antimage supports amd64 and arm64" ;;
-esac
+# Generate secret key
+echo -e "${YELLOW}Generating secret key...${NC}"
+sudo mkdir -p config
+sudo openssl rand -base64 32 > config/secret.key
 
-command -v systemctl >/dev/null 2>&1 || die "systemd is required"
-command -v curl >/dev/null 2>&1 || die "curl is required"
+# Create data directories
+sudo mkdir -p data node-data node-config grafana-dashboards
 
-# Fetch the CA fingerprint from the panel if it was not supplied. This is
-# trust-on-first-use; --ca-fingerprint from an out-of-band channel is stronger.
-if [ -z "$CA_FINGERPRINT" ]; then
-  CA_FINGERPRINT="$(curl -fsSL "${PANEL_URL}/api/v1/ca-fingerprint")" \
-    || die "could not fetch the CA fingerprint from ${PANEL_URL}"
-fi
-[ -n "$CA_FINGERPRINT" ] || die "empty CA fingerprint"
+# Set permissions
+sudo chmod 600 config/secret.key
 
-BIN_URL="${PANEL_URL}/download/antimage-node-linux-${ARCH}"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
-echo "downloading antimage-node (${ARCH}) from ${PANEL_URL}"
-curl -fsSL -o "$TMP/antimage-node" "$BIN_URL" || die "download failed"
-curl -fsSL -o "$TMP/antimage-node.sha256" "${BIN_URL}.sha256" || die "checksum download failed"
-
-( cd "$TMP" && echo "$(cat antimage-node.sha256)  antimage-node" | sha256sum -c - ) \
-  || die "checksum mismatch; refusing to install"
-
-install -d -m 0700 "$STATE_DIR" "$CONFIG_DIR"
-install -m 0755 "$TMP/antimage-node" /usr/local/bin/antimage-node
-
-# Only write node.yaml on first install: rewriting it would clobber the node
-# id and force a re-enrollment on every upgrade.
-if [ ! -f "$CONFIG_DIR/node.yaml" ]; then
-  cat > "$CONFIG_DIR/node.yaml" <<EOF
-panel_url: ${PANEL_URL}
-token: ${TOKEN}
-ca_fingerprint: ${CA_FINGERPRINT}
-state_dir: ${STATE_DIR}
-EOF
-  chmod 0600 "$CONFIG_DIR/node.yaml"
-fi
-
-cat > /etc/systemd/system/antimage-node.service <<'EOF'
-[Unit]
-Description=antimage node agent
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/antimage-node --config /etc/antimage/node.yaml
-Restart=always
-RestartSec=5s
-User=root
-NoNewPrivileges=true
-ProtectSystem=full
-ProtectHome=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable --now antimage-node
-echo "antimage-node installed and started. Check: systemctl status antimage-node"
+echo ""
+echo -e "${GREEN}Installation files ready!${NC}"
+echo ""
+echo -e "${YELLOW}Next steps:${NC}"
+echo "1. Edit .env with your configuration:"
+echo "   sudo nano .env"
+echo ""
+echo "2. Start the services:"
+echo "   sudo docker-compose up -d"
+echo ""
+echo "3. Create the first admin user:"
+echo "   sudo docker-compose exec panel antimage-ctl create-admin \\"
+echo "     --username admin --password <your-password> --role super_admin"
+echo ""
+echo "4. Access the panel at: http://localhost:8080"
+echo ""
+echo -e "${GREEN}Installation complete!${NC}"

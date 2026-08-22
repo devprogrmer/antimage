@@ -124,6 +124,7 @@ func NewRouter(d Deps) http.Handler {
 		// SP4: Subscription endpoint - public, token-authenticated.
 		// The token IS the authentication, no session required.
 		api.Get("/subscribe/{token}", d.handleSubscribe)
+		api.Get("/subscribe/{token}/qr", d.handleSubscriptionQR)
 
 		api.Group(func(private chi.Router) {
 			private.Use(d.authMiddleware, readOnlyMiddleware, d.rateLimitMiddleware(limiter))
@@ -181,12 +182,16 @@ func NewRouter(d Deps) http.Handler {
 			// returned by list or get; revealing one needs its own permission
 			// and is audited by kind, never by value.
 			private.Get("/subjects", d.handleListSubjects)
+			private.Get("/v2/subjects", d.handleListSubjectsV2) // Paginated with search/filter
 			private.Post("/subjects", d.handleCreateSubject)
 			private.Get("/subjects/{subjectID}", d.handleGetSubject)
 			private.Put("/subjects/{subjectID}", d.handleUpdateSubject)
 			private.Delete("/subjects/{subjectID}", d.handleDeleteSubject)
 			private.Get("/subjects/{subjectID}/credentials/{kind}", d.handleRevealCredential)
 			private.Post("/subjects/{subjectID}/credentials/{kind}/rotate", d.handleRotateCredential)
+			private.Get("/subjects/export", d.handleExportSubjects)
+			private.Post("/subjects/import", d.handleImportSubjects)
+			private.Post("/subjects/bulk/delete", d.handleBulkDeleteSubjects)
 
 			// Subject lifecycle operations
 			private.Post("/subjects/{subjectID}/freeze", d.handleFreezeSubject)
@@ -218,6 +223,10 @@ func NewRouter(d Deps) http.Handler {
 
 	// SP5: Prometheus metrics endpoint (no auth, standard for /metrics)
 	r.Handle("/metrics", promhttp.Handler())
+
+	// Health check endpoints (no auth, for orchestration)
+	r.Get("/health", d.handleHealth)
+	r.Get("/ready", d.handleReady)
 
 	r.Handle("/*", d.uiHandler())
 	return r

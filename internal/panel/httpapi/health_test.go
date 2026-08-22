@@ -1,0 +1,56 @@
+package httpapi
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/amyrm/antimage/internal/panel/control"
+	"github.com/amyrm/antimage/internal/panel/store"
+)
+
+func TestHealthEndpoint(t *testing.T) {
+	st := store.NewMemory()
+	deps := Deps{
+		Store: st,
+		Hub:   control.NewHub(st),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+
+	deps.handleHealth(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if body == "" {
+		t.Error("expected response body")
+	}
+}
+
+func TestReadyEndpoint(t *testing.T) {
+	st := store.NewMemory()
+	deps := Deps{
+		Store: st,
+		Hub:   control.NewHub(st),
+	}
+
+	// Initialize database schema
+	ctx := context.Background()
+	if err := st.Init(ctx); err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	w := httptest.NewRecorder()
+
+	deps.handleReady(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
