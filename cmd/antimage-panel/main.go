@@ -25,6 +25,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/control"
+	"github.com/amyrm/antimage/internal/panel/deployment"
 	"github.com/amyrm/antimage/internal/panel/httpapi"
 	"github.com/amyrm/antimage/internal/panel/metrics"
 	"github.com/amyrm/antimage/internal/panel/nodes"
@@ -89,6 +90,12 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Recover any deployments stuck in in_progress state from process crashes
+	orchestrator := deployment.NewOrchestrator(st)
+	if err := orchestrator.RecoverStaleDeployments(ctx); err != nil {
+		slog.Warn("deployment recovery failed", "error", err)
+	}
 
 	// SP5: Register Prometheus metrics collector
 	collector := metrics.NewCollector(st)
