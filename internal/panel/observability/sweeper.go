@@ -64,6 +64,10 @@ func (sw *Sweeper) sweep(ctx context.Context) {
 	if err := sw.checkQuotas(ctx, now); err != nil {
 		log.Printf("[observability] quota check failed: %v", err)
 	}
+
+	if err := sw.enforceQuotaFreeze(ctx, now); err != nil {
+		log.Printf("[observability] quota freeze enforcement failed: %v", err)
+	}
 }
 
 func (sw *Sweeper) checkCertificates(ctx context.Context, now time.Time) error {
@@ -247,6 +251,107 @@ func (sw *Sweeper) checkQuotas(ctx context.Context, now time.Time) error {
 
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate subjects: %w", err)
+	}
+
+	return nil
+}
+
+// enforceQuotaFreeze automatically freezes subjects that have exceeded their quota.
+// This runs after checkQuotas() which creates alerts. This function takes action.
+func (sw *Sweeper) enforceQuotaFreeze(ctx context.Context, now time.Time) error {
+	// Find subjects that have exceeded quota and are not frozen
+	rows, err := sw.store.Read().QueryContext(ctx, `
+		SELECT id, name, quota_bytes, quota_used_bytes
+		FROM subjects
+		WHERE quota_bytes IS NOT NULL
+		  AND quota_used_bytes >= quota_bytes
+		  AND frozen_at IS NULL
+		  AND enabled = 1`)
+	if err != nil {
+		return fmt.Errorf("query subjects over quota: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var toFreeze []struct {
+		id    int64
+		name  string
+		quota int64
+		used  int64
+	}
+
+	for rows.Next() {
+		var s struct {
+			id    int64
+			name  string
+			quota int64
+			used  int64
+		}
+		if err := rows.Scan(&s.id, &s.name, &s.quota, &s.used); err != nil {
+			log.Printf("[observability] scan subject for freeze: %v", err)
+			continue
+		}
+		toFreeze = append(toFreeze, s)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate subjects: %w", err)
+	}
+
+	// Freeze each subject in a transaction
+	for _, s := range toFreeze {
+		err := sw.store.Write(ctx, func(tx *sql.Tx) error {
+			// Double-check they haven't been frozen by another process
+			var alreadyFrozen sql.NullInt64
+			err := tx.QueryRowContext(ctx,
+				`SELECT frozen_at FROM subjects WHERE id = ?`, s.id).Scan(&alreadyFrozen)
+			if err != nil {
+				return fmt.Errorf("check frozen status: %w", err)
+			}
+			if alreadyFrozen.Valid {
+				return nil // Already frozen, skip
+			}
+
+			// Freeze the subject
+			reason := fmt.Sprintf("quota exceeded: %d/%d bytes used", s.used, s.quota)
+			_, err = tx.ExecContext(ctx,
+				`UPDATE subjects SET frozen_at = ?, frozen_reason = ? WHERE id = ?`,
+				now.Unix(), reason, s.id)
+			if err != nil {
+				return fmt.Errorf("freeze subject: %w", err)
+			}
+
+			// Create a critical alert for the freeze action
+			alert := Alert{
+				AlertType:      AlertTypeQuotaExceeded,
+				Severity:       SeverityCritical,
+				TargetType:     TargetSubject,
+				TargetID:       s.id,
+				DedupKey:       fmt.Sprintf("quota_exceeded:subject:%d", s.id),
+				ThresholdValue: fmt.Sprintf("%d bytes", s.quota),
+				CurrentValue:   fmt.Sprintf("%d bytes", s.used),
+				Metadata: map[string]interface{}{
+					"subject_name":     s.name,
+					"quota_bytes":      s.quota,
+					"quota_used_bytes": s.used,
+					"auto_frozen":      true,
+					"frozen_at":        now.Format(time.RFC3339),
+					"frozen_reason":    reason,
+				},
+			}
+
+			if _, _, err := CreateOrUpdateAlert(ctx, sw.store, alert, now); err != nil {
+				log.Printf("[observability] create quota exceeded alert for subject %d: %v", s.id, err)
+			}
+
+			log.Printf("[observability] auto-frozen subject %d (%s) for quota exceeded: %d/%d bytes",
+				s.id, s.name, s.used, s.quota)
+
+			return nil
+		})
+
+		if err != nil {
+			log.Printf("[observability] failed to freeze subject %d: %v", s.id, err)
+		}
 	}
 
 	return nil

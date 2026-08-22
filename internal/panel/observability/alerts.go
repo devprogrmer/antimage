@@ -19,6 +19,7 @@ type AlertType string
 const (
 	AlertTypeCertExpiry   AlertType = "cert_expiry"
 	AlertTypeQuotaWarning AlertType = "quota_warning"
+	AlertTypeQuotaExceeded AlertType = "quota_exceeded"
 )
 
 // Severity indicates alert urgency.
