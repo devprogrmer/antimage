@@ -177,6 +177,41 @@ func (s *Store) ListDevices(ctx context.Context, subjectID int64) ([]Device, err
 	return devices, rows.Err()
 }
 
+// ListDevicesPaginated returns devices for a subject with pagination
+func (s *Store) ListDevicesPaginated(ctx context.Context, subjectID int64, limit, offset int) ([]Device, error) {
+	rows, err := s.db.Read().QueryContext(ctx,
+		`SELECT id, subject_id, hwid, name, first_seen_at, last_seen_at, last_ip, user_agent, is_active, revoked_at, COALESCE(revoked_reason, '')
+		 FROM subject_devices
+		 WHERE subject_id = ?
+		 ORDER BY last_seen_at DESC
+		 LIMIT ? OFFSET ?`,
+		subjectID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var devices []Device
+	for rows.Next() {
+		var d Device
+		var firstSeen, lastSeen int64
+		var revokedAt sql.NullInt64
+		err := rows.Scan(&d.ID, &d.SubjectID, &d.HWID, &d.Name, &firstSeen, &lastSeen,
+			&d.LastIP, &d.UserAgent, &d.IsActive, &revokedAt, &d.RevokedReason)
+		if err != nil {
+			return nil, err
+		}
+		d.FirstSeenAt = time.Unix(firstSeen, 0).UTC()
+		d.LastSeenAt = time.Unix(lastSeen, 0).UTC()
+		if revokedAt.Valid {
+			t := time.Unix(revokedAt.Int64, 0).UTC()
+			d.RevokedAt = &t
+		}
+		devices = append(devices, d)
+	}
+	return devices, rows.Err()
+}
+
 // CheckIPLimit verifies if subject can connect from a new IP address
 func (s *Store) CheckIPLimit(ctx context.Context, subjectID int64, sourceIP string) error {
 	var maxIPs sql.NullInt64

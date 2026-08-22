@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/amyrm/antimage/internal/panel/devices"
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -53,14 +54,35 @@ type EnforcementStatusResponse struct {
 // handleListDevices lists all devices for a subject.
 // GET /api/subjects/:id/devices
 func (d Deps) handleListDevices(w http.ResponseWriter, r *http.Request) {
+	actor := ActorFrom(r.Context())
+	if err := rbac.Check(actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}); err != nil {
+		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+		return
+	}
+
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)
 		return
 	}
 
+	// Parse pagination parameters
+	limit := 100 // default
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 1000 {
+			limit = parsedLimit
+		}
+	}
+
+	offset := 0
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+
 	deviceStore := devices.NewStore(d.Store, nil)
-	devs, err := deviceStore.ListDevices(r.Context(), subjectID)
+	devs, err := deviceStore.ListDevicesPaginated(r.Context(), subjectID, limit, offset)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to list devices")
 		return
@@ -93,6 +115,12 @@ func (d Deps) handleListDevices(w http.ResponseWriter, r *http.Request) {
 // handleRevokeDevice revokes a device.
 // POST /api/devices/:id/revoke
 func (d Deps) handleRevokeDevice(w http.ResponseWriter, r *http.Request) {
+	actor := ActorFrom(r.Context())
+	if err := rbac.Check(actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}); err != nil {
+		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+		return
+	}
+
 	deviceID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid device ID", http.StatusBadRequest)
@@ -129,10 +157,31 @@ func (d Deps) handleRevokeDevice(w http.ResponseWriter, r *http.Request) {
 // handleListActiveConnections lists active connections for a subject.
 // GET /api/subjects/:id/connections
 func (d Deps) handleListActiveConnections(w http.ResponseWriter, r *http.Request) {
+	actor := ActorFrom(r.Context())
+	if err := rbac.Check(actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}); err != nil {
+		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+		return
+	}
+
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)
 		return
+	}
+
+	// Parse pagination parameters
+	limit := 100 // default
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 1000 {
+			limit = parsedLimit
+		}
+	}
+
+	offset := 0
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
 	}
 
 	ctx := r.Context()
@@ -140,8 +189,9 @@ func (d Deps) handleListActiveConnections(w http.ResponseWriter, r *http.Request
 		`SELECT subject_id, device_id, node_id, connection_id, source_ip, connected_at, last_seen_at, protocol_info
 		 FROM active_connections
 		 WHERE subject_id = ?
-		 ORDER BY connected_at DESC`,
-		subjectID)
+		 ORDER BY connected_at DESC
+		 LIMIT ? OFFSET ?`,
+		subjectID, limit, offset)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to list connections")
 		return
@@ -176,6 +226,12 @@ func (d Deps) handleListActiveConnections(w http.ResponseWriter, r *http.Request
 // handleGetEnforcementStatus returns enforcement status for a subject.
 // GET /api/subjects/:id/enforcement
 func (d Deps) handleGetEnforcementStatus(w http.ResponseWriter, r *http.Request) {
+	actor := ActorFrom(r.Context())
+	if err := rbac.Check(actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}); err != nil {
+		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+		return
+	}
+
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)

@@ -110,6 +110,9 @@ func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(requestIDMiddleware, recoverMiddleware, originMiddleware)
 
+	// Rate limiter: 1000 requests per minute per admin
+	limiter := newRateLimiter(1000, time.Minute)
+
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Post("/auth/login", d.handleLogin)
 
@@ -123,7 +126,7 @@ func NewRouter(d Deps) http.Handler {
 		api.Get("/subscribe/{token}", d.handleSubscribe)
 
 		api.Group(func(private chi.Router) {
-			private.Use(d.authMiddleware, readOnlyMiddleware)
+			private.Use(d.authMiddleware, readOnlyMiddleware, d.rateLimitMiddleware(limiter))
 
 			private.Post("/auth/logout", d.handleLogout)
 			private.Get("/auth/me", d.handleMe)
