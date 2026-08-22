@@ -307,9 +307,9 @@ func TestRecordNodeEvent(t *testing.T) {
 	// Create role record (required by FK on admin.role_id)
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO roles (id, name, permissions, created_at)
-			VALUES (?, ?, ?, ?)
-		`, 1, "test_role", "[]", time.Now().Unix())
+			INSERT INTO roles (id, name, permissions)
+			VALUES (?, ?, ?)
+		`, 1, "test_role", "[]")
 		return err
 	})
 	if err != nil {
