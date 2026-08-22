@@ -159,12 +159,15 @@ func (s *Store) ListDevices(ctx context.Context, subjectID int64) ([]Device, err
 	var devices []Device
 	for rows.Next() {
 		var d Device
+		var firstSeen, lastSeen int64
 		var revokedAt sql.NullInt64
-		err := rows.Scan(&d.ID, &d.SubjectID, &d.HWID, &d.Name, &d.FirstSeenAt, &d.LastSeenAt,
+		err := rows.Scan(&d.ID, &d.SubjectID, &d.HWID, &d.Name, &firstSeen, &lastSeen,
 			&d.LastIP, &d.UserAgent, &d.IsActive, &revokedAt, &d.RevokedReason)
 		if err != nil {
 			return nil, err
 		}
+		d.FirstSeenAt = time.Unix(firstSeen, 0).UTC()
+		d.LastSeenAt = time.Unix(lastSeen, 0).UTC()
 		if revokedAt.Valid {
 			t := time.Unix(revokedAt.Int64, 0).UTC()
 			d.RevokedAt = &t

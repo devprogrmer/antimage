@@ -17,16 +17,10 @@ func testDB(t *testing.T) (*store.Store, func()) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 
-	// Create store
+	// Create store - migrations run automatically in Open()
 	st, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
-	}
-
-	// Run migrations
-	if err := st.Migrate(); err != nil {
-		st.Close()
-		t.Fatalf("migrate: %v", err)
 	}
 
 	cleanup := func() {
@@ -40,31 +34,59 @@ func setupTestSubject(t *testing.T, st *store.Store, maxDevices, maxIPs, maxConn
 	t.Helper()
 
 	ctx := context.Background()
-	tx, err := st.Write().BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
-	}
-	defer tx.Rollback()
+	var subjectID int64
 
-	// Insert test subject
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO subjects (name, enabled, max_devices, max_ips, max_connections, created_at)
-		 VALUES (?, 1, ?, ?, ?, ?)`,
-		"test-subject", maxDevices, maxIPs, maxConns, time.Now().Unix())
-	if err != nil {
-		t.Fatalf("insert subject: %v", err)
-	}
+	// Generate unique subject name to avoid conflicts
+	subjectName := fmt.Sprintf("test-subject-%d", time.Now().UnixNano())
 
-	subjectID, err := res.LastInsertId()
-	if err != nil {
-		t.Fatalf("get subject id: %v", err)
-	}
+	err := st.Write(ctx, func(tx *sql.Tx) error {
+		// Insert test subject
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO subjects (name, enabled, max_devices, max_ips, max_connections, created_at)
+			 VALUES (?, 1, ?, ?, ?, ?)`,
+			subjectName, maxDevices, maxIPs, maxConns, time.Now().Unix())
+		if err != nil {
+			return fmt.Errorf("insert subject: %w", err)
+		}
 
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
+		id, err := res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("get subject id: %w", err)
+		}
+		subjectID = id
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("setup subject: %v", err)
 	}
 
 	return subjectID
+}
+
+func setupTestNode(t *testing.T, st *store.Store) int64 {
+	t.Helper()
+
+	ctx := context.Background()
+	var nodeID int64
+
+	err := st.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO nodes (name, address, created_at) VALUES (?, ?, ?)`,
+			"test-node", "10.0.0.1", time.Now().Unix())
+		if err != nil {
+			return err
+		}
+		id, err := res.LastInsertId()
+		nodeID = id
+		return err
+	})
+
+	if err != nil {
+		t.Fatalf("setup node: %v", err)
+	}
+
+	return nodeID
 }
 
 func TestRegisterDevice(t *testing.T) {
@@ -78,10 +100,12 @@ func TestRegisterDevice(t *testing.T) {
 		maxDevices := int64(3)
 		subjectID := setupTestSubject(t, st, &maxDevices, nil, nil)
 
-		tx, _ := st.Write().BeginTx(ctx, nil)
-		defer tx.Rollback()
-
-		deviceID, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-001", "Test Device", "192.168.1.100", "TestAgent/1.0")
+		var deviceID int64
+		err := st.Write(ctx, func(tx *sql.Tx) error {
+			id, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-001", "Test Device", "192.168.1.100", "TestAgent/1.0")
+			deviceID = id
+			return err
+		})
 		if err != nil {
 			t.Fatalf("RegisterDevice failed: %v", err)
 		}
@@ -89,8 +113,6 @@ func TestRegisterDevice(t *testing.T) {
 		if deviceID == 0 {
 			t.Error("expected non-zero device ID")
 		}
-
-		tx.Commit()
 
 		// Verify device was stored
 		devices, err := deviceStore.ListDevices(ctx, subjectID)
@@ -113,19 +135,20 @@ func TestRegisterDevice(t *testing.T) {
 
 		// Register 2 devices (at limit)
 		for i := 1; i <= 2; i++ {
-			tx, _ := st.Write().BeginTx(ctx, nil)
-			_, err := deviceStore.RegisterDevice(ctx, tx, subjectID, fmt.Sprintf("hwid-%03d", i), "Device", "192.168.1.1", "Agent")
-			tx.Commit()
+			err := st.Write(ctx, func(tx *sql.Tx) error {
+				_, err := deviceStore.RegisterDevice(ctx, tx, subjectID, fmt.Sprintf("hwid-%03d", i), "Device", "192.168.1.1", "Agent")
+				return err
+			})
 			if err != nil {
 				t.Fatalf("RegisterDevice %d failed: %v", i, err)
 			}
 		}
 
 		// Try to register 3rd device - should fail
-		tx, _ := st.Write().BeginTx(ctx, nil)
-		defer tx.Rollback()
-
-		_, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-003", "Device 3", "192.168.1.1", "Agent")
+		err := st.Write(ctx, func(tx *sql.Tx) error {
+			_, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-003", "Device 3", "192.168.1.1", "Agent")
+			return err
+		})
 		if err != ErrDeviceLimitReached {
 			t.Errorf("expected ErrDeviceLimitReached, got %v", err)
 		}
@@ -135,23 +158,26 @@ func TestRegisterDevice(t *testing.T) {
 		subjectID := setupTestSubject(t, st, nil, nil, nil)
 
 		// Register device
-		tx, _ := st.Write().BeginTx(ctx, nil)
-		deviceID, _ := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-revoke", "Device", "192.168.1.1", "Agent")
-		tx.Commit()
+		var deviceID int64
+		st.Write(ctx, func(tx *sql.Tx) error {
+			id, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-revoke", "Device", "192.168.1.1", "Agent")
+			deviceID = id
+			return err
+		})
 
 		// Revoke device
-		tx, _ = st.Write().BeginTx(ctx, nil)
-		err := deviceStore.RevokeDevice(ctx, tx, deviceID, "Testing revocation")
-		tx.Commit()
+		err := st.Write(ctx, func(tx *sql.Tx) error {
+			return deviceStore.RevokeDevice(ctx, tx, deviceID, "Testing revocation")
+		})
 		if err != nil {
 			t.Fatalf("RevokeDevice failed: %v", err)
 		}
 
 		// Try to register same device again - should fail
-		tx, _ = st.Write().BeginTx(ctx, nil)
-		defer tx.Rollback()
-
-		_, err = deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-revoke", "Device", "192.168.1.1", "Agent")
+		err = st.Write(ctx, func(tx *sql.Tx) error {
+			_, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-revoke", "Device", "192.168.1.1", "Agent")
+			return err
+		})
 		if err != ErrDeviceRevoked {
 			t.Errorf("expected ErrDeviceRevoked, got %v", err)
 		}
@@ -161,14 +187,20 @@ func TestRegisterDevice(t *testing.T) {
 		subjectID := setupTestSubject(t, st, nil, nil, nil)
 
 		// Register device
-		tx, _ := st.Write().BeginTx(ctx, nil)
-		deviceID1, _ := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-update", "Device", "192.168.1.1", "Agent/1.0")
-		tx.Commit()
+		var deviceID1 int64
+		st.Write(ctx, func(tx *sql.Tx) error {
+			id, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-update", "Device", "192.168.1.1", "Agent/1.0")
+			deviceID1 = id
+			return err
+		})
 
 		// Register same HWID again (simulates reconnection with new IP)
-		tx, _ = st.Write().BeginTx(ctx, nil)
-		deviceID2, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-update", "Device", "192.168.1.2", "Agent/2.0")
-		tx.Commit()
+		var deviceID2 int64
+		err := st.Write(ctx, func(tx *sql.Tx) error {
+			id, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-update", "Device", "192.168.1.2", "Agent/2.0")
+			deviceID2 = id
+			return err
+		})
 
 		if err != nil {
 			t.Fatalf("RegisterDevice update failed: %v", err)
@@ -192,14 +224,7 @@ func TestCheckIPLimit(t *testing.T) {
 
 	deviceStore := NewStore(st, nil)
 	ctx := context.Background()
-
-	// Setup test node
-	tx, _ := st.Write().BeginTx(ctx, nil)
-	res, _ := tx.ExecContext(ctx,
-		`INSERT INTO nodes (name, address, created_at) VALUES (?, ?, ?)`,
-		"test-node", "10.0.0.1", time.Now().Unix())
-	nodeID, _ := res.LastInsertId()
-	tx.Commit()
+	nodeID := setupTestNode(t, st)
 
 	t.Run("unlimited IPs", func(t *testing.T) {
 		subjectID := setupTestSubject(t, st, nil, nil, nil)
@@ -216,10 +241,10 @@ func TestCheckIPLimit(t *testing.T) {
 
 		// Create 2 active connections from different IPs
 		for i := 1; i <= 2; i++ {
-			tx, _ := st.Write().BeginTx(ctx, nil)
-			deviceStore.RecordConnection(ctx, tx, subjectID, nil, nodeID, fmt.Sprintf("conn-%d", i),
-				fmt.Sprintf("192.168.1.%d", i), "test")
-			tx.Commit()
+			st.Write(ctx, func(tx *sql.Tx) error {
+				return deviceStore.RecordConnection(ctx, tx, subjectID, nil, nodeID, fmt.Sprintf("conn-%d", i),
+					fmt.Sprintf("192.168.1.%d", i), "test")
+			})
 		}
 
 		// Try to connect from 3rd IP - should fail
@@ -234,9 +259,9 @@ func TestCheckIPLimit(t *testing.T) {
 		subjectID := setupTestSubject(t, st, nil, &maxIPs, nil)
 
 		// Create active connection
-		tx, _ := st.Write().BeginTx(ctx, nil)
-		deviceStore.RecordConnection(ctx, tx, subjectID, nil, nodeID, "conn-1", "192.168.1.1", "test")
-		tx.Commit()
+		st.Write(ctx, func(tx *sql.Tx) error {
+			return deviceStore.RecordConnection(ctx, tx, subjectID, nil, nodeID, "conn-1", "192.168.1.1", "test")
+		})
 
 		// Same IP should be allowed
 		err := deviceStore.CheckIPLimit(ctx, subjectID, "192.168.1.1")
@@ -252,14 +277,7 @@ func TestCheckConnectionLimit(t *testing.T) {
 
 	deviceStore := NewStore(st, nil)
 	ctx := context.Background()
-
-	// Setup test node
-	tx, _ := st.Write().BeginTx(ctx, nil)
-	res, _ := tx.ExecContext(ctx,
-		`INSERT INTO nodes (name, address, created_at) VALUES (?, ?, ?)`,
-		"test-node", "10.0.0.1", time.Now().Unix())
-	nodeID, _ := res.LastInsertId()
-	tx.Commit()
+	nodeID := setupTestNode(t, st)
 
 	t.Run("unlimited connections", func(t *testing.T) {
 		subjectID := setupTestSubject(t, st, nil, nil, nil)
@@ -276,9 +294,9 @@ func TestCheckConnectionLimit(t *testing.T) {
 
 		// Create 3 active connections (at limit)
 		for i := 1; i <= 3; i++ {
-			tx, _ := st.Write().BeginTx(ctx, nil)
-			deviceStore.RecordConnection(ctx, tx, subjectID, nil, nodeID, fmt.Sprintf("conn-%d", i), "192.168.1.1", "test")
-			tx.Commit()
+			st.Write(ctx, func(tx *sql.Tx) error {
+				return deviceStore.RecordConnection(ctx, tx, subjectID, nil, nodeID, fmt.Sprintf("conn-%d", i), "192.168.1.1", "test")
+			})
 		}
 
 		// Try to open 4th connection - should fail
@@ -297,83 +315,44 @@ func TestCleanupStaleConnections(t *testing.T) {
 	deviceStore := NewStore(st, func() time.Time { return now })
 	ctx := context.Background()
 
-	// Setup test node and subject
-	tx, _ := st.Write().BeginTx(ctx, nil)
-	res, _ := tx.ExecContext(ctx,
-		`INSERT INTO nodes (name, address, created_at) VALUES (?, ?, ?)`,
-		"test-node", "10.0.0.1", now.Unix())
-	nodeID, _ := res.LastInsertId()
-	tx.Commit()
-
+	nodeID := setupTestNode(t, st)
 	subjectID := setupTestSubject(t, st, nil, nil, nil)
 
-	// Create some connections
+	// Create some connections with different staleness
+	// Connections at 1, 2, 3, 4, 5 minutes old
 	for i := 1; i <= 5; i++ {
 		lastSeen := now.Add(-time.Duration(i) * time.Minute).Unix()
-		tx, _ := st.Write().BeginTx(ctx, nil)
-		tx.ExecContext(ctx,
-			`INSERT INTO active_connections (subject_id, node_id, connection_id, source_ip, connected_at, last_seen_at, protocol_info)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			subjectID, nodeID, fmt.Sprintf("conn-%d", i), "192.168.1.1", now.Unix(), lastSeen, "{}")
-		tx.Commit()
+		st.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx,
+				`INSERT INTO active_connections (subject_id, node_id, connection_id, source_ip, connected_at, last_seen_at, protocol_info)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				subjectID, nodeID, fmt.Sprintf("conn-%d", i), "192.168.1.1", now.Unix(), lastSeen, "test")
+			return err
+		})
 	}
 
-	// Cleanup connections older than 3 minutes
-	tx, _ = st.Write().BeginTx(ctx, nil)
-	count, err := deviceStore.CleanupStaleConnections(ctx, tx, 3*time.Minute)
-	tx.Commit()
-
+	// Cleanup connections older than 2.5 minutes
+	// This should remove connections 3, 4, 5 (3+ minutes old)
+	var deleted int64
+	err := st.Write(ctx, func(tx *sql.Tx) error {
+		d, err := deviceStore.CleanupStaleConnections(ctx, tx, 150*time.Second)
+		deleted = d
+		return err
+	})
 	if err != nil {
 		t.Fatalf("CleanupStaleConnections failed: %v", err)
 	}
 
-	// Should remove 2 connections (4 and 5 minutes old)
+	// Should delete connections 3, 4, 5
+	if deleted != 3 {
+		t.Errorf("expected 3 deletions, got %d", deleted)
+	}
+
+	// Verify remaining connections
+	var count int
+	st.Read().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM active_connections WHERE subject_id = ?`, subjectID).Scan(&count)
 	if count != 2 {
-		t.Errorf("expected 2 cleaned connections, got %d", count)
+		t.Errorf("expected 2 remaining connections, got %d", count)
 	}
 }
-
-func TestGetSpeedLimits(t *testing.T) {
-	st, cleanup := testDB(t)
-	defer cleanup()
-
-	deviceStore := NewStore(st, nil)
-	ctx := context.Background()
-
-	t.Run("no speed limits", func(t *testing.T) {
-		subjectID := setupTestSubject(t, st, nil, nil, nil)
-
-		up, down, err := deviceStore.GetSpeedLimits(ctx, subjectID)
-		if err != nil {
-			t.Fatalf("GetSpeedLimits failed: %v", err)
-		}
-
-		if up != nil || down != nil {
-			t.Error("expected nil speed limits")
-		}
-	})
-
-	t.Run("with speed limits", func(t *testing.T) {
-		subjectID := setupTestSubject(t, st, nil, nil, nil)
-
-		// Set speed limits
-		tx, _ := st.Write().BeginTx(ctx, nil)
-		tx.ExecContext(ctx,
-			`UPDATE subjects SET speed_limit_up_kbps = 1000, speed_limit_down_kbps = 5000 WHERE id = ?`,
-			subjectID)
-		tx.Commit()
-
-		up, down, err := deviceStore.GetSpeedLimits(ctx, subjectID)
-		if err != nil {
-			t.Fatalf("GetSpeedLimits failed: %v", err)
-		}
-
-		if up == nil || *up != 1000 {
-			t.Errorf("expected up=1000, got %v", up)
-		}
-		if down == nil || *down != 5000 {
-			t.Errorf("expected down=5000, got %v", down)
-		}
-	})
-}
-

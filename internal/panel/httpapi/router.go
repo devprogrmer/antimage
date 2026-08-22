@@ -185,6 +185,12 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/subjects/{subjectID}/credentials/{kind}", d.handleRevealCredential)
 			private.Post("/subjects/{subjectID}/credentials/{kind}/rotate", d.handleRotateCredential)
 
+			// Device management and enforcement endpoints
+			private.Get("/subjects/{id}/devices", d.handleListDevices)
+			private.Get("/subjects/{id}/connections", d.handleListActiveConnections)
+			private.Get("/subjects/{id}/enforcement", d.handleGetEnforcementStatus)
+			private.Post("/devices/{id}/revoke", d.handleRevokeDevice)
+
 			private.Get("/audit", d.handleListAudit)
 			private.Get("/sessions", d.handleListSessions)
 			private.Delete("/sessions/{sessionID}", d.handleRevokeSession)

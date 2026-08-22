@@ -69,6 +69,7 @@ func (e *ErrPolicyViolation) Error() string {
 
 // UpdatePolicies replaces all policies with the provided set.
 // Removed policies are deleted, existing policies are updated.
+// If a policy's limits are reduced, excess connections are terminated.
 func (e *Enforcer) UpdatePolicies(policies []Policy) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -86,11 +87,120 @@ func (e *Enforcer) UpdatePolicies(policies []Policy) {
 		}
 	}
 
+	// Update policies and enforce new limits
 	e.policies = newPolicies
+
+	// For subjects with updated policies, check if current connections exceed new limits
+	for subjectID, policy := range newPolicies {
+		e.enforceConnectionLimitLocked(subjectID, policy.MaxConnections)
+		// Note: Device and IP limits only apply to NEW connections
+		// Existing connections from already-seen devices/IPs are grandfathered
+	}
+}
+
+// CheckAndRegisterConnection atomically checks if a connection is allowed and registers it.
+// This prevents TOCTOU races where concurrent connections could bypass limits.
+// Returns nil if connection was registered, or ErrPolicyViolation if rejected.
+func (e *Enforcer) CheckAndRegisterConnection(connID string, subjectID int64, deviceID, sourceIP, protocol string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Check if connection already exists
+	if _, exists := e.connections[connID]; exists {
+		// Already registered - update last seen
+		conn := e.connections[connID]
+		conn.LastSeenAt = e.now()
+		e.connections[connID] = conn
+		return nil
+	}
+
+	// Check policy limits atomically (while holding write lock)
+	policy, exists := e.policies[subjectID]
+	if exists {
+		// Validate policy constraints
+		if policy.MaxDevices != nil && *policy.MaxDevices < 0 {
+			return &ErrPolicyViolation{Reason: "invalid device limit"}
+		}
+		if policy.MaxIPs != nil && *policy.MaxIPs < 0 {
+			return &ErrPolicyViolation{Reason: "invalid IP limit"}
+		}
+		if policy.MaxConnections != nil && *policy.MaxConnections < 0 {
+			return &ErrPolicyViolation{Reason: "invalid connection limit"}
+		}
+
+		// Check device limit
+		if policy.MaxDevices != nil {
+			devices := e.subjectDevs[subjectID]
+			if len(devices) >= int(*policy.MaxDevices) {
+				// Check if this device is already registered
+				if _, known := devices[deviceID]; !known {
+					return &ErrPolicyViolation{
+						Reason: fmt.Sprintf("device limit reached (%d/%d)", len(devices), *policy.MaxDevices),
+					}
+				}
+			}
+		}
+
+		// Check IP limit
+		if policy.MaxIPs != nil {
+			ips := e.subjectIPs[subjectID]
+			if len(ips) >= int(*policy.MaxIPs) {
+				// Check if this IP is already connected
+				if _, known := ips[sourceIP]; !known {
+					return &ErrPolicyViolation{
+						Reason: fmt.Sprintf("IP limit reached (%d/%d)", len(ips), *policy.MaxIPs),
+					}
+				}
+			}
+		}
+
+		// Check connection limit
+		if policy.MaxConnections != nil {
+			conns := e.subjectConns[subjectID]
+			if len(conns) >= int(*policy.MaxConnections) {
+				return &ErrPolicyViolation{
+					Reason: fmt.Sprintf("connection limit reached (%d/%d)", len(conns), *policy.MaxConnections),
+				}
+			}
+		}
+	}
+
+	// All checks passed - register the connection
+	now := e.now()
+	conn := Connection{
+		ID:          connID,
+		SubjectID:   subjectID,
+		DeviceID:    deviceID,
+		SourceIP:    sourceIP,
+		Protocol:    protocol,
+		ConnectedAt: now,
+		LastSeenAt:  now,
+	}
+
+	e.connections[connID] = conn
+
+	// Update indexes
+	e.subjectConns[subjectID] = append(e.subjectConns[subjectID], connID)
+
+	if e.subjectIPs[subjectID] == nil {
+		e.subjectIPs[subjectID] = make(map[string]struct{})
+	}
+	e.subjectIPs[subjectID][sourceIP] = struct{}{}
+
+	if e.subjectDevs[subjectID] == nil {
+		e.subjectDevs[subjectID] = make(map[string]struct{})
+	}
+	e.subjectDevs[subjectID][deviceID] = struct{}{}
+
+	return nil
 }
 
 // CheckConnection validates if a new connection is allowed under current policies.
 // Returns nil if allowed, or ErrPolicyViolation if rejected.
+//
+// DEPRECATED: This method has a TOCTOU race condition when used with RegisterConnection.
+// Use CheckAndRegisterConnection instead for atomic check-and-register.
+// This method is kept for advisory checks only (e.g., pre-flight validation).
 func (e *Enforcer) CheckConnection(subjectID int64, deviceID, sourceIP string) error {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -141,10 +251,29 @@ func (e *Enforcer) CheckConnection(subjectID int64, deviceID, sourceIP string) e
 }
 
 // RegisterConnection records a new active connection.
-// Must be called after CheckConnection succeeds.
+// DEPRECATED: Use CheckAndRegisterConnection instead to avoid TOCTOU races.
+// This method should only be called if you've already acquired the necessary lock
+// or are certain no concurrent registrations are possible.
 func (e *Enforcer) RegisterConnection(connID string, subjectID int64, deviceID, sourceIP, protocol string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	// Check if already registered (idempotent)
+	if _, exists := e.connections[connID]; exists {
+		return
+	}
+
+	_ = e.registerConnectionLocked(connID, subjectID, deviceID, sourceIP, protocol)
+	// Ignore error since we already checked for existence above
+}
+
+// registerConnectionLocked registers a connection. Must be called with lock held.
+// Returns error if connID already exists (to prevent duplicate registration).
+func (e *Enforcer) registerConnectionLocked(connID string, subjectID int64, deviceID, sourceIP, protocol string) error {
+	// Check if connection already exists to prevent duplicate registration
+	if _, exists := e.connections[connID]; exists {
+		return fmt.Errorf("connection %s already registered", connID)
+	}
 
 	now := e.now()
 	conn := Connection{
@@ -171,6 +300,19 @@ func (e *Enforcer) RegisterConnection(connID string, subjectID int64, deviceID, 
 		e.subjectDevs[subjectID] = make(map[string]struct{})
 	}
 	e.subjectDevs[subjectID][deviceID] = struct{}{}
+
+	return nil
+}
+
+// UpdateLastSeen updates the last seen timestamp for a connection.
+func (e *Enforcer) UpdateLastSeen(connID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if conn, exists := e.connections[connID]; exists {
+		conn.LastSeenAt = e.now()
+		e.connections[connID] = conn
+	}
 }
 
 // UnregisterConnection removes a connection from tracking.
@@ -359,4 +501,60 @@ func (e *Enforcer) countUniqueDevices() int {
 		}
 	}
 	return len(seen)
+}
+
+// enforceConnectionLimitLocked terminates excess connections if they exceed the new limit.
+// Must be called with e.mu locked.
+func (e *Enforcer) enforceConnectionLimitLocked(subjectID int64, maxConnections *int64) {
+	if maxConnections == nil {
+		return
+	}
+
+	limit := int(*maxConnections)
+	if limit < 0 {
+		// Invalid limit - terminate all connections
+		e.terminateSubjectLocked(subjectID)
+		return
+	}
+
+	connIDs := e.subjectConns[subjectID]
+	if len(connIDs) <= limit {
+		return
+	}
+
+	// Terminate oldest connections first (keep most recent)
+	// Sort by connected time and terminate oldest
+	type connWithTime struct {
+		id   string
+		time time.Time
+	}
+
+	conns := make([]connWithTime, 0, len(connIDs))
+	for _, connID := range connIDs {
+		if conn, exists := e.connections[connID]; exists {
+			conns = append(conns, connWithTime{id: connID, time: conn.ConnectedAt})
+		}
+	}
+
+	// Sort by connected time (oldest first)
+	for i := 0; i < len(conns)-1; i++ {
+		for j := i + 1; j < len(conns); j++ {
+			if conns[j].time.Before(conns[i].time) {
+				conns[i], conns[j] = conns[j], conns[i]
+			}
+		}
+	}
+
+	// Terminate oldest connections until we're at the limit
+	toTerminate := len(conns) - limit
+	for i := 0; i < toTerminate; i++ {
+		connID := conns[i].id
+		conn := e.connections[connID]
+		delete(e.connections, connID)
+		e.removeSubjectConnLocked(conn.SubjectID, connID)
+	}
+
+	// Rebuild indexes for this subject
+	e.rebuildIPIndexLocked(subjectID)
+	e.rebuildDeviceIndexLocked(subjectID)
 }
