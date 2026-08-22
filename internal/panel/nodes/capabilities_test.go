@@ -222,12 +222,7 @@ func TestCapabilityUpdate(t *testing.T) {
 		t.Error("Xray should now be unavailable")
 	}
 
-	if !retrieved[0].LastCheckAt.Equal(later) {
-		t.Errorf("LastCheckAt = %v, want %v", retrieved[0].LastCheckAt, later)
-	}
-}
-
-// Compare timestamps within 1 second tolerance due to SQLite precision
+	// Compare timestamps within 1 second tolerance due to SQLite precision
 	diff := retrieved[0].LastCheckAt.Sub(later)
 	if diff < -time.Second || diff > time.Second {
 		t.Errorf("LastCheckAt = %v, want %v (within 1s)", retrieved[0].LastCheckAt, later)
