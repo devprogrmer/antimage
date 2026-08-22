@@ -39,11 +39,22 @@ func TestSingBoxRenderer_SingleVLESS(t *testing.T) {
 	}
 
 	outbounds, ok := config["outbounds"].([]interface{})
-	if !ok || len(outbounds) != 1 {
-		t.Fatalf("expected 1 outbound, got: %v", config["outbounds"])
+	if !ok {
+		t.Fatalf("outbounds not found or wrong type")
+	}
+	// Should have: selector + 1 server + direct + block = 4 outbounds
+	if len(outbounds) != 4 {
+		t.Errorf("expected 4 outbounds (selector + server + direct + block), got: %d", len(outbounds))
 	}
 
-	outbound := outbounds[0].(map[string]interface{})
+	// First outbound is selector
+	selector := outbounds[0].(map[string]interface{})
+	if selector["type"] != "selector" {
+		t.Errorf("first outbound should be selector, got: %v", selector["type"])
+	}
+
+	// Second outbound is the VLESS server
+	outbound := outbounds[1].(map[string]interface{})
 	if outbound["type"] != "vless" {
 		t.Errorf("wrong type: %v", outbound["type"])
 	}
@@ -121,24 +132,34 @@ func TestSingBoxRenderer_MultipleServers(t *testing.T) {
 	}
 
 	outbounds, ok := config["outbounds"].([]interface{})
-	if !ok || len(outbounds) != 3 {
-		t.Fatalf("expected 3 outbounds, got: %v", len(outbounds))
+	if !ok {
+		t.Fatalf("outbounds not found or wrong type")
+	}
+	// Should have: selector + 3 servers + direct + block = 6 outbounds
+	if len(outbounds) != 6 {
+		t.Errorf("expected 6 outbounds (selector + 3 servers + direct + block), got: %d", len(outbounds))
 	}
 
-	// Verify each outbound type.
-	outbound0 := outbounds[0].(map[string]interface{})
-	if outbound0["type"] != "vless" {
-		t.Errorf("outbound 0 should be vless, got: %v", outbound0["type"])
+	// First outbound is selector
+	selector := outbounds[0].(map[string]interface{})
+	if selector["type"] != "selector" {
+		t.Errorf("first outbound should be selector, got: %v", selector["type"])
 	}
 
+	// Verify each server outbound type (indices 1, 2, 3)
 	outbound1 := outbounds[1].(map[string]interface{})
-	if outbound1["type"] != "vmess" {
-		t.Errorf("outbound 1 should be vmess, got: %v", outbound1["type"])
+	if outbound1["type"] != "vless" {
+		t.Errorf("outbound 1 should be vless, got: %v", outbound1["type"])
 	}
 
 	outbound2 := outbounds[2].(map[string]interface{})
-	if outbound2["type"] != "trojan" {
-		t.Errorf("outbound 2 should be trojan, got: %v", outbound2["type"])
+	if outbound2["type"] != "vmess" {
+		t.Errorf("outbound 2 should be vmess, got: %v", outbound2["type"])
+	}
+
+	outbound3 := outbounds[3].(map[string]interface{})
+	if outbound3["type"] != "trojan" {
+		t.Errorf("outbound 3 should be trojan, got: %v", outbound3["type"])
 	}
 }
 
@@ -169,7 +190,13 @@ func TestSingBoxRenderer_VMess_WebSocket(t *testing.T) {
 	}
 
 	outbounds := config["outbounds"].([]interface{})
-	outbound := outbounds[0].(map[string]interface{})
+	// Should have: selector + 1 server + direct + block = 4 outbounds
+	// Second outbound (index 1) is the VMess server
+	outbound := outbounds[1].(map[string]interface{})
+
+	if outbound["type"] != "vmess" {
+		t.Errorf("wrong type: %v", outbound["type"])
+	}
 
 	if outbound["network"] != "ws" {
 		t.Errorf("wrong network: %v", outbound["network"])
@@ -215,7 +242,13 @@ func TestSingBoxRenderer_VLESS_gRPC(t *testing.T) {
 	}
 
 	outbounds := config["outbounds"].([]interface{})
-	outbound := outbounds[0].(map[string]interface{})
+	// Should have: selector + 1 server + direct + block = 4 outbounds
+	// Second outbound (index 1) is the VLESS server
+	outbound := outbounds[1].(map[string]interface{})
+
+	if outbound["type"] != "vless" {
+		t.Errorf("wrong type: %v", outbound["type"])
+	}
 
 	transport, ok := outbound["transport"].(map[string]interface{})
 	if !ok {
@@ -257,7 +290,9 @@ func TestSingBoxRenderer_Trojan(t *testing.T) {
 	}
 
 	outbounds := config["outbounds"].([]interface{})
-	outbound := outbounds[0].(map[string]interface{})
+	// Should have: selector + 1 server + direct + block = 4 outbounds
+	// Second outbound (index 1) is the Trojan server
+	outbound := outbounds[1].(map[string]interface{})
 
 	if outbound["type"] != "trojan" {
 		t.Errorf("wrong type: %v", outbound["type"])
@@ -266,7 +301,10 @@ func TestSingBoxRenderer_Trojan(t *testing.T) {
 		t.Errorf("wrong password: %v", outbound["password"])
 	}
 
-	tls := outbound["tls"].(map[string]interface{})
+	tls, ok := outbound["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing tls config: %v", outbound)
+	}
 	if tls["server_name"] != "trojan.example.com" {
 		t.Errorf("wrong server_name: %v", tls["server_name"])
 	}

@@ -1,13 +1,9 @@
 package integration
 
 import (
-	"context"
 	"fmt"
 	"testing"
-	"time"
 
-	"github.com/amyrm/antimage/internal/node/adapter"
-	"github.com/amyrm/antimage/internal/node/adapter/xray"
 	"github.com/amyrm/antimage/internal/node/enforcement"
 )
 
@@ -42,39 +38,36 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 			QuotaUsedBytes: &quotaUsed,
 		}
 
-		if err := enforcer.UpdatePolicy(subjectID, policy); err != nil {
-			t.Fatalf("UpdatePolicy failed: %v", err)
-		}
+		enforcer.UpdatePolicies([]enforcement.Policy{policy})
 
 		// 2. Connect: First connection should succeed
 		conn1ID := "conn-1"
 		err := enforcer.CheckAndRegisterConnection(conn1ID, subjectID, "device1", "1.2.3.4", "vless")
 		if err != nil {
-			t.Fatalf("First connection should succeed, got error: %v", err)
+			t.Fatalf("First connection should succeed: %v", err)
 		}
 
-		// 3. Enforce: Second connection should succeed
+		// 3. Connect: Second connection should succeed (within limit)
 		conn2ID := "conn-2"
 		err = enforcer.CheckAndRegisterConnection(conn2ID, subjectID, "device1", "1.2.3.5", "vless")
 		if err != nil {
-			t.Fatalf("Second connection should succeed, got error: %v", err)
+			t.Fatalf("Second connection should succeed: %v", err)
 		}
 
-		// 4. Enforce: Third connection should fail (max=2)
+		// 4. Enforce: Third connection should fail (exceeds limit)
 		conn3ID := "conn-3"
 		err = enforcer.CheckAndRegisterConnection(conn3ID, subjectID, "device1", "1.2.3.6", "vless")
 		if err == nil {
-			t.Fatal("Third connection should fail due to connection limit")
+			t.Fatal("Third connection should fail (exceeds MaxConnections=2)")
 		}
-		// Check it's a policy violation error
 		if !isPolicyViolation(err) {
 			t.Fatalf("Expected policy violation error, got: %v", err)
 		}
 
 		// Verify active connection count
-		stats := enforcer.GetStats(subjectID)
-		if stats.ActiveConnections != 2 {
-			t.Fatalf("Expected 2 active connections, got: %d", stats.ActiveConnections)
+		conns := enforcer.GetActiveConnections(subjectID)
+		if len(conns) != 2 {
+			t.Fatalf("Expected 2 active connections, got: %d", len(conns))
 		}
 
 		// 5. Revoke: Update policy to disable subject
@@ -86,9 +79,7 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 			QuotaUsedBytes: &quotaUsed,
 		}
 
-		if err := enforcer.UpdatePolicy(subjectID, revokedPolicy); err != nil {
-			t.Fatalf("UpdatePolicy for revocation failed: %v", err)
-		}
+		enforcer.UpdatePolicies([]enforcement.Policy{revokedPolicy})
 
 		// 6. Disconnect: New connections should fail immediately
 		conn4ID := "conn-4"
@@ -97,13 +88,10 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 			t.Fatal("Connection should fail after revocation")
 		}
 
-		// 7. Disconnect existing: Terminate active connections
-		enforcer.DisconnectSubject(subjectID)
-
-		// Verify all connections terminated
-		stats = enforcer.GetStats(subjectID)
-		if stats.ActiveConnections != 0 {
-			t.Fatalf("Expected 0 active connections after disconnect, got: %d", stats.ActiveConnections)
+		// 7. Verify existing connections are terminated by policy update
+		conns = enforcer.GetActiveConnections(subjectID)
+		if len(conns) != 0 {
+			t.Fatalf("Expected 0 active connections after revocation, got: %d", len(conns))
 		}
 	})
 
@@ -120,9 +108,7 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 			QuotaUsedBytes: &quotaUsed,
 		}
 
-		if err := enforcer.UpdatePolicy(subjectID, policy); err != nil {
-			t.Fatalf("UpdatePolicy failed: %v", err)
-		}
+		enforcer.UpdatePolicies([]enforcement.Policy{policy})
 
 		// Connection allowed at 95%
 		connID := "conn-quota-1"
@@ -139,9 +125,7 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 			QuotaUsedBytes: &quotaUsed,
 		}
 
-		if err := enforcer.UpdatePolicy(subjectID, exhaustedPolicy); err != nil {
-			t.Fatalf("UpdatePolicy failed: %v", err)
-		}
+		enforcer.UpdatePolicies([]enforcement.Policy{exhaustedPolicy})
 
 		// New connection should fail
 		conn2ID := "conn-quota-2"
@@ -154,9 +138,9 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 		}
 
 		// Existing connection still tracked
-		stats := enforcer.GetStats(subjectID)
-		if stats.ActiveConnections != 1 {
-			t.Fatalf("Expected 1 active connection (established before quota exhausted), got: %d", stats.ActiveConnections)
+		conns := enforcer.GetActiveConnections(subjectID)
+		if len(conns) != 1 {
+			t.Fatalf("Expected 1 active connection (established before quota exhausted), got: %d", len(conns))
 		}
 	})
 
@@ -172,7 +156,7 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 			MaxConnections: &maxConn,
 		}
 
-		enforcer1.UpdatePolicy(subjectID, policy)
+		enforcer1.UpdatePolicies([]enforcement.Policy{policy})
 
 		// Register 3 connections
 		for i := 1; i <= 3; i++ {
@@ -184,25 +168,25 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 		}
 
 		// Verify 3 active
-		stats1 := enforcer1.GetStats(subjectID)
-		if stats1.ActiveConnections != 3 {
-			t.Fatalf("Expected 3 active connections before restart, got: %d", stats1.ActiveConnections)
+		conns1 := enforcer1.GetActiveConnections(subjectID)
+		if len(conns1) != 3 {
+			t.Fatalf("Expected 3 active connections before restart, got: %d", len(conns1))
 		}
 
 		// Simulate restart: new enforcer instance
 		enforcer2 := enforcement.New()
 
 		// Reconcile: restore policy
-		enforcer2.UpdatePolicy(subjectID, policy)
+		enforcer2.UpdatePolicies([]enforcement.Policy{policy})
 
 		// Reconcile: connections should be rebuilt from desired state
 		// In production, this would read from adapter state or connection tracker
 		// For this test, we simulate by re-registering known connections
 
 		// After restart, connection count should be 0 (memory cleared)
-		stats2 := enforcer2.GetStats(subjectID)
-		if stats2.ActiveConnections != 0 {
-			t.Fatalf("Expected 0 active connections after restart (before reconciliation), got: %d", stats2.ActiveConnections)
+		conns2 := enforcer2.GetActiveConnections(subjectID)
+		if len(conns2) != 0 {
+			t.Fatalf("Expected 0 active connections after restart (before reconciliation), got: %d", len(conns2))
 		}
 
 		// Reconciliation: re-register active connections
@@ -215,9 +199,9 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 		}
 
 		// Verify reconciled state
-		stats3 := enforcer2.GetStats(subjectID)
-		if stats3.ActiveConnections != 3 {
-			t.Fatalf("Expected 3 active connections after reconciliation, got: %d", stats3.ActiveConnections)
+		conns3 := enforcer2.GetActiveConnections(subjectID)
+		if len(conns3) != 3 {
+			t.Fatalf("Expected 3 active connections after reconciliation, got: %d", len(conns3))
 		}
 
 		// New connections should respect limit
@@ -230,104 +214,17 @@ func TestConnectionLifecycleE2E(t *testing.T) {
 
 // TestXrayAdapterIntegration tests Xray adapter with enforcer
 func TestXrayAdapterIntegration(t *testing.T) {
-	t.Skip("Requires Xray binary and runtime environment")
+	t.Skip("Requires Xray binary and runtime environment - integration test placeholder")
 
-	ctx := context.Background()
-
-	// Setup Xray adapter
-	rt := xray.NewExecRuntime("/tmp/xray-test", "xray")
-	adapter := xray.New("/tmp/xray-test-config", rt, true)
-
-	// Verify adapter capabilities
-	desc := adapter.Descriptor()
-	if !desc.Caps.HotUserAdd {
-		t.Fatal("Xray should support hot user add")
-	}
-	if !desc.Caps.SelfAccounting {
-		t.Fatal("Xray should support self accounting")
-	}
-
-	// Setup desired state with subjects
-	desired := adapter.Desired{
-		SchemaVersion: 2,
-		Services: []adapter.Service{
-			{
-				ID:      1,
-				Kind:    "xray",
-				Enabled: true,
-				Params:  []byte(`{"protocol":"vless","port":10086,"uuid":"test-uuid"}`),
-			},
-		},
-		Subjects: []adapter.Subject{
-			{
-				ID: 1001,
-				Credentials: []adapter.Credential{
-					{Kind: "uuid", Value: "550e8400-e29b-41d4-a716-446655440000"},
-				},
-				MaxConnections:     ptrInt64(3),
-				SpeedLimitUpKbps:   ptrInt64(5000),
-				SpeedLimitDownKbps: ptrInt64(10000),
-			},
-		},
-	}
-
-	// Observe current state
-	observed, err := adapter.Observe(ctx)
-	if err != nil {
-		t.Fatalf("Observe failed: %v", err)
-	}
-
-	// Plan convergence
-	plan, err := adapter.Plan(ctx, desired, observed)
-	if err != nil {
-		t.Fatalf("Plan failed: %v", err)
-	}
-
-	// Apply steps
-	for _, step := range plan.Steps {
-		result, err := adapter.Apply(ctx, step)
-		if err != nil {
-			t.Fatalf("Apply step %d failed: %v", step.Seq, err)
-		}
-		if !result.OK {
-			t.Fatalf("Apply step %d failed: %s", step.Seq, result.Err)
-		}
-	}
-
-	// Wait for convergence
-	time.Sleep(2 * time.Second)
-
-	// Test accounting (if supported)
-	if reporter, ok := interface{}(adapter).(adapter.UsageReporter); ok {
-		samples, err := reporter.Usage(ctx)
-		if err != nil {
-			t.Fatalf("Usage failed: %v", err)
-		}
-		t.Logf("Got %d usage samples", len(samples))
-	}
+	// This test would verify:
+	// - Xray adapter Plan() execution
+	// - Enforcer policy updates
+	// - Usage accounting integration
+	// - Connection lifecycle across adapter + enforcer
 }
 
-func ptrInt64(v int64) *int64 {
-	return &v
-}
-
-// isPolicyViolation checks if error is a policy violation
+// isPolicyViolation checks if error is a policy violation.
 func isPolicyViolation(err error) bool {
-	// Check error message contains policy violation indicators
-	msg := err.Error()
-	return contains(msg, "exceeded") || contains(msg, "quota") || contains(msg, "limit")
+	_, ok := err.(*enforcement.ErrPolicyViolation)
+	return ok
 }
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && indexOfSubstring(s, substr) >= 0
-}
-
-func indexOfSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
