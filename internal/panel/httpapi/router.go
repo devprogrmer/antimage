@@ -153,6 +153,7 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/nodes/{nodeID}/health/latest", d.handleGetNodeHealthLatest)
 			private.Get("/nodes/{nodeID}/health/history", d.handleGetNodeHealthHistory)
 			private.Get("/nodes/{nodeID}/reconciliation", d.handleGetNodeReconciliation)
+			private.Get("/nodes/{nodeID}/capabilities", d.handleGetNodeCapabilities)
 
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 			private.Put("/services/{serviceID}", d.handleUpdateService)
