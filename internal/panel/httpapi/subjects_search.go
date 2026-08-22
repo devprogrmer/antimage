@@ -8,12 +8,12 @@ import (
 	"time"
 )
 
-// SubjectListResponse includes pagination metadata.
-type SubjectListResponse struct {
-	Subjects []SubjectResponse `json:"subjects"`
-	Total    int               `json:"total"`
-	Page     int               `json:"page"`
-	PageSize int               `json:"page_size"`
+// SubjectListV2Response includes pagination metadata.
+type SubjectListV2Response struct {
+	Subjects []Subject `json:"subjects"`
+	Total    int       `json:"total"`
+	Page     int       `json:"page"`
+	PageSize int       `json:"page_size"`
 }
 
 // handleListSubjectsV2 returns a paginated, searchable, filterable list of subjects.
@@ -120,21 +120,18 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	subjects := []SubjectResponse{}
+	subjects := []Subject{}
 	for rows.Next() {
-		var s SubjectResponse
-		var expiresAt, quotaBytes, quotaUsedBytes sql.NullInt64
-		var note sql.NullString
-
+		var s Subject
 		err := rows.Scan(
 			&s.ID,
 			&s.Name,
-			&note,
+			&s.Note,
 			&s.Disabled,
 			&s.Frozen,
-			&expiresAt,
-			&quotaBytes,
-			&quotaUsedBytes,
+			&s.ExpiresAt,
+			&s.QuotaBytes,
+			&s.QuotaUsedBytes,
 			&s.SubscriptionToken,
 			&s.CreatedAt,
 			&s.UpdatedAt,
@@ -143,23 +140,6 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to scan subject", http.StatusInternalServerError)
 			return
 		}
-
-		if note.Valid {
-			s.Note = note.String
-		}
-		if expiresAt.Valid {
-			ea := expiresAt.Int64
-			s.ExpiresAt = &ea
-		}
-		if quotaBytes.Valid {
-			qb := quotaBytes.Int64
-			s.QuotaBytes = &qb
-		}
-		if quotaUsedBytes.Valid {
-			qub := quotaUsedBytes.Int64
-			s.QuotaUsedBytes = &qub
-		}
-
 		subjects = append(subjects, s)
 	}
 
@@ -168,12 +148,14 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := SubjectListResponse{
+	resp := SubjectListV2Response{
 		Subjects: subjects,
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }

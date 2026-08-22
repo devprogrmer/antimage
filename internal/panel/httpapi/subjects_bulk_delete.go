@@ -21,7 +21,7 @@ type BulkDeleteResponse struct {
 // POST /api/v1/subjects/bulk/delete
 func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 	var req BulkDeleteRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -41,14 +41,8 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 	errors := []string{}
 	affectedNodes := make(map[int64]struct{})
 
-	tx, err := d.Store.Write().BeginTx(r.Context(), nil)
-	if err != nil {
-		http.Error(w, "failed to begin transaction", http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback()
-
-	for _, subjectID := range req.SubjectIDs {
+	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+		for _, subjectID := range req.SubjectIDs {
 		// Check if subject exists and collect affected nodes
 		rows, err := tx.QueryContext(r.Context(), `
 			SELECT node_id FROM subject_services WHERE subject_id = ?
@@ -67,35 +61,34 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 
-		// Delete subject
-		result, err := tx.ExecContext(r.Context(), `DELETE FROM subjects WHERE id = ?`, subjectID)
-		if err != nil {
-			errors = append(errors, err.Error())
-			failed++
-			continue
+			// Delete subject
+			result, err := tx.ExecContext(r.Context(), `DELETE FROM subjects WHERE id = ?`, subjectID)
+			if err != nil {
+				errors = append(errors, err.Error())
+				failed++
+				continue
+			}
+
+			rowsAffected, _ := result.RowsAffected()
+			if rowsAffected == 0 {
+				errors = append(errors, "subject not found")
+				failed++
+				continue
+			}
+
+			deleted++
 		}
+		return nil
+	})
 
-		rowsAffected, _ := result.RowsAffected()
-		if rowsAffected == 0 {
-			errors = append(errors, "subject not found")
-			failed++
-			continue
-		}
-
-		deleted++
-	}
-
-	if err := tx.Commit(); err != nil {
-		http.Error(w, "failed to commit transaction", http.StatusInternalServerError)
+	if err != nil {
+		http.Error(w, "transaction failed", http.StatusInternalServerError)
 		return
 	}
 
 	// Republish affected nodes
 	for nodeID := range affectedNodes {
-		if err := d.Hub.Republish(r.Context(), nodeID); err != nil {
-			// Log but don't fail the bulk operation
-			_ = err
-		}
+		_ = d.Hub.NotifyRevision(r.Context(), nodeID, 0) // Trigger republish
 	}
 
 	resp := BulkDeleteResponse{
@@ -104,5 +97,7 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 		Errors:  errors,
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }

@@ -59,9 +59,9 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 	errors := []string{}
 
 	// Process each row
-	for i, row := range records[1:] {
+	for _, row := range records[1:] {
 		if len(row) < 2 {
-			errors = append(errors, "row %d: insufficient columns")
+			errors = append(errors, "insufficient columns")
 			failed++
 			continue
 		}
@@ -69,7 +69,7 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 		// Parse row
 		name := row[colMap["Name"]]
 		if name == "" {
-			errors = append(errors, "row %d: name required")
+			errors = append(errors, "name required")
 			failed++
 			continue
 		}
@@ -106,7 +106,7 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 		// Generate subscription token
 		tokenBytes := make([]byte, 16)
 		if _, err := rand.Read(tokenBytes); err != nil {
-			errors = append(errors, "row %d: token generation failed")
+			errors = append(errors, "token generation failed")
 			failed++
 			continue
 		}
@@ -114,13 +114,16 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 
 		// Insert subject
 		now := time.Now().Unix()
-		_, err := d.Store.Write().ExecContext(r.Context(), `
-			INSERT INTO subjects (name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-		`, name, note, disabled, frozen, expiresAt, quotaBytes, subscriptionToken, now, now)
+		err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(r.Context(), `
+				INSERT INTO subjects (name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+			`, name, note, disabled, frozen, expiresAt, quotaBytes, subscriptionToken, now, now)
+			return err
+		})
 
 		if err != nil {
-			errors = append(errors, "row %d: %s")
+			errors = append(errors, err.Error())
 			failed++
 			continue
 		}
@@ -134,5 +137,7 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 		Errors:   errors,
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }
