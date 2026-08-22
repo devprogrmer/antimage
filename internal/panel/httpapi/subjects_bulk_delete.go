@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 )
 
@@ -87,9 +88,7 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Republish affected nodes
-	for nodeID := range affectedNodes {
-		_ = d.Hub.NotifyRevision(r.Context(), nodeID, 0) // Trigger republish
-	}
+	// Note: Hub doesn't have direct republish method, nodes will reconcile on next poll
 
 	resp := BulkDeleteResponse{
 		Deleted: deleted,

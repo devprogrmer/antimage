@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"

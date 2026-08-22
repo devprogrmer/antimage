@@ -197,9 +197,9 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 	return metrics, nil
 }
 
-// handleDashboardOverview provides a snapshot of dashboard metrics.
-// GET /api/v1/dashboard/overview
-func (d Deps) handleDashboardOverview(w http.ResponseWriter, r *http.Request) {
+// handleDashboardMetrics provides a snapshot of dashboard metrics.
+// GET /api/v1/dashboard/metrics
+func (d Deps) handleDashboardMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics, err := d.collectDashboardMetrics(r.Context())
 	if err != nil {
 		http.Error(w, "failed to collect metrics", http.StatusInternalServerError)

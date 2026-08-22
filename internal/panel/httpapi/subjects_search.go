@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,10 +10,10 @@ import (
 
 // SubjectListV2Response includes pagination metadata.
 type SubjectListV2Response struct {
-	Subjects []Subject `json:"subjects"`
-	Total    int       `json:"total"`
-	Page     int       `json:"page"`
-	PageSize int       `json:"page_size"`
+	Subjects []subjectDTO `json:"subjects"`
+	Total    int          `json:"total"`
+	Page     int          `json:"page"`
+	PageSize int          `json:"page_size"`
 }
 
 // handleListSubjectsV2 returns a paginated, searchable, filterable list of subjects.
@@ -120,27 +120,29 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	subjects := []Subject{}
+	subjects := []subjectDTO{}
 	for rows.Next() {
-		var s Subject
-		err := rows.Scan(
-			&s.ID,
-			&s.Name,
-			&s.Note,
-			&s.Disabled,
-			&s.Frozen,
-			&s.ExpiresAt,
-			&s.QuotaBytes,
-			&s.QuotaUsedBytes,
-			&s.SubscriptionToken,
-			&s.CreatedAt,
-			&s.UpdatedAt,
-		)
+		var id, createdAt int64
+		var name string
+		var enabled bool
+		var expiresAt, expiredAt *int64
+		var note string
+
+		err := rows.Scan(&id, &name, &note, &enabled, &expiresAt, &createdAt)
 		if err != nil {
 			http.Error(w, "failed to scan subject", http.StatusInternalServerError)
 			return
 		}
-		subjects = append(subjects, s)
+
+		subjects = append(subjects, subjectDTO{
+			ID:        id,
+			Name:      name,
+			Note:      note,
+			Enabled:   enabled,
+			ExpiresAt: expiresAt,
+			ExpiredAt: expiredAt,
+			CreatedAt: createdAt,
+		})
 	}
 
 	if err := rows.Err(); err != nil {
