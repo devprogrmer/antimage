@@ -56,7 +56,7 @@ func setupTestDeps(t *testing.T) (Deps, *store.Store, *rbac.Actor) {
 	actor := &rbac.Actor{
 		AdminID:  adminID,
 		RoleName: "admin",
-		IsSuper:  false,
+		IsSuper:  true, // Make super admin to have access to all nodes
 		Perms: map[rbac.Permission]struct{}{
 			rbac.PermNodeRead:  {},
 			rbac.PermNodeWrite: {},

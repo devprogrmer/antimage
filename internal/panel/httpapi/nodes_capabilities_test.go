@@ -15,17 +15,14 @@ import (
 )
 
 func TestHandleGetNodeCapabilities_Success(t *testing.T) {
-	s, err := store.Open(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	deps, s, actor := setupTestDeps(t)
 
 	ctx := context.Background()
 	nodeID := int64(1)
 	now := time.Now()
 
 	// Create node
-	err = s.Write(ctx, func(tx *sql.Tx) error {
+	err := s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO nodes (id, name, address, status, created_at)
 			VALUES (?, ?, ?, ?, ?)
@@ -50,18 +47,16 @@ func TestHandleGetNodeCapabilities_Success(t *testing.T) {
 		}
 	}
 
-	// Create dispatcher
-	d := Deps{Store: s}
-
-	// Create request
+	// Create request with authentication
 	req := httptest.NewRequest("GET", "/api/v1/nodes/1/capabilities", nil)
+	req = req.WithContext(withActor(req.Context(), actor))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("nodeID", "1")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	w := httptest.NewRecorder()
 
 	// Execute
-	d.handleGetNodeCapabilities(w, req)
+	deps.handleGetNodeCapabilities(w, req)
 
 	// Verify response
 	if w.Code != http.StatusOK {
@@ -124,16 +119,13 @@ func TestHandleGetNodeCapabilities_NodeNotFound(t *testing.T) {
 }
 
 func TestHandleGetNodeCapabilities_EmptyCapabilities(t *testing.T) {
-	s, err := store.Open(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	deps, s, actor := setupTestDeps(t)
 
 	ctx := context.Background()
 	nodeID := int64(1)
 
 	// Create node but no capabilities
-	err = s.Write(ctx, func(tx *sql.Tx) error {
+	err := s.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO nodes (id, name, address, status, created_at)
 			VALUES (?, ?, ?, ?, ?)
@@ -144,15 +136,14 @@ func TestHandleGetNodeCapabilities_EmptyCapabilities(t *testing.T) {
 		t.Fatalf("failed to create node: %v", err)
 	}
 
-	d := Deps{Store: s}
-
 	req := httptest.NewRequest("GET", "/api/v1/nodes/1/capabilities", nil)
+	req = req.WithContext(withActor(req.Context(), actor))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("nodeID", "1")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	w := httptest.NewRecorder()
 
-	d.handleGetNodeCapabilities(w, req)
+	deps.handleGetNodeCapabilities(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status code = %d, want %d", w.Code, http.StatusOK)
