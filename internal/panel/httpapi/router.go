@@ -234,6 +234,7 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/deployments", d.handleDeploymentCreate)
 			private.Get("/deployments", d.handleDeploymentList)
 			private.Get("/deployments/{id}", d.handleDeploymentGet)
+			private.Post("/deployments/{id}/rollback", d.handleDeploymentRollback)
 
 			private.Get("/events", d.handleEvents)
 		})

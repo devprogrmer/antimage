@@ -228,3 +228,126 @@ func TestDeploymentGet(t *testing.T) {
 		t.Errorf("expected strategy=canary, got %s", body.Deployment.Strategy)
 	}
 }
+
+func TestDeploymentRollbackAPI(t *testing.T) {
+	env := newTestEnv(t)
+	adminID := env.seedAdmin(t, "admin", "pw", "super_admin")
+	token := env.login(t, "admin", "pw")
+
+	ctx := context.Background()
+
+	// Create node with two revisions
+	var nodeID int64
+	err := env.store.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx,
+			`INSERT INTO nodes (name, address, status, created_at)
+			 VALUES ('test-node', '10.0.0.1:8443', 'online', ?)`,
+			time.Now().Unix())
+		if err != nil {
+			return err
+		}
+		nodeID, err = result.LastInsertId()
+		if err != nil {
+			return err
+		}
+
+		// Revision 1
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO node_revisions (node_id, revision, created_at, actor_type, actor_label, reason, doc_sha256)
+			 VALUES (?, 1, ?, 'system', 'test', 'initial', 'sha256-rev1')`,
+			nodeID, time.Now().Unix())
+		if err != nil {
+			return err
+		}
+
+		// Revision 2
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO node_revisions (node_id, revision, created_at, actor_type, actor_label, reason, doc_sha256)
+			 VALUES (?, 2, ?, 'system', 'test', 'update', 'sha256-rev2')`,
+			nodeID, time.Now().Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("create node with revisions: %v", err)
+	}
+
+	// Create completed deployment
+	var deploymentID int64
+	err = env.store.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx,
+			`INSERT INTO deployments (revision_id, strategy, status, created_by, created_at)
+			 VALUES (2, 'all_at_once', 'completed', ?, ?)`,
+			adminID, time.Now().Unix())
+		if err != nil {
+			return err
+		}
+		deploymentID, err = result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO deployment_node_status (deployment_id, node_id, status)
+			 VALUES (?, ?, 'completed')`,
+			deploymentID, nodeID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("create deployment: %v", err)
+	}
+
+	// Trigger rollback via API
+	res := env.post(t, "/api/v1/deployments/"+itoa64(deploymentID)+"/rollback", "", token)
+	if res.Code != http.StatusOK {
+		t.Fatalf("rollback status = %d, body = %s", res.Code, res.Body)
+	}
+
+	var rollbackResp struct {
+		DeploymentID int64  `json:"deployment_id"`
+		Status       string `json:"status"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&rollbackResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if rollbackResp.Status != "rolled_back" {
+		t.Errorf("expected status=rolled_back, got %s", rollbackResp.Status)
+	}
+
+	// Verify deployment status updated
+	res = env.get(t, "/api/v1/deployments/"+itoa64(deploymentID), token)
+	if res.Code != http.StatusOK {
+		t.Fatalf("get deployment after rollback status = %d", res.Code)
+	}
+
+	var getResp struct {
+		Deployment struct {
+			Status string `json:"status"`
+		} `json:"deployment"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&getResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if getResp.Deployment.Status != "rolled_back" {
+		t.Errorf("expected deployment status=rolled_back, got %s", getResp.Deployment.Status)
+	}
+}
+
+func TestDeploymentRollbackUnauthorized(t *testing.T) {
+	env := newTestEnv(t)
+
+	res := env.post(t, "/api/v1/deployments/1/rollback", "", "")
+	if res.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", res.Code)
+	}
+}
+
+func TestDeploymentRollbackRequiresPermission(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "readonly", "pw", "readonly")
+	token := env.login(t, "readonly", "pw")
+
+	res := env.post(t, "/api/v1/deployments/1/rollback", "", token)
+	if res.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", res.Code)
+	}
+}

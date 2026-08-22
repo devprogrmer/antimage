@@ -257,3 +257,35 @@ func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
 		"deployments": deployments,
 	})
 }
+
+func (d Deps) handleDeploymentRollback(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+
+	deploymentIDStr := chi.URLParam(r, "id")
+	if deploymentIDStr == "" {
+		http.Error(w, "missing deployment id", http.StatusBadRequest)
+		return
+	}
+
+	deploymentID, err := strconv.ParseInt(deploymentIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid deployment id", http.StatusBadRequest)
+		return
+	}
+
+	orchestrator := deployment.NewOrchestrator(d.Store)
+	if err := orchestrator.RollbackDeployment(r.Context(), deploymentID); err != nil {
+		slog.ErrorContext(r.Context(), "rollback deployment", "error", err, "admin_id", actor.AdminID, "deployment_id", deploymentID)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"deployment_id": deploymentID,
+		"status":        "rolled_back",
+	})
+}
