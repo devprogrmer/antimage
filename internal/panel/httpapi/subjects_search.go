@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -86,19 +87,47 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	trafficMin := strings.TrimSpace(r.URL.Query().Get("traffic_min"))
+	if trafficMin != "" {
+		if parsed, err := strconv.ParseInt(trafficMin, 10, 64); err == nil && parsed >= 0 {
+			conditions = append(conditions, "quota_used_bytes >= ?")
+			args = append(args, parsed)
+			argIdx++
+		}
+	}
+
+	trafficMax := strings.TrimSpace(r.URL.Query().Get("traffic_max"))
+	if trafficMax != "" {
+		if parsed, err := strconv.ParseInt(trafficMax, 10, 64); err == nil && parsed >= 0 {
+			conditions = append(conditions, "quota_used_bytes <= ?")
+			args = append(args, parsed)
+			argIdx++
+		}
+	}
+
+	quotaStatus := strings.TrimSpace(r.URL.Query().Get("quota_status"))
+	if quotaStatus == "under_limit" {
+		conditions = append(conditions, "quota_bytes IS NOT NULL AND quota_used_bytes < quota_bytes")
+	} else if quotaStatus == "near_limit" {
+		conditions = append(conditions, "quota_bytes IS NOT NULL AND quota_used_bytes >= quota_bytes * 0.8 AND quota_used_bytes < quota_bytes")
+	} else if quotaStatus == "over_limit" {
+		conditions = append(conditions, "quota_bytes IS NOT NULL AND quota_used_bytes >= quota_bytes")
+	}
+
+	sortBy := strings.TrimSpace(r.URL.Query().Get("sort"))
+	sortOrder := strings.TrimSpace(r.URL.Query().Get("order"))
+
 	whereClause := strings.Join(conditions, " AND ")
 
-	// Handle tag filter (if tag system exists)
-	var baseQuery string
+	// Handle tag filter via note field
 	if tag != "" {
-		baseQuery = `
-			SELECT DISTINCT s.* FROM subjects s
-			INNER JOIN subject_tags st ON s.id = st.subject_id
-			WHERE st.tag = ? AND ` + whereClause
-		args = append([]interface{}{tag}, args...)
-	} else {
-		baseQuery = "SELECT * FROM subjects WHERE " + whereClause
+		conditions = append(conditions, "note LIKE ?")
+		args = append(args, "%"+tag+"%")
+		argIdx++
+		whereClause = strings.Join(conditions, " AND ")
 	}
+
+	baseQuery := "SELECT id, name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at FROM subjects WHERE " + whereClause
 
 	// Count total
 	countQuery := "SELECT COUNT(*) FROM (" + baseQuery + ") AS filtered"
@@ -109,8 +138,26 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch page
-	query := baseQuery + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	// Fetch page with dynamic sorting
+	orderClause := "ORDER BY created_at DESC"
+	if sortBy != "" {
+		validSorts := map[string]string{
+			"name":    "name",
+			"created": "created_at",
+			"expires": "expires_at",
+			"traffic": "quota_used_bytes",
+			"quota":   "quota_bytes",
+		}
+		if col, ok := validSorts[sortBy]; ok {
+			direction := "DESC"
+			if sortOrder == "asc" {
+				direction = "ASC"
+			}
+			orderClause = "ORDER BY " + col + " " + direction
+		}
+	}
+
+	query := baseQuery + " " + orderClause + " LIMIT ? OFFSET ?"
 	args = append(args, pageSize, offset)
 
 	rows, err := d.Store.Read().QueryContext(r.Context(), query, args...)
