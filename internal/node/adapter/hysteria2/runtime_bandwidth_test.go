@@ -2,12 +2,8 @@ package hysteria2
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"io"
-	"net"
 	"testing"
-	"time"
 )
 
 // TestHysteria2RuntimeBandwidthEnforcement verifies whether Hysteria2 actually

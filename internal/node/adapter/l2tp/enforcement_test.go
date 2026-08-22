@@ -86,17 +86,17 @@ func TestL2TPAccounting(t *testing.T) {
 // TestL2TPIPMapping tests IP to subject ID mapping
 func TestL2TPIPMapping(t *testing.T) {
 	t.Run("SessionsFileFormat", func(t *testing.T) {
-		// Test parsing of xl2tpd sessions file format
-		// Format: IP SubjectID Timestamp
-		// Example: 10.0.0.5 1001 1234567890
+		// Test parsing of sessions file format
+		// Format: username IP
+		// Example: user1001 10.0.0.5
 
 		stateDir := t.TempDir()
 		sessionsFile := filepath.Join(stateDir, "l2tp-sessions.txt")
 
-		// Create test sessions file
-		content := `10.0.0.5 1001 1234567890
-10.0.0.6 1002 1234567891
-10.0.0.7 1003 1234567892
+		// Create test sessions file with correct format
+		content := `user1001 10.0.0.5
+user1002 10.0.0.6
+user1003 10.0.0.7
 `
 		err := os.WriteFile(sessionsFile, []byte(content), 0644)
 		if err != nil {

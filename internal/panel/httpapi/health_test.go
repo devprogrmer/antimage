@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -50,12 +49,6 @@ func TestReadyEndpoint(t *testing.T) {
 		Store: st,
 		Hub:   control.NewHub(),
 		Now:   time.Now,
-	}
-
-	// Initialize database schema
-	ctx := context.Background()
-	if err := st.Init(ctx); err != nil {
-		t.Fatalf("failed to init store: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
