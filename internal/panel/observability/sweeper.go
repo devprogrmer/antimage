@@ -72,6 +72,14 @@ func (sw *Sweeper) sweep(ctx context.Context) {
 	if err := sw.enforceQuotaWarnings(ctx); err != nil {
 		log.Printf("[observability] quota warnings failed: %v", err)
 	}
+
+	if err := sw.checkNodeHealth(ctx, now); err != nil {
+		log.Printf("[observability] node health check failed: %v", err)
+	}
+
+	if err := sw.checkEnforcementFailures(ctx, now); err != nil {
+		log.Printf("[observability] enforcement failure check failed: %v", err)
+	}
 }
 
 func (sw *Sweeper) checkCertificates(ctx context.Context, now time.Time) error {

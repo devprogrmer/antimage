@@ -10,6 +10,9 @@ import (
 
 // Plan computes the steps needed to move from observed to desired state.
 func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed adapter.Observed) (adapter.Plan, error) {
+	// Rebuild peer registry from current desired state
+	a.registry.update(desired.Subjects)
+
 	var steps []adapter.Step
 
 	// Build maps for efficient lookup

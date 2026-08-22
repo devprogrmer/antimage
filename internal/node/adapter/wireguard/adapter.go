@@ -78,11 +78,17 @@ type Adapter struct {
 	rt Runtime
 	// stateDir is where we persist accounting cursors and applied state.
 	stateDir string
+	// registry maps WireGuard public keys to subject IDs
+	registry *peerRegistry
 }
 
 // New returns an adapter managing WireGuard interfaces through rt.
 func New(rt Runtime, stateDir string) *Adapter {
-	return &Adapter{rt: rt, stateDir: stateDir}
+	return &Adapter{
+		rt:       rt,
+		stateDir: stateDir,
+		registry: newPeerRegistry(),
+	}
 }
 
 // serviceSchema is published to the panel, which validates operator input
