@@ -3,6 +3,7 @@ package nodes
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,10 +12,12 @@ import (
 
 func TestRecordAndGetCapabilities(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	// Use temp file instead of :memory: to ensure migrations run properly
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nodeID := int64(1)
 	now := time.Now()
@@ -100,10 +103,11 @@ func TestRecordAndGetCapabilities(t *testing.T) {
 
 func TestGetAvailableProtocols(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nodeID := int64(1)
 	now := time.Now()
@@ -159,10 +163,11 @@ func TestGetAvailableProtocols(t *testing.T) {
 
 func TestCapabilityUpdate(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nodeID := int64(1)
 	now := time.Now()
@@ -224,10 +229,11 @@ func TestCapabilityUpdate(t *testing.T) {
 
 func TestCapabilitiesForNonexistentNode(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	capabilities, err := GetNodeCapabilities(ctx, s, 999)
 	if err != nil {

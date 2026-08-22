@@ -3,6 +3,7 @@ package nodes
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,10 +13,11 @@ import (
 // TestCapabilityForeignKeyConstraint verifies that capabilities cannot reference nonexistent nodes.
 func TestCapabilityForeignKeyConstraint(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nonexistentNodeID := int64(999)
 	now := time.Now()
@@ -43,10 +45,11 @@ func TestCapabilityForeignKeyConstraint(t *testing.T) {
 // TestCapabilityCascadeDelete verifies that deleting a node cascades to its capabilities.
 func TestCapabilityCascadeDelete(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nodeID := int64(1)
 	now := time.Now()

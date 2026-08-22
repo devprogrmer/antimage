@@ -2,6 +2,8 @@ package nodes
 
 import (
 	"context"
+	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,13 +12,26 @@ import (
 
 func TestRecordAndGetLatestMetrics(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nodeID := int64(1)
 	now := time.Now()
+
+	// Create parent node record
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO nodes (id, name, address, status, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, nodeID, "test-node", "10.0.0.1:8080", "online", now.Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to create parent node: %v", err)
+	}
 
 	cpu := 45.5
 	memUsed := int64(8 * 1024 * 1024 * 1024)  // 8GB
@@ -72,13 +87,26 @@ func TestRecordAndGetLatestMetrics(t *testing.T) {
 
 func TestGetMetricsHistory(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nodeID := int64(1)
 	now := time.Now()
+
+	// Create parent node
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO nodes (id, name, address, status, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, nodeID, "test-node", "10.0.0.1:8080", "online", now.Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to create parent node: %v", err)
+	}
 
 	// Record 5 metrics over time
 	for i := 0; i < 5; i++ {
@@ -255,13 +283,26 @@ func TestCalculateHealthStatus_Offline_TimeoutExceeded(t *testing.T) {
 
 func TestRecordNodeEvent(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nodeID := int64(1)
 	adminID := int64(42)
+
+	// Create parent node
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO nodes (id, name, address, status, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, nodeID, "test-node", "10.0.0.1:8080", "online", time.Now().Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to create parent node: %v", err)
+	}
 
 	details := map[string]interface{}{
 		"reason": "test maintenance",
@@ -287,13 +328,26 @@ func TestRecordNodeEvent(t *testing.T) {
 
 func TestPruneOldMetrics(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(":memory:")
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	defer s.Close()
 
 	nodeID := int64(1)
 	now := time.Now()
+
+	// Create parent node
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO nodes (id, name, address, status, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, nodeID, "test-node", "10.0.0.1:8080", "online", now.Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to create parent node: %v", err)
+	}
 
 	// Record old metrics (31 days ago)
 	oldMetrics := HealthMetrics{
