@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -17,6 +18,18 @@ func TestRecordAndGetCapabilities(t *testing.T) {
 
 	nodeID := int64(1)
 	now := time.Now()
+
+	// Create parent node record (required by foreign key)
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO nodes (id, name, address, status, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, nodeID, "test-node", "10.0.0.1:8080", "online", now.Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to create parent node: %v", err)
+	}
 
 	// Record capabilities for different protocols
 	xrayVersion := "1.8.4"
@@ -95,6 +108,18 @@ func TestGetAvailableProtocols(t *testing.T) {
 	nodeID := int64(1)
 	now := time.Now()
 
+	// Create parent node record
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO nodes (id, name, address, status, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, nodeID, "test-node", "10.0.0.1:8080", "online", now.Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to create parent node: %v", err)
+	}
+
 	// Record mixed available/unavailable protocols
 	capabilities := []NodeCapability{
 		{NodeID: nodeID, Protocol: ProtocolXray, Available: true, DetectedAt: now, LastCheckAt: now},
@@ -141,6 +166,18 @@ func TestCapabilityUpdate(t *testing.T) {
 
 	nodeID := int64(1)
 	now := time.Now()
+
+	// Create parent node record
+	err = s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO nodes (id, name, address, status, created_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, nodeID, "test-node", "10.0.0.1:8080", "online", now.Unix())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to create parent node: %v", err)
+	}
 
 	// Initial capability: Xray available
 	v1 := "1.8.0"
