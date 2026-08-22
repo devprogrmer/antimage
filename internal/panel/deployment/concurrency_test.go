@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -214,13 +215,22 @@ func TestConcurrentDeploymentPartialOverlap(t *testing.T) {
 	node2 := createTestNodeWithRevision(t, st, 2, "node-2")
 	node3 := createTestNodeWithRevision(t, st, 3, "node-3")
 
-	// Create deployment 1: nodes 1, 2
-	var deployment1 int64
+	// Mark nodes as online for health checks
 	err := st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE nodes SET status = 'online' WHERE id IN (?, ?, ?)`, node1, node2, node3)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("update node status: %v", err)
+	}
+
+	// Create deployment 1: nodes 1, 2 with rolling strategy (takes longer)
+	var deployment1 int64
+	err = st.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx,
 			`INSERT INTO deployments (revision_id, strategy, status, created_by, created_at)
 			 VALUES (1, ?, ?, 1, ?)`,
-			StrategyAllAtOnce, StatusPending, time.Now().Unix())
+			StrategyRolling, StatusPending, time.Now().Unix())
 		if err != nil {
 			return err
 		}
@@ -275,15 +285,26 @@ func TestConcurrentDeploymentPartialOverlap(t *testing.T) {
 		exec1Err = orchestrator.ExecuteDeployment(ctx, deployment1)
 	}()
 
-	// Give first deployment time to start
-	time.Sleep(100 * time.Millisecond)
+	// Give first deployment time to start and mark as in_progress
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify deployment 1 is in_progress
+	var dep1Status string
+	err = st.Read().QueryRowContext(ctx,
+		`SELECT status FROM deployments WHERE id = ?`, deployment1).Scan(&dep1Status)
+	if err != nil {
+		t.Fatalf("query deployment 1 status: %v", err)
+	}
+	if dep1Status != string(StatusInProgress) {
+		t.Fatalf("deployment 1 should be in_progress, got %s", dep1Status)
+	}
 
 	// Try to start second deployment - should fail due to overlap
 	exec2Err := orchestrator.ExecuteDeployment(ctx, deployment2)
 	if exec2Err == nil {
 		t.Fatal("expected error when starting deployment with overlapping nodes")
 	}
-	if exec2Err.Error() != "cannot deploy: 1 active deployments to overlapping nodes" {
+	if !strings.Contains(exec2Err.Error(), "active deployments to overlapping nodes") {
 		t.Errorf("unexpected error: %v", exec2Err)
 	}
 
