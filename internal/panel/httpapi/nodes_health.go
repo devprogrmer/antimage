@@ -8,42 +8,44 @@ import (
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/nodes"
+	"github.com/amyrm/antimage/internal/panel/rbac"
 )
 
 // GET /api/v1/nodes/:id/health/latest
 func (d Deps) handleGetNodeHealthLatest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Extract node ID
-	nodeIDStr := r.PathValue("id")
-	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
-	if err != nil {
-		http.Error(w, "invalid node ID", http.StatusBadRequest)
+	actor, ok := requireActor(w, r)
+	if !ok {
 		return
 	}
 
-	// Authorization: must have nodes:read permission
-	if err := d.authorize(ctx, "nodes:read"); err != nil {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	nodeID, err := pathInt64(r, "nodeID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node ID")
+		return
+	}
+
+	if !d.authorize(w, r, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 
 	// Verify node exists and get last_seen_at
 	var lastSeenUnix *int64
 	err = d.Store.Read().QueryRowContext(ctx, `SELECT last_seen_at FROM nodes WHERE id = ?`, nodeID).Scan(&lastSeenUnix)
+	if err == sql.ErrNoRows {
+		WriteError(w, http.StatusNotFound, "not_found", "node not found")
+		return
+	}
 	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "node not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "database error", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "internal", "could not load node")
 		return
 	}
 
 	// Get latest metrics
 	metrics, err := nodes.GetLatestMetrics(ctx, d.Store, nodeID)
 	if err != nil {
-		http.Error(w, "failed to retrieve metrics", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to retrieve metrics")
 		return
 	}
 
@@ -85,25 +87,25 @@ func (d Deps) handleGetNodeHealthLatest(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // GET /api/v1/nodes/:id/health/history?from=<unix>&to=<unix>&limit=<int>
 func (d Deps) handleGetNodeHealthHistory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Extract node ID
-	nodeIDStr := r.PathValue("id")
-	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
-	if err != nil {
-		http.Error(w, "invalid node ID", http.StatusBadRequest)
+	actor, ok := requireActor(w, r)
+	if !ok {
 		return
 	}
 
-	// Authorization: must have nodes:read permission
-	if err := d.authorize(ctx, "nodes:read"); err != nil {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	nodeID, err := pathInt64(r, "nodeID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node ID")
+		return
+	}
+
+	if !d.authorize(w, r, actor, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 

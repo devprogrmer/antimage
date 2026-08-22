@@ -4,11 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
+	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 )
@@ -17,49 +15,60 @@ import (
 func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	nodeIDStr := chi.URLParam(r, "nodeID")
-	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+
+	nodeID, err := pathInt64(r, "nodeID")
 	if err != nil {
-		http.Error(w, "invalid node ID", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node ID")
 		return
 	}
 
-	// Authorization via middleware - already checked by requireAuth
-	actor := rbac.ActorFromContext(r.Context())
-	if actor == nil {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	// Check nodes:write permission
-	target := rbac.Target{Kind: rbac.TargetNode, ID: nodeID}
-	if !d.authorize(w, r, actor, rbac.NodesWrite, target) {
+	if !d.authorize(w, r, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 
 	// Verify node exists
-	var nodeName string
-	err = d.Store.Read().QueryRowContext(ctx, `SELECT name FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName)
+	var nodeName, status string
+	err = d.Store.Read().QueryRowContext(ctx,
+		`SELECT name, status FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName, &status)
+	if err == sql.ErrNoRows {
+		WriteError(w, http.StatusNotFound, "not_found", "node not found")
+		return
+	}
 	if err != nil {
-		http.Error(w, "node not found", http.StatusNotFound)
+		WriteError(w, http.StatusInternalServerError, "internal", "could not load node")
 		return
 	}
 
-	// Record node event for audit trail
-	adminID := actor.AdminID
+	// Record restart request event
 	details := map[string]interface{}{
-		"action":    "restart",
-		"admin_id":  adminID,
-		"timestamp": time.Now().Unix(),
+		"action":      "restart",
+		"admin_id":    actor.AdminID,
+		"node_name":   nodeName,
+		"node_status": status,
 	}
 
-	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "restart_requested", "info", details, &adminID); err != nil {
-		http.Error(w, "failed to record event", http.StatusInternalServerError)
+	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "restart_requested", "info", details, &actor.AdminID); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to record event")
 		return
 	}
 
-	// TODO: Trigger actual restart via gRPC to node agent
-	// For now, just record the action
+	// Audit log
+	if err := d.Store.Write(ctx, func(tx *sql.Tx) error {
+		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
+			Action:     "node.restart",
+			TargetType: "node",
+			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
+			Result:     "ok",
+			After:      map[string]any{"node": nodeName, "status": status},
+		})
+	}); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "audit failed")
+		return
+	}
 
 	response := map[string]interface{}{
 		"node_id":   nodeID,
@@ -69,57 +78,64 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 		"message":   "restart request recorded, node will restart on next heartbeat",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // POST /api/v1/nodes/:id/sync
 func (d Deps) handleSyncNode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	nodeIDStr := chi.URLParam(r, "nodeID")
-	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+
+	nodeID, err := pathInt64(r, "nodeID")
 	if err != nil {
-		http.Error(w, "invalid node ID", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node ID")
 		return
 	}
 
-	adminID := auth.AdminIDFromContext(ctx)
-	actor, err := d.loadActor(ctx, adminID)
-	if err != nil {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	if !d.authorize(w, r, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 
-	if !actor.Has(rbac.NodesWrite) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	// Verify node exists and is in scope
+	// Verify node exists
 	var nodeName string
-	err = d.Store.Read().QueryRowContext(ctx, `SELECT name FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName)
+	err = d.Store.Read().QueryRowContext(ctx,
+		`SELECT name FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName)
+	if err == sql.ErrNoRows {
+		WriteError(w, http.StatusNotFound, "not_found", "node not found")
+		return
+	}
 	if err != nil {
-		http.Error(w, "node not found", http.StatusNotFound)
+		WriteError(w, http.StatusInternalServerError, "internal", "could not load node")
 		return
 	}
 
-	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
-		if _, ok := actor.NodeIDs[nodeID]; !ok {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-	}
-
-	// Record sync request
+	// Record sync request event
 	details := map[string]interface{}{
 		"action":    "sync",
-		"admin_id":  adminID,
-		"timestamp": time.Now().Unix(),
+		"admin_id":  actor.AdminID,
+		"node_name": nodeName,
 	}
 
-	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "sync_requested", "info", details, &adminID); err != nil {
-		http.Error(w, "failed to record event", http.StatusInternalServerError)
+	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "sync_requested", "info", details, &actor.AdminID); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to record event")
+		return
+	}
+
+	// Audit log
+	if err := d.Store.Write(ctx, func(tx *sql.Tx) error {
+		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
+			Action:     "node.sync",
+			TargetType: "node",
+			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
+			Result:     "ok",
+			After:      map[string]any{"node": nodeName},
+		})
+	}); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "audit failed")
 		return
 	}
 
@@ -131,18 +147,21 @@ func (d Deps) handleSyncNode(w http.ResponseWriter, r *http.Request) {
 		"message":   "sync request recorded, node will apply latest configuration",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // POST /api/v1/nodes/:id/maintenance
 func (d Deps) handleSetNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	nodeIDStr := chi.URLParam(r, "nodeID")
-	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+
+	nodeID, err := pathInt64(r, "nodeID")
 	if err != nil {
-		http.Error(w, "invalid node ID", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node ID")
 		return
 	}
 
@@ -152,27 +171,12 @@ func (d Deps) handleSetNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
 
-	adminID := auth.AdminIDFromContext(ctx)
-	actor, err := d.loadActor(ctx, adminID)
-	if err != nil {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	if !d.authorize(w, r, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
-	}
-
-	if !actor.Has(rbac.NodesWrite) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
-		if _, ok := actor.NodeIDs[nodeID]; !ok {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
 	}
 
 	// Update maintenance mode in database
@@ -186,7 +190,9 @@ func (d Deps) handleSetNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 				    status = 'maintenance'
 				WHERE id = ?
 			`, req.Reason, time.Now().Unix(), nodeID)
-			return err
+			if err != nil {
+				return err
+			}
 		} else {
 			_, err := tx.ExecContext(ctx, `
 				UPDATE nodes
@@ -196,11 +202,22 @@ func (d Deps) handleSetNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 				    status = 'online'
 				WHERE id = ?
 			`, nodeID)
-			return err
+			if err != nil {
+				return err
+			}
 		}
+
+		// Audit log
+		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
+			Action:     "node.maintenance",
+			TargetType: "node",
+			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
+			Result:     "ok",
+			After:      map[string]any{"enable": req.Enable, "reason": req.Reason},
+		})
 	})
 	if err != nil {
-		http.Error(w, "failed to update maintenance mode", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to update maintenance mode")
 		return
 	}
 
@@ -211,15 +228,13 @@ func (d Deps) handleSetNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	details := map[string]interface{}{
-		"action":    eventType,
-		"reason":    req.Reason,
-		"admin_id":  adminID,
-		"timestamp": time.Now().Unix(),
+		"action":   eventType,
+		"reason":   req.Reason,
+		"admin_id": actor.AdminID,
 	}
 
-	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, eventType, "info", details, &adminID); err != nil {
-		// Log but don't fail the request
-		http.Error(w, "failed to record event", http.StatusInternalServerError)
+	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, eventType, "info", details, &actor.AdminID); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to record event")
 		return
 	}
 
@@ -229,63 +244,72 @@ func (d Deps) handleSetNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 		"status":           "updated",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // POST /api/v1/nodes/:id/enable
 func (d Deps) handleEnableNode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	nodeIDStr := chi.URLParam(r, "nodeID")
-	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+
+	nodeID, err := pathInt64(r, "nodeID")
 	if err != nil {
-		http.Error(w, "invalid node ID", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node ID")
 		return
 	}
 
-	adminID := auth.AdminIDFromContext(ctx)
-	actor, err := d.loadActor(ctx, adminID)
-	if err != nil {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	if !d.authorize(w, r, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
-	}
-
-	if !actor.Has(rbac.NodesWrite) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
-		if _, ok := actor.NodeIDs[nodeID]; !ok {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
 	}
 
 	// Update node status from disabled to pending
 	err = d.Store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(ctx, `
 			UPDATE nodes
 			SET status = 'pending'
 			WHERE id = ? AND status = 'disabled'
 		`, nodeID)
-		return err
+		if err != nil {
+			return err
+		}
+
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return sql.ErrNoRows
+		}
+
+		// Audit log
+		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
+			Action:     "node.enable",
+			TargetType: "node",
+			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
+			Result:     "ok",
+		})
 	})
+	if err == sql.ErrNoRows {
+		WriteError(w, http.StatusConflict, "conflict", "node not found or not disabled")
+		return
+	}
 	if err != nil {
-		http.Error(w, "failed to enable node", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to enable node")
 		return
 	}
 
 	// Record event
 	details := map[string]interface{}{
-		"action":    "enable",
-		"admin_id":  adminID,
-		"timestamp": time.Now().Unix(),
+		"action":   "enable",
+		"admin_id": actor.AdminID,
 	}
 
-	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "node_enabled", "info", details, &adminID); err != nil {
-		http.Error(w, "failed to record event", http.StatusInternalServerError)
+	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "node_enabled", "info", details, &actor.AdminID); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to record event")
 		return
 	}
 
@@ -296,18 +320,21 @@ func (d Deps) handleEnableNode(w http.ResponseWriter, r *http.Request) {
 		"message": "node enabled, will reconnect on next heartbeat",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // POST /api/v1/nodes/:id/disable
 func (d Deps) handleDisableNode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	nodeIDStr := chi.URLParam(r, "nodeID")
-	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+
+	nodeID, err := pathInt64(r, "nodeID")
 	if err != nil {
-		http.Error(w, "invalid node ID", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node ID")
 		return
 	}
 
@@ -316,27 +343,12 @@ func (d Deps) handleDisableNode(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
 
-	adminID := auth.AdminIDFromContext(ctx)
-	actor, err := d.loadActor(ctx, adminID)
-	if err != nil {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	if !d.authorize(w, r, actor, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
-	}
-
-	if !actor.Has(rbac.NodesWrite) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	if !actor.IsSuper && len(actor.NodeIDs) > 0 {
-		if _, ok := actor.NodeIDs[nodeID]; !ok {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
 	}
 
 	// Update node status to disabled
@@ -346,23 +358,33 @@ func (d Deps) handleDisableNode(w http.ResponseWriter, r *http.Request) {
 			SET status = 'disabled'
 			WHERE id = ?
 		`, nodeID)
-		return err
+		if err != nil {
+			return err
+		}
+
+		// Audit log
+		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
+			Action:     "node.disable",
+			TargetType: "node",
+			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
+			Result:     "ok",
+			After:      map[string]any{"reason": req.Reason},
+		})
 	})
 	if err != nil {
-		http.Error(w, "failed to disable node", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to disable node")
 		return
 	}
 
 	// Record event
 	details := map[string]interface{}{
-		"action":    "disable",
-		"reason":    req.Reason,
-		"admin_id":  adminID,
-		"timestamp": time.Now().Unix(),
+		"action":   "disable",
+		"reason":   req.Reason,
+		"admin_id": actor.AdminID,
 	}
 
-	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "node_disabled", "warning", details, &adminID); err != nil {
-		http.Error(w, "failed to record event", http.StatusInternalServerError)
+	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "node_disabled", "warning", details, &actor.AdminID); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "failed to record event")
 		return
 	}
 
@@ -373,6 +395,5 @@ func (d Deps) handleDisableNode(w http.ResponseWriter, r *http.Request) {
 		"message": "node disabled, will not accept new connections",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
