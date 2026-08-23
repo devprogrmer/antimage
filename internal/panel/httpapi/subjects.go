@@ -81,6 +81,33 @@ func (d Deps) requireSubjectInScope(
 	return true
 }
 
+// scopeFilterSubjectIDs drops the ids this caller may not act on.
+//
+// Bulk operations filter rather than reject. Rejecting a batch because one id
+// is out of scope would tell the caller that id exists, which is the same
+// enumeration oracle the 404-instead-of-403 rule exists to close. A dropped id
+// is indistinguishable from one that was never there, and shows up in the
+// response counts exactly as a nonexistent id would.
+func (d Deps) scopeFilterSubjectIDs(
+	r *http.Request, ids []int64,
+) ([]int64, error) {
+	sc := rbac.ScopeOf(ActorFrom(r.Context()))
+	if sc.IsSuper {
+		return ids, nil
+	}
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		ok, err := d.Store.SubjectInScope(r.Context(), sc, id)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 func (d Deps) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireActor(w, r)
 	if !ok {

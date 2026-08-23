@@ -75,6 +75,21 @@ func TestDeviceEndpointsPagination(t *testing.T) {
 	env.seedAdmin(t, "admin", "password", "super_admin")
 	token := env.login(t, "admin", "password")
 
+	// Subject 1 must actually exist. These endpoints are now tenant-scoped, and
+	// a scope check cannot pass for a subject that is not in the table -- so
+	// what used to return 200 with an empty list is now correctly a 404. That
+	// is the better behaviour: "this subject has no devices" and "there is no
+	// such subject" are different answers. This test is about pagination
+	// parameters, so it gets a real subject to paginate.
+	if err := env.store.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO subjects (id, name, enabled, created_at) VALUES (1,'paged',1,?)`,
+			time.Now().Unix())
+		return err
+	}); err != nil {
+		t.Fatalf("seed subject: %v", err)
+	}
+
 	tests := []struct {
 		name string
 		path string

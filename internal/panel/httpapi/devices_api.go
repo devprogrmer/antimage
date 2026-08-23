@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -63,6 +64,13 @@ func (d Deps) handleListDevices(w http.ResponseWriter, r *http.Request) {
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)
+		return
+	}
+	// Second layer. The rbac.Check above proves the actor may read subjects at
+	// all; this proves they may read THIS one. Device lists, connection history
+	// and enforcement state are per-customer data, and without this a reseller
+	// could read any competitor's by id.
+	if !d.requireSubjectInScope(w, r, actor, subjectID) {
 		return
 	}
 
@@ -139,6 +147,25 @@ func (d Deps) handleRevokeDevice(w http.ResponseWriter, r *http.Request) {
 		req.Reason = "revoked by administrator"
 	}
 
+	// This route is keyed by DEVICE id, not subject id, so the tenant check has
+	// to resolve the owning subject first. Without it a reseller could revoke a
+	// competitor's customer device -- cutting off their connection -- by
+	// guessing device ids, which are dense and sequential.
+	var ownerSubjectID int64
+	switch err := d.Store.Read().QueryRowContext(r.Context(),
+		`SELECT subject_id FROM devices WHERE id = ?`, deviceID).Scan(&ownerSubjectID); {
+	case errors.Is(err, sql.ErrNoRows):
+		// Indistinguishable from out-of-scope, same as everywhere else.
+		WriteError(w, http.StatusNotFound, "not_found", "device not found")
+		return
+	case err != nil:
+		WriteError(w, http.StatusInternalServerError, "internal", "could not load device")
+		return
+	}
+	if !d.requireSubjectInScope(w, r, actor, ownerSubjectID) {
+		return
+	}
+
 	deviceStore := devices.NewStore(d.Store, nil)
 	ctx := r.Context()
 
@@ -166,6 +193,13 @@ func (d Deps) handleListActiveConnections(w http.ResponseWriter, r *http.Request
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)
+		return
+	}
+	// Second layer. The rbac.Check above proves the actor may read subjects at
+	// all; this proves they may read THIS one. Device lists, connection history
+	// and enforcement state are per-customer data, and without this a reseller
+	// could read any competitor's by id.
+	if !d.requireSubjectInScope(w, r, actor, subjectID) {
 		return
 	}
 
@@ -235,6 +269,13 @@ func (d Deps) handleGetEnforcementStatus(w http.ResponseWriter, r *http.Request)
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)
+		return
+	}
+	// Second layer. The rbac.Check above proves the actor may read subjects at
+	// all; this proves they may read THIS one. Device lists, connection history
+	// and enforcement state are per-customer data, and without this a reseller
+	// could read any competitor's by id.
+	if !d.requireSubjectInScope(w, r, actor, subjectID) {
 		return
 	}
 

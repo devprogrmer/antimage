@@ -36,6 +36,14 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "maximum 1000 subjects per request", http.StatusBadRequest)
 		return
 	}
+	// Drop ids outside this caller's tenant. Filtering rather than rejecting
+	// keeps an out-of-scope id indistinguishable from a nonexistent one.
+	scoped, scopeErr := d.scopeFilterSubjectIDs(r, req.SubjectIDs)
+	if scopeErr != nil {
+		http.Error(w, "could not check subject scope", http.StatusInternalServerError)
+		return
+	}
+	req.SubjectIDs = scoped
 
 	deleted := 0
 	failed := 0

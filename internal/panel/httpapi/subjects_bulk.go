@@ -183,6 +183,14 @@ func (d Deps) handleBulkUpdateSubjects(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "bulk operation limited to 1000 subjects")
 		return
 	}
+	// Drop ids outside this caller's tenant. Filtering rather than rejecting
+	// keeps an out-of-scope id indistinguishable from a nonexistent one.
+	scoped, scopeErr := d.scopeFilterSubjectIDs(r, req.SubjectIDs)
+	if scopeErr != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not check subject scope")
+		return
+	}
+	req.SubjectIDs = scoped
 
 	ctx := r.Context()
 	store := d.subjectStore()
@@ -293,6 +301,14 @@ func (d Deps) handleBulkDisableSubjects(w http.ResponseWriter, r *http.Request) 
 		WriteError(w, http.StatusBadRequest, "bad_request", "bulk operation limited to 1000 subjects")
 		return
 	}
+	// Drop ids outside this caller's tenant. Filtering rather than rejecting
+	// keeps an out-of-scope id indistinguishable from a nonexistent one.
+	scoped, scopeErr := d.scopeFilterSubjectIDs(r, req.SubjectIDs)
+	if scopeErr != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not check subject scope")
+		return
+	}
+	req.SubjectIDs = scoped
 
 	ctx := r.Context()
 	store := d.subjectStore()

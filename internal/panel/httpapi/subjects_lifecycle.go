@@ -38,6 +38,13 @@ func (d Deps) handleFreezeSubject(w http.ResponseWriter, r *http.Request) {
 	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	// Second layer. PermSubjectWrite says this actor may change customers, not
+	// that they may change ANY customer. Without this a reseller could freeze
+	// or disable a competitor's users -- denial of service against another
+	// tenant, from an endpoint their own role legitimately needs.
+	if !d.requireSubjectInScope(w, r, ActorFrom(r.Context()), subjectID) {
+		return
+	}
 
 	store := subjects.NewStore(d.Store, d.Box, d.Now)
 	ctx := r.Context()
@@ -77,6 +84,13 @@ func (d Deps) handleUnfreezeSubject(w http.ResponseWriter, r *http.Request) {
 
 	// Check authorization BEFORE entering transaction to allow BestEffort audit logging
 	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	// Second layer. PermSubjectWrite says this actor may change customers, not
+	// that they may change ANY customer. Without this a reseller could freeze
+	// or disable a competitor's users -- denial of service against another
+	// tenant, from an endpoint their own role legitimately needs.
+	if !d.requireSubjectInScope(w, r, ActorFrom(r.Context()), subjectID) {
 		return
 	}
 
@@ -120,6 +134,13 @@ func (d Deps) handleDisableSubject(w http.ResponseWriter, r *http.Request) {
 	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	// Second layer. PermSubjectWrite says this actor may change customers, not
+	// that they may change ANY customer. Without this a reseller could freeze
+	// or disable a competitor's users -- denial of service against another
+	// tenant, from an endpoint their own role legitimately needs.
+	if !d.requireSubjectInScope(w, r, ActorFrom(r.Context()), subjectID) {
+		return
+	}
 
 	store := subjects.NewStore(d.Store, d.Box, d.Now)
 	ctx := r.Context()
@@ -159,6 +180,13 @@ func (d Deps) handleEnableSubject(w http.ResponseWriter, r *http.Request) {
 
 	// Check authorization BEFORE entering transaction to allow BestEffort audit logging
 	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	// Second layer. PermSubjectWrite says this actor may change customers, not
+	// that they may change ANY customer. Without this a reseller could freeze
+	// or disable a competitor's users -- denial of service against another
+	// tenant, from an endpoint their own role legitimately needs.
+	if !d.requireSubjectInScope(w, r, ActorFrom(r.Context()), subjectID) {
 		return
 	}
 

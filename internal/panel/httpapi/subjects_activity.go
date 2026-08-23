@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
 )
 
 // ActivityEvent represents a subject activity event.
@@ -38,6 +40,16 @@ func (d Deps) handleSubjectActivity(w http.ResponseWriter, r *http.Request) {
 	subjectID, err := strconv.ParseInt(subjectIDStr, 10, 64)
 	if err != nil {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)
+		return
+	}
+	// These endpoints had NO authorization of any kind: authentication alone
+	// let any logged-in actor read any subject's connection history, device
+	// list and enforcement state by id. Both layers are applied here -- the
+	// permission gate, then the tenant scope.
+	if !d.requirePermission(w, r, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, ActorFrom(r.Context()), subjectID) {
 		return
 	}
 
@@ -188,6 +200,16 @@ func (d Deps) handleSubjectConnections(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)
 		return
 	}
+	// These endpoints had NO authorization of any kind: authentication alone
+	// let any logged-in actor read any subject's connection history, device
+	// list and enforcement state by id. Both layers are applied here -- the
+	// permission gate, then the tenant scope.
+	if !d.requirePermission(w, r, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, ActorFrom(r.Context()), subjectID) {
+		return
+	}
 
 	query := r.URL.Query()
 
@@ -311,6 +333,16 @@ func (d Deps) handleSubjectDevices(w http.ResponseWriter, r *http.Request) {
 	subjectID, err := strconv.ParseInt(subjectIDStr, 10, 64)
 	if err != nil {
 		http.Error(w, "invalid subject ID", http.StatusBadRequest)
+		return
+	}
+	// These endpoints had NO authorization of any kind: authentication alone
+	// let any logged-in actor read any subject's connection history, device
+	// list and enforcement state by id. Both layers are applied here -- the
+	// permission gate, then the tenant scope.
+	if !d.requirePermission(w, r, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, ActorFrom(r.Context()), subjectID) {
 		return
 	}
 

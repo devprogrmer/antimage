@@ -6,16 +6,28 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/amyrm/antimage/internal/panel/store"
 )
 
 // handleExportSubjects exports all subjects to CSV.
 // GET /api/v1/subjects/export
 func (d Deps) handleExportSubjects(w http.ResponseWriter, r *http.Request) {
+	// Export is the highest-volume disclosure surface in the panel: one request
+	// returns every column of every row, including subscription_token, which by
+	// itself grants access to a user's configuration. Unscoped, a single GET by
+	// any reseller dumped the entire customer base of every other tenant.
+	if !d.requirePermission(w, r, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	args := append([]any{}, store.ScopeArgs(rbac.ScopeOf(ActorFrom(r.Context())))...)
 	rows, err := d.Store.Read().QueryContext(r.Context(), `
 		SELECT id, name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at
 		FROM subjects
+		WHERE `+store.SubjectScopeSQL+`
 		ORDER BY created_at DESC
-	`)
+	`, args...)
 	if err != nil {
 		http.Error(w, "failed to query subjects", http.StatusInternalServerError)
 		return
