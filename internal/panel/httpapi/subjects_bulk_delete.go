@@ -61,6 +61,12 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 				affectedNodes[nodeID] = struct{}{}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			errors = append(errors, err.Error())
+			failed++
+			continue
+		}
 		rows.Close()
 
 			// Delete subject

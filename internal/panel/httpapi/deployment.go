@@ -131,9 +131,10 @@ func (d Deps) handleDeploymentCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Launch async deployment execution with detached context
 	go func(depID int64) {
-		ctx := context.Background() // Detached context for async execution
-		if err := orchestrator.ExecuteDeployment(ctx, depID); err != nil {
-			slog.ErrorContext(ctx, "execute deployment", "error", err, "deployment_id", depID)
+		// Use background context for long-running async work
+		asyncCtx := context.Background()
+		if err := orchestrator.ExecuteDeployment(asyncCtx, depID); err != nil {
+			slog.ErrorContext(asyncCtx, "execute deployment", "error", err, "deployment_id", depID)
 		}
 	}(deploymentID)
 
