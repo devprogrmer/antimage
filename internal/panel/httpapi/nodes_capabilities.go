@@ -39,7 +39,7 @@ func (d Deps) handleGetNodeCapabilities(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Transform to JSON-friendly format
-	var results []map[string]interface{}
+	results := make([]map[string]interface{}, 0, len(capabilities))
 	for _, cap := range capabilities {
 		result := map[string]interface{}{
 			"protocol":      cap.Protocol,

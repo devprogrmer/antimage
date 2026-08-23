@@ -200,13 +200,18 @@ func TestHandleGetNodeHealthHistory(t *testing.T) {
 		t.Errorf("status code = %d, want %d, body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var results []map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&results); err != nil {
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(results) != 3 {
-		t.Errorf("got %d metrics, want 3", len(results))
+	metrics, ok := response["metrics"].([]interface{})
+	if !ok {
+		t.Fatalf("expected 'metrics' field with array, got: %v", response)
+	}
+
+	if len(metrics) != 3 {
+		t.Errorf("got %d metrics, want 3", len(metrics))
 	}
 }
 

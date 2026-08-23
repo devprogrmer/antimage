@@ -45,6 +45,7 @@ func TestHandleGetNodeReconciliation_Converged(t *testing.T) {
 	// Verify response
 	if w.Code != http.StatusOK {
 		t.Errorf("status code = %d, want %d", w.Code, http.StatusOK)
+		t.Logf("response body: %s", w.Body.String())
 	}
 
 	var response map[string]interface{}
@@ -126,9 +127,13 @@ func TestHandleGetNodeReconciliation_WithApplyRuns(t *testing.T) {
 			return err
 		}
 
-		// Note: apply_runs table might not exist in test schema
-		// This test may need to be skipped or the table created
-		return nil
+		// Create some apply runs
+		now := time.Now().Unix()
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO node_apply_runs (node_id, target_revision, outcome, started_at, finished_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, nodeID, 5, "converged", now-300, now-290)
+		return err
 	})
 	if err != nil {
 		t.Fatalf("failed to create test data: %v", err)

@@ -127,7 +127,7 @@ func NewRouter(d Deps) http.Handler {
 		api.Get("/subscribe/{token}/qr", d.handleSubscriptionQR)
 
 		api.Group(func(private chi.Router) {
-			private.Use(d.authMiddleware, readOnlyMiddleware, d.rateLimitMiddleware(limiter))
+			private.Use(d.authMiddleware, d.readOnlyMiddleware, d.rateLimitMiddleware(limiter))
 
 			private.Post("/auth/logout", d.handleLogout)
 			private.Get("/auth/me", d.handleMe)

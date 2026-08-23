@@ -66,8 +66,8 @@ func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request
 
 	// Get recent apply runs for this node
 	rows, err := d.Store.Read().QueryContext(ctx, `
-		SELECT id, revision, outcome, started_at, finished_at, error
-		FROM apply_runs
+		SELECT id, target_revision, outcome, started_at, finished_at
+		FROM node_apply_runs
 		WHERE node_id = ?
 		ORDER BY started_at DESC
 		LIMIT 10
@@ -86,9 +86,8 @@ func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request
 			outcome    string
 			startedAt  int64
 			finishedAt *int64
-			errMsg     *string
 		)
-		if err := rows.Scan(&id, &revision, &outcome, &startedAt, &finishedAt, &errMsg); err != nil {
+		if err := rows.Scan(&id, &revision, &outcome, &startedAt, &finishedAt); err != nil {
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -101,9 +100,6 @@ func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request
 		}
 		if finishedAt != nil {
 			run["finished_at"] = *finishedAt
-		}
-		if errMsg != nil {
-			run["error"] = *errMsg
 		}
 		runs = append(runs, run)
 	}

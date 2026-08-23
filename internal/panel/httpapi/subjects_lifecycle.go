@@ -14,9 +14,6 @@ import (
 // handleFreezeSubject freezes a subject (quota enforcement, violations)
 // POST /api/v1/subjects/:id/freeze
 func (d Deps) handleFreezeSubject(w http.ResponseWriter, r *http.Request) {
-	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
-		return
-	}
 	actor := ActorFrom(r.Context())
 
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "subjectID"), 10, 64)
@@ -35,6 +32,11 @@ func (d Deps) handleFreezeSubject(w http.ResponseWriter, r *http.Request) {
 
 	if req.Reason == "" {
 		req.Reason = "frozen by administrator"
+	}
+
+	// Check authorization BEFORE entering transaction to allow BestEffort audit logging
+	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
 	}
 
 	store := subjects.NewStore(d.Store, d.Box, d.Now)
@@ -65,14 +67,16 @@ func (d Deps) handleFreezeSubject(w http.ResponseWriter, r *http.Request) {
 // handleUnfreezeSubject unfreezes a subject
 // POST /api/v1/subjects/:id/unfreeze
 func (d Deps) handleUnfreezeSubject(w http.ResponseWriter, r *http.Request) {
-	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
-		return
-	}
 	actor := ActorFrom(r.Context())
 
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "subjectID"), 10, 64)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject ID")
+		return
+	}
+
+	// Check authorization BEFORE entering transaction to allow BestEffort audit logging
+	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
 
@@ -104,14 +108,16 @@ func (d Deps) handleUnfreezeSubject(w http.ResponseWriter, r *http.Request) {
 // handleDisableSubject disables a subject (manual admin action)
 // POST /api/v1/subjects/:id/disable
 func (d Deps) handleDisableSubject(w http.ResponseWriter, r *http.Request) {
-	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
-		return
-	}
 	actor := ActorFrom(r.Context())
 
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "subjectID"), 10, 64)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject ID")
+		return
+	}
+
+	// Check authorization BEFORE entering transaction to allow BestEffort audit logging
+	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
 
@@ -143,14 +149,16 @@ func (d Deps) handleDisableSubject(w http.ResponseWriter, r *http.Request) {
 // handleEnableSubject enables a subject
 // POST /api/v1/subjects/:id/enable
 func (d Deps) handleEnableSubject(w http.ResponseWriter, r *http.Request) {
-	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
-		return
-	}
 	actor := ActorFrom(r.Context())
 
 	subjectID, err := strconv.ParseInt(chi.URLParam(r, "subjectID"), 10, 64)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject ID")
+		return
+	}
+
+	// Check authorization BEFORE entering transaction to allow BestEffort audit logging
+	if !d.requirePermission(w, r, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
 

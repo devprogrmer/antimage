@@ -1,94 +1,57 @@
 #!/bin/bash
+# Antimage node bootstrap installer
+# Fetches the node binary, verifies its checksum, and enrolls with the panel.
+# Usage: curl -fsSL https://panel.example.com/install.sh | bash -s -- ENROLLMENT_TOKEN
 
-# Antimage Installation Script
-# Usage: curl -fsSL https://panel.example.com/install.sh | bash
+set -euo pipefail
 
-set -e
+PANEL_URL="${PANEL_URL:-https://panel.example.com}"
+BINARY_URL="${PANEL_URL}/download/antimage-node"
+CHECKSUM_URL="${PANEL_URL}/download/antimage-node.sha256"
+INSTALL_DIR="/opt/antimage"
+BINARY_PATH="${INSTALL_DIR}/antimage-node"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-echo -e "${GREEN}╔═══════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   Antimage VPN Control Plane Setup   ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════════════╝${NC}"
-echo ""
-
-# Detect OS
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    OS="linux"
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    OS="darwin"
-else
-    echo -e "${RED}Unsupported OS: $OSTYPE${NC}"
+# Enrollment token from first argument
+ENROLLMENT_TOKEN="${1:-}"
+if [[ -z "${ENROLLMENT_TOKEN}" ]]; then
+    echo "Error: enrollment token required" >&2
+    echo "Usage: curl -fsSL ${PANEL_URL}/install.sh | bash -s -- TOKEN" >&2
     exit 1
 fi
 
-# Detect architecture
-ARCH=$(uname -m)
-case $ARCH in
-    x86_64)
-        ARCH="amd64"
-        ;;
-    aarch64|arm64)
-        ARCH="arm64"
-        ;;
+# Detect OS and architecture
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+case "${ARCH}" in
+    x86_64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
     *)
-        echo -e "${RED}Unsupported architecture: $ARCH${NC}"
+        echo "Error: unsupported architecture ${ARCH}" >&2
         exit 1
         ;;
 esac
 
-echo -e "${YELLOW}Detected: $OS-$ARCH${NC}"
-
-# Check for required commands
-for cmd in curl wget docker docker-compose; do
-    if ! command -v $cmd &> /dev/null; then
-        echo -e "${YELLOW}Warning: $cmd not found. Some features may not work.${NC}"
-    fi
-done
+echo "Installing antimage-node for ${OS}-${ARCH}"
 
 # Create installation directory
-INSTALL_DIR="/opt/antimage"
-echo -e "${YELLOW}Creating installation directory: $INSTALL_DIR${NC}"
-sudo mkdir -p $INSTALL_DIR
-cd $INSTALL_DIR
+mkdir -p "${INSTALL_DIR}"
+cd "${INSTALL_DIR}"
 
-# Download docker-compose.yml
-echo -e "${YELLOW}Downloading docker-compose.yml...${NC}"
-sudo curl -fsSL https://raw.githubusercontent.com/amyrm/antimage/main/docker-compose.yml -o docker-compose.yml
+# Download binary and checksum
+echo "Downloading binary..."
+curl -fsSL -o antimage-node "${BINARY_URL}"
+curl -fsSL -o antimage-node.sha256 "${CHECKSUM_URL}"
 
-# Download .env.example
-echo -e "${YELLOW}Downloading environment template...${NC}"
-sudo curl -fsSL https://raw.githubusercontent.com/amyrm/antimage/main/.env.example -o .env
+# Verify checksum
+echo "Verifying checksum..."
+sha256sum -c antimage-node.sha256
 
-# Generate secret key
-echo -e "${YELLOW}Generating secret key...${NC}"
-sudo mkdir -p config
-sudo openssl rand -base64 32 > config/secret.key
+# Make executable
+chmod +x antimage-node
 
-# Create data directories
-sudo mkdir -p data node-data node-config grafana-dashboards
+# Enroll with panel
+echo "Enrolling with panel..."
+./antimage-node enroll --token="${ENROLLMENT_TOKEN}" --panel="${PANEL_URL}"
 
-# Set permissions
-sudo chmod 600 config/secret.key
-
-echo ""
-echo -e "${GREEN}Installation files ready!${NC}"
-echo ""
-echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Edit .env with your configuration:"
-echo "   sudo nano .env"
-echo ""
-echo "2. Start the services:"
-echo "   sudo docker-compose up -d"
-echo ""
-echo "3. Create the first admin user:"
-echo "   sudo docker-compose exec panel antimage-ctl create-admin \\"
-echo "     --username admin --password <your-password> --role super_admin"
-echo ""
-echo "4. Access the panel at: http://localhost:8080"
-echo ""
-echo -e "${GREEN}Installation complete!${NC}"
+echo "Installation complete. Starting node..."
+./antimage-node start

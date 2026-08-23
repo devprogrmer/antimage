@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/amyrm/antimage/internal/panel/deployment"
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -101,6 +102,11 @@ func (d Deps) handleDeploymentCreate(w http.ResponseWriter, r *http.Request) {
 
 	if req.Strategy == "" {
 		req.Strategy = deployment.StrategyAllAtOnce
+	}
+
+	// Check authorization before creating deployment
+	if !d.requirePermission(w, r, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
 	}
 
 	validStrategies := map[deployment.Strategy]bool{
@@ -273,6 +279,11 @@ func (d Deps) handleDeploymentRollback(w http.ResponseWriter, r *http.Request) {
 	deploymentID, err := strconv.ParseInt(deploymentIDStr, 10, 64)
 	if err != nil {
 		http.Error(w, "invalid deployment id", http.StatusBadRequest)
+		return
+	}
+
+	// Check authorization before rollback
+	if !d.requirePermission(w, r, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
 

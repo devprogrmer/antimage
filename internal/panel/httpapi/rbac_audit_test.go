@@ -20,8 +20,16 @@ func TestRBACAuditLogging(t *testing.T) {
 	readonlyToken := env.login(t, "readonly", "password")
 
 	t.Run("audit denied authorization on freeze", func(t *testing.T) {
+		// Create a subject to freeze
+		env.store.Write(context.Background(), func(tx *sql.Tx) error {
+			_, err := tx.Exec(`INSERT INTO subjects (id, name, enabled, created_at) VALUES (1, 'test-subject', 1, 1234567890)`)
+			return err
+		})
+
 		// Try to freeze subject with readonly account (should be denied)
 		w := env.post(t, "/api/v1/subjects/1/freeze", `{"reason":"test"}`, readonlyToken)
+
+		t.Logf("Response code: %d, body: %s", w.Code, w.Body.String())
 
 		if w.Code != http.StatusForbidden {
 			t.Errorf("expected 403 Forbidden, got %d: %s", w.Code, w.Body.String())
