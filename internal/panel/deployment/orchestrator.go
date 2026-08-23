@@ -507,7 +507,7 @@ func (o *Orchestrator) initiateRollback(ctx context.Context, deploymentID int64)
 		 AND revision < ?
 		 ORDER BY revision DESC LIMIT 1`,
 		deploymentID, deployment.RevisionID).Scan(&previousRevision)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		// No previous revision, cannot rollback
 		return fmt.Errorf("no previous revision found for rollback")
 	}

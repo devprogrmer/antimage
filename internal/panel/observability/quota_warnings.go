@@ -32,7 +32,7 @@ func (s *Sweeper) enforceQuotaWarnings(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("query 80%% quota warnings: %w", err)
 	}
-	defer rows80.Close()
+	defer func() { _ = rows80.Close() }()
 
 	var warned80 int
 	for rows80.Next() {
@@ -93,7 +93,7 @@ func (s *Sweeper) enforceQuotaWarnings(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("query 90%% quota warnings: %w", err)
 	}
-	defer rows90.Close()
+	defer func() { _ = rows90.Close() }()
 
 	var warned90 int
 	for rows90.Next() {

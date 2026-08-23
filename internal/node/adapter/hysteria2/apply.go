@@ -58,7 +58,7 @@ func (a *Adapter) applyRemove(ctx context.Context, step adapter.Step) (adapter.S
 	}
 
 	// Remove applied state
-	os.Remove(a.appliedPath(step.ServiceID)) // Best effort
+	_ = os.Remove(a.appliedPath(step.ServiceID)) // Best effort
 
 	return adapter.StepResult{OK: true}, nil
 }
@@ -85,7 +85,7 @@ func (a *Adapter) writeConfigAndApply(ctx context.Context, serviceID int64, conf
 	}
 
 	if err := os.Rename(tmpPath, configPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // cleanup
 		return adapter.StepResult{
 			OK:  false,
 			Err: fmt.Sprintf("install config: %v", err),

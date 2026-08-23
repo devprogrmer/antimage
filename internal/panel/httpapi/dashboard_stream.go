@@ -82,8 +82,8 @@ func (d Deps) sendDashboardMetrics(ctx context.Context, w http.ResponseWriter) e
 		return err
 	}
 
-	fmt.Fprintf(w, "event: metrics\n")
-	fmt.Fprintf(w, "data: %s\n\n", data)
+	_, _ = fmt.Fprintf(w, "event: metrics\n")
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -192,6 +192,9 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 		nm.RAMPercent = 0
 
 		metrics.Nodes = append(metrics.Nodes, nm)
+	}
+	if err := rows.Err(); err != nil {
+		return metrics, nil // Return what we have so far
 	}
 
 	return metrics, nil

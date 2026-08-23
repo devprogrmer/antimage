@@ -36,7 +36,7 @@ func (d Deps) handleDeploymentValidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func (d Deps) handleDeploymentPreview(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +129,7 @@ func (d Deps) handleDeploymentCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Launch async deployment execution with detached context
 	go func() {
 		ctx := context.Background() // Detached context for async execution
 		if err := orchestrator.ExecuteDeployment(ctx, deploymentID); err != nil {
@@ -214,9 +215,14 @@ func (d Deps) handleDeploymentGet(w http.ResponseWriter, r *http.Request) {
 		}
 		nodeStatuses = append(nodeStatuses, ns)
 	}
+	if err := rows.Err(); err != nil {
+		slog.ErrorContext(r.Context(), "rows error", "error", err)
+		http.Error(w, "failed to process node status", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"deployment":  dep,
 		"node_status": nodeStatuses,
 	})
@@ -259,9 +265,14 @@ func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
 		}
 		deployments = append(deployments, d)
 	}
+	if err := rows.Err(); err != nil {
+		slog.ErrorContext(r.Context(), "rows error", "error", err)
+		http.Error(w, "failed to process deployments", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"deployments": deployments,
 	})
 }

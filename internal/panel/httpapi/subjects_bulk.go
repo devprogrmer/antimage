@@ -334,7 +334,7 @@ func (d Deps) handleBulkDisableSubjects(w http.ResponseWriter, r *http.Request) 
 		nodeIDs = append(nodeIDs, nid)
 	}
 
-	d.republishNodes(ctx, r, actor, nodeIDs, "bulk disable")
+	_ = d.republishNodes(ctx, r, actor, nodeIDs, "bulk disable") // Best effort
 
 	WriteJSON(w, http.StatusOK, resp)
 }
