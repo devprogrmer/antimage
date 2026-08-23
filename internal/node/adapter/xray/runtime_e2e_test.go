@@ -3,6 +3,7 @@ package xray
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -613,7 +614,7 @@ func measureDownloadThroughput(t *testing.T, socksPort, httpPort, durationSec in
 	for time.Now().Before(deadline) {
 		n, err := conn.Read(buf)
 		if err != nil {
-			if err == io.EOF || os.IsTimeout(err) {
+			if errors.Is(err, io.EOF) || os.IsTimeout(err) {
 				break
 			}
 			t.Logf("Read error (may be timeout): %v", err)

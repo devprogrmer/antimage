@@ -1,6 +1,7 @@
 package enforcement
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -277,7 +278,8 @@ func TestAtomicAdmission_NegativeLimits(t *testing.T) {
 		t.Error("expected connection to be rejected with negative limit")
 	}
 
-	if _, ok := err.(*ErrPolicyViolation); !ok {
+	var policyErr *ErrPolicyViolation
+	if !errors.As(err, &policyErr) {
 		t.Errorf("expected ErrPolicyViolation, got %T", err)
 	}
 }
