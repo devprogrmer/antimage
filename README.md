@@ -284,18 +284,35 @@ Open `http://localhost:8080` and sign in with the credentials from step 5.
 3. Run on the target node:
 
 ```bash
-curl -fsSL https://panel.example.com/install.sh | sudo bash -s -- \
-  --panel https://panel.example.com \
-  --token YOUR_ENROLMENT_TOKEN \
-  --ca-fingerprint sha256:ABC123...
+curl -fsSL https://panel.example.com/install.sh | sudo bash -s -- YOUR_ENROLMENT_TOKEN
 ```
 
-The script:
-- Verifies OS compatibility
-- Downloads and verifies agent binary (SHA-256 checksum)
-- Installs to `/usr/local/bin/antimage-node`
-- Creates systemd service
-- Starts the agent
+Or with custom panel URL:
+
+```bash
+PANEL_URL=https://panel.example.com curl -fsSL https://panel.example.com/install.sh | sudo bash -s -- YOUR_ENROLMENT_TOKEN
+```
+
+The installer automatically:
+- Verifies root privileges and OS compatibility (Linux x86-64/ARM64)
+- Validates enrollment token format
+- Downloads agent binary with timeout limits (5 min)
+- Verifies SHA-256 checksum (rejects on mismatch)
+- Creates dedicated system user `antimage` (no login shell)
+- Installs to `/opt/antimage/antimage-node` with secure permissions
+- Creates hardened systemd service with:
+  - Security features: NoNewPrivileges, PrivateTmp, ProtectSystem=strict
+  - Capability bounding: CAP_NET_ADMIN, CAP_NET_BIND_SERVICE only
+  - Automatic restart on failure (5s delay)
+- Enrolls node with panel using mTLS
+- Enables and starts the service
+- Verifies service is running
+
+**Security Notes:**
+- Enrollment tokens must be 16+ alphanumeric characters
+- Checksum verification prevents binary tampering
+- Failed verification triggers automatic cleanup
+- Service runs as unprivileged user with minimal capabilities
 
 #### Option 2: Manual Installation
 
