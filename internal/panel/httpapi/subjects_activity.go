@@ -143,6 +143,10 @@ func (d Deps) handleSubjectActivity(w http.ResponseWriter, r *http.Request) {
 		}
 		activities = append(activities, a)
 	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
 
 	hasMore := (offset + limit) < total
 

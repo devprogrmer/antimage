@@ -59,7 +59,7 @@ func ListPresets(ctx context.Context, db *store.Store, actor rbac.Actor) ([]User
 	if err != nil {
 		return nil, fmt.Errorf("query presets: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var presets []UserPreset
 	for rows.Next() {

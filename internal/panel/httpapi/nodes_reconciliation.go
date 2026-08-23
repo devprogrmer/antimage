@@ -103,6 +103,10 @@ func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request
 		}
 		runs = append(runs, run)
 	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
 
 	response := map[string]interface{}{
 		"node_id":          nodeID,

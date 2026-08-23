@@ -77,7 +77,7 @@ func (d Deps) handleDeploymentPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"node_id":            req.NodeID,
 		"current_revision":   currentRevision,
 		"target_revision":    req.Revision,
@@ -130,16 +130,16 @@ func (d Deps) handleDeploymentCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Launch async deployment execution with detached context
-	go func() {
+	go func(depID int64) {
 		ctx := context.Background() // Detached context for async execution
-		if err := orchestrator.ExecuteDeployment(ctx, deploymentID); err != nil {
-			slog.ErrorContext(ctx, "execute deployment", "error", err, "deployment_id", deploymentID)
+		if err := orchestrator.ExecuteDeployment(ctx, depID); err != nil {
+			slog.ErrorContext(ctx, "execute deployment", "error", err, "deployment_id", depID)
 		}
-	}()
+	}(deploymentID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"deployment_id": deploymentID,
 		"status":        "pending",
 	})
@@ -308,7 +308,7 @@ func (d Deps) handleDeploymentRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"deployment_id": deploymentID,
 		"status":        "rolled_back",
 	})
