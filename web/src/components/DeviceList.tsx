@@ -66,7 +66,7 @@ export function DeviceList({ subjectId }: DeviceListProps) {
       <div className="mb-4">
         <h3 className="text-sm font-semibold">{t('devices.title')}</h3>
         <p className="text-xs text-zinc-400 mt-1">
-          {t('devices.count', { count: devices.length })}
+          {devices.length} device{devices.length !== 1 ? "s" : ""} connected to this subject
         </p>
       </div>
 

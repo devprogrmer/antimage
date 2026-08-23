@@ -82,9 +82,9 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
     const diffDays = Math.floor(diffMs / 86400000);
 
     if (diffMins < 1) return t('common.just_now');
-    if (diffMins < 60) return t('common.minutes_ago', { count: diffMins });
-    if (diffHours < 24) return t('common.hours_ago', { count: diffHours });
-    if (diffDays < 7) return t('common.days_ago', { count: diffDays });
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString() + " " + date.toLocaleTimeString();
   }
 
