@@ -132,14 +132,24 @@ func (a *Adapter) saveCursors(cursors map[string]userCursor) error {
 	return os.WriteFile(a.cursorsPath(), raw, 0o600)
 }
 
-// parseSubjectEmail extracts the subject ID from "subject-<id>@antimage".
+// parseSubjectEmail extracts the subject ID from "subject-<id>@antimage" or
+// "subject-<id>@antimage-<conn>" (where conn is a connection suffix for testing).
 func parseSubjectEmail(email string) (int64, error) {
 	const prefix = "subject-"
-	const suffix = "@antimage"
-	if !strings.HasPrefix(email, prefix) || !strings.HasSuffix(email, suffix) {
+	const domain = "@antimage"
+
+	if !strings.HasPrefix(email, prefix) {
 		return 0, fmt.Errorf("invalid subject email format: %q", email)
 	}
-	idStr := strings.TrimSuffix(strings.TrimPrefix(email, prefix), suffix)
+
+	// Find the @antimage part (may have suffix like @antimage-2)
+	atIndex := strings.Index(email, domain)
+	if atIndex == -1 {
+		return 0, fmt.Errorf("invalid subject email format: %q", email)
+	}
+
+	// Extract the ID part between "subject-" and "@antimage"
+	idStr := email[len(prefix):atIndex]
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
 		return 0, fmt.Errorf("parse subject id from %q: %w", email, err)
