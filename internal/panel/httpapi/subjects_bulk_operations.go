@@ -42,9 +42,10 @@ func (d Deps) handleBulkEnableSubjects(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	errors := []string{}
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
-			result, err := tx.ExecContext(r.Context(), `
+			result, err := tx.ExecContext(ctx, `
 				UPDATE subjects SET disabled = 0, updated_at = ? WHERE id = ?
 			`, time.Now().Unix(), subjectID)
 			if err != nil {
@@ -122,11 +123,12 @@ func (d Deps) handleBulkExtendSubjects(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	errors := []string{}
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
 			// Get current expiry
 			var currentExpiry sql.NullInt64
-			err := tx.QueryRowContext(r.Context(), `
+			err := tx.QueryRowContext(ctx, `
 				SELECT expires_at FROM subjects WHERE id = ?
 			`, subjectID).Scan(&currentExpiry)
 			if err != nil {
@@ -150,7 +152,7 @@ func (d Deps) handleBulkExtendSubjects(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Update expiry
-			result, err := tx.ExecContext(r.Context(), `
+			result, err := tx.ExecContext(ctx, `
 				UPDATE subjects SET expires_at = ?, updated_at = ? WHERE id = ?
 			`, newExpiry, time.Now().Unix(), subjectID)
 			if err != nil {
@@ -222,9 +224,10 @@ func (d Deps) handleBulkResetTraffic(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	errors := []string{}
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
-			result, err := tx.ExecContext(r.Context(), `
+			result, err := tx.ExecContext(ctx, `
 				UPDATE subjects SET quota_used_bytes = 0, updated_at = ? WHERE id = ?
 			`, time.Now().Unix(), subjectID)
 			if err != nil {
@@ -302,14 +305,15 @@ func (d Deps) handleBulkSetQuota(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	errors := []string{}
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
 			var quotaValue sql.NullInt64
 			if req.QuotaBytes > 0 {
 				quotaValue = sql.NullInt64{Int64: req.QuotaBytes, Valid: true}
 			}
 
-			result, err := tx.ExecContext(r.Context(), `
+			result, err := tx.ExecContext(ctx, `
 				UPDATE subjects SET quota_bytes = ?, updated_at = ? WHERE id = ?
 			`, quotaValue, time.Now().Unix(), subjectID)
 			if err != nil {

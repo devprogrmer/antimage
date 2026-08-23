@@ -151,7 +151,9 @@ func (v *Validator) validatePortConflicts(desiredState map[string]interface{}, r
 
 	for nodeIDStr, configIface := range nodeConfigs {
 		var nodeID int64
-		fmt.Sscanf(nodeIDStr, "%d", &nodeID)
+		if _, err := fmt.Sscanf(nodeIDStr, "%d", &nodeID); err != nil {
+			continue // Skip invalid node IDs
+		}
 
 		config, ok := configIface.(map[string]interface{})
 		if !ok {
@@ -201,7 +203,9 @@ func (v *Validator) validateProtocolConfigs(desiredState map[string]interface{},
 
 	for nodeIDStr, configIface := range nodeConfigs {
 		var nodeID int64
-		fmt.Sscanf(nodeIDStr, "%d", &nodeID)
+		if _, err := fmt.Sscanf(nodeIDStr, "%d", &nodeID); err != nil {
+			continue // Skip invalid node IDs
+		}
 
 		config, ok := configIface.(map[string]interface{})
 		if !ok {

@@ -159,7 +159,7 @@ func ListBulkOperations(
 	if err != nil {
 		return nil, fmt.Errorf("query bulk operations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var ops []*BulkOperation
 	for rows.Next() {

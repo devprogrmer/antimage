@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -129,8 +130,9 @@ func (d Deps) handleDeploymentCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
-		if err := orchestrator.ExecuteDeployment(r.Context(), deploymentID); err != nil {
-			slog.ErrorContext(r.Context(), "execute deployment", "error", err, "deployment_id", deploymentID)
+		ctx := context.Background() // Detached context for async execution
+		if err := orchestrator.ExecuteDeployment(ctx, deploymentID); err != nil {
+			slog.ErrorContext(ctx, "execute deployment", "error", err, "deployment_id", deploymentID)
 		}
 	}()
 

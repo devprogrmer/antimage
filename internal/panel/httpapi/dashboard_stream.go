@@ -62,8 +62,8 @@ func (d Deps) handleDashboardStream(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Send heartbeat
-			fmt.Fprintf(w, "event: heartbeat\n")
-			fmt.Fprintf(w, "data: {\"timestamp\": %d}\n\n", time.Now().Unix())
+			_, _ = fmt.Fprintf(w, "event: heartbeat\n")
+			_, _ = fmt.Fprintf(w, "data: {\"timestamp\": %d}\n\n", time.Now().Unix())
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}

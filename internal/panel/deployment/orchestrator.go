@@ -426,7 +426,7 @@ func (o *Orchestrator) getPendingNodes(ctx context.Context, deploymentID int64) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var nodeIDs []int64
 	for rows.Next() {
@@ -474,7 +474,7 @@ func (o *Orchestrator) initiateRollback(ctx context.Context, deploymentID int64)
 	if err != nil {
 		return fmt.Errorf("query deployed nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var nodeIDs []int64
 	for rows.Next() {

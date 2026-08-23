@@ -145,7 +145,12 @@ func (a *Adapter) applyWithDesired(ctx context.Context, step adapter.Step, desir
 			configPath := a.configPath(desired.ID)
 			running, err := a.rt.ServerStatus(ctx, configPath)
 			if err == nil && running {
-				a.rt.ServerStop(ctx, configPath)
+				if stopErr := a.rt.ServerStop(ctx, configPath); stopErr != nil {
+					return adapter.StepResult{
+						OK:  false,
+						Err: fmt.Sprintf("failed to stop server: %v", stopErr),
+					}, nil
+				}
 			}
 		}
 		return a.writeConfigAndApply(ctx, desired.ID, config, users)

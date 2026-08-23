@@ -92,7 +92,7 @@ func (a *Adapter) applyRemove(ctx context.Context, step adapter.Step) (adapter.S
 
 	// Remove applied state file
 	appliedPath := a.appliedPath(step.ServiceID)
-	os.Remove(appliedPath) // Best effort, don't fail if this errors
+	_ = os.Remove(appliedPath) // Best effort, don't fail if this errors
 
 	return adapter.StepResult{
 		OK: true,
@@ -122,7 +122,7 @@ func (a *Adapter) writeConfigAndApply(ctx context.Context, serviceID int64, conf
 	}
 
 	if err := os.Rename(tmpPath, configPath); err != nil {
-		os.Remove(tmpPath) // cleanup
+		_ = os.Remove(tmpPath) // cleanup
 		return adapter.StepResult{
 			OK:  false,
 			Err: fmt.Sprintf("install config: %v", err),
@@ -182,7 +182,7 @@ func (a *Adapter) applyWithDesired(ctx context.Context, step adapter.Step, desir
 			iface := interfaceName(step.ServiceID)
 			_, up, err := a.rt.InterfaceStatus(ctx, iface)
 			if err == nil && up {
-				a.rt.InterfaceDown(ctx, iface)
+				_ = a.rt.InterfaceDown(ctx, iface) // Best effort
 			}
 		}
 		return a.writeConfigAndApply(ctx, desired.ID, config, peers)
@@ -221,7 +221,7 @@ func (a *Adapter) applyWithDesired(ctx context.Context, step adapter.Step, desir
 		lines := strings.Split(config, "\n")
 		_, checksum, _ := parseMarker(lines[0])
 		peerKeys := extractPublicKeys(peers)
-		a.recordApplied(desired.ID, checksum, peerKeys)
+		_ = a.recordApplied(desired.ID, checksum, peerKeys) // Best effort
 
 		return adapter.StepResult{OK: true}, nil
 
