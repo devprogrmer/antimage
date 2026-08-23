@@ -84,7 +84,7 @@ func TestAutomaticRollbackOnFailure(t *testing.T) {
 	// Execute deployment - should fail and trigger rollback
 	// Note: This won't actually fail in applyToNode since it doesn't do real work,
 	// but we can manually trigger a failure scenario
-	err = orchestrator.ExecuteDeployment(ctx, deploymentID)
+	_ = orchestrator.ExecuteDeployment(ctx, deploymentID)
 
 	// Verify deployment completed (even though node is offline, applyToNode succeeds)
 	// This is because applyToNode doesn't actually apply anything yet

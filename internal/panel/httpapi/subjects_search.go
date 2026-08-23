@@ -122,7 +122,6 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	if tag != "" {
 		conditions = append(conditions, "note LIKE ?")
 		args = append(args, "%"+tag+"%")
-		argIdx++
 		whereClause = strings.Join(conditions, " AND ")
 	}
 

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -34,7 +35,7 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 	var nodeName, status string
 	err = d.Store.Read().QueryRowContext(ctx,
 		`SELECT name, status FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName, &status)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "not_found", "node not found")
 		return
 	}

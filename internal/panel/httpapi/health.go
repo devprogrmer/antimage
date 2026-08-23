@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -44,7 +45,7 @@ func (d Deps) handleReady(w http.ResponseWriter, r *http.Request) {
 		var result int
 		err = d.Store.Read().QueryRowContext(ctx, "SELECT 1").Scan(&result)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				checks["database"] = "ok"
 			} else {
 				checks["database"] = "error: " + err.Error()

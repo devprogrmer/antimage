@@ -137,7 +137,7 @@ func (f *FaultyDB) QueryContext(ctx context.Context, query string, args ...inter
 		}
 	}
 
-	return f.db.QueryContext(ctx, query, args...)
+	return f.db.QueryContext(ctx, query, args...) //nolint:sqlclosecheck // Rows are closed by the caller
 }
 
 // ExecContext wraps sql.DB.ExecContext with fault injection
