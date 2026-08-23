@@ -144,8 +144,13 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			// restarting the interface. Only structural changes (listen port,
 			// private key, subnet) require a restart.
 			HotUserAdd: true,
-			// WireGuard has no built-in accounting API; we parse `wg show`.
-			SelfAccounting: false,
+			// SelfAccounting declares that this adapter reports its own usage,
+			// not that the protocol ships an accounting API. WireGuard has no
+			// API, but the adapter implements UsageReporter by parsing
+			// `wg show <iface> transfer`, so the capability is true. Declaring
+			// false here told the panel this adapter could not account for
+			// itself while it was doing exactly that.
+			SelfAccounting: true,
 			RequiresPKI:    false,
 			// WireGuard peers are identified by their public key, which is
 			// derived from a private key. The panel stores the private key
