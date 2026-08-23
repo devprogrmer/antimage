@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18n";
 
 interface FilterParams {
   search: string;
@@ -17,6 +18,7 @@ interface SubjectFiltersProps {
 }
 
 export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [trafficMin, setTrafficMin] = useState("");
@@ -72,58 +74,58 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
     <div className="bg-zinc-900 border border-zinc-800 rounded p-4 mb-4">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Search</label>
+          <label className="block text-xs text-zinc-400 mb-1">{t('filters.search')}</label>
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Name or note..."
+            placeholder={t('filters.search_placeholder')}
             className="w-full px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-sm"
           />
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Status</label>
+          <label className="block text-xs text-zinc-400 mb-1">{t('filters.status')}</label>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
             className="w-full px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-sm"
           >
-            <option value="">All</option>
-            <option value="active">Active</option>
-            <option value="disabled">Disabled</option>
-            <option value="frozen">Frozen</option>
-            <option value="expired">Expired</option>
+            <option value="">{t('filters.all')}</option>
+            <option value="active">{t('filters.active')}</option>
+            <option value="disabled">{t('filters.disabled')}</option>
+            <option value="frozen">{t('filters.frozen')}</option>
+            <option value="expired">{t('filters.expired')}</option>
           </select>
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Quota Status</label>
+          <label className="block text-xs text-zinc-400 mb-1">{t('filters.quota_status')}</label>
           <select
             value={quotaStatus}
             onChange={(e) => setQuotaStatus(e.target.value)}
             className="w-full px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-sm"
           >
-            <option value="">All</option>
-            <option value="under_limit">Under Limit</option>
-            <option value="near_limit">Near Limit (80%+)</option>
-            <option value="over_limit">Over Limit</option>
+            <option value="">{t('filters.all')}</option>
+            <option value="under_limit">{t('filters.under_limit')}</option>
+            <option value="near_limit">{t('filters.near_limit')}</option>
+            <option value="over_limit">{t('filters.over_limit')}</option>
           </select>
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Sort By</label>
+          <label className="block text-xs text-zinc-400 mb-1">{t('filters.sort_by')}</label>
           <div className="flex gap-2">
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value)}
               className="flex-1 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-sm"
             >
-              <option value="created">Created</option>
-              <option value="name">Name</option>
-              <option value="expires">Expiry</option>
-              <option value="traffic">Traffic</option>
-              <option value="quota">Quota</option>
+              <option value="created">{t('filters.sort_created')}</option>
+              <option value="name">{t('filters.sort_name')}</option>
+              <option value="expires">{t('filters.sort_expiry')}</option>
+              <option value="traffic">{t('filters.sort_traffic')}</option>
+              <option value="quota">{t('filters.sort_quota')}</option>
             </select>
             <button
               type="button"
@@ -136,7 +138,7 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Traffic Min (GB)</label>
+          <label className="block text-xs text-zinc-400 mb-1">{t('filters.traffic_min')}</label>
           <input
             type="number"
             value={trafficMin}
@@ -148,19 +150,19 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Traffic Max (GB)</label>
+          <label className="block text-xs text-zinc-400 mb-1">{t('filters.traffic_max')}</label>
           <input
             type="number"
             value={trafficMax}
             onChange={(e) => setTrafficMax(e.target.value)}
-            placeholder="Unlimited"
+            placeholder={t('filters.unlimited')}
             min="0"
             className="w-full px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-sm"
           />
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Expires After</label>
+          <label className="block text-xs text-zinc-400 mb-1">{t('filters.expires_after')}</label>
           <input
             type="date"
             value={expiresAfter}
@@ -170,7 +172,7 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Expires Before</label>
+          <label className="block text-xs text-zinc-400 mb-1">{t('filters.expires_before')}</label>
           <input
             type="date"
             value={expiresBefore}
@@ -187,7 +189,7 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
             onClick={clearFilters}
             className="px-4 py-1.5 text-xs text-zinc-400 hover:text-zinc-100"
           >
-            Clear Filters
+            {t('filters.clear_filters')}
           </button>
         </div>
       )}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18n";
 import { api } from "../lib/api";
 
 interface Connection {
@@ -20,6 +21,7 @@ interface ConnectionHistoryProps {
 }
 
 export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
+  const { t } = useTranslation();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<"start_time" | "duration" | "traffic">("start_time");
@@ -70,36 +72,36 @@ export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
   return (
     <div>
       <div className="mb-4 flex items-center gap-4">
-        <h3 className="text-sm font-semibold">Connection History</h3>
+        <h3 className="text-sm font-semibold">{t('connections.history')}</h3>
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as any)}
           className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs"
         >
-          <option value="start_time">Recent First</option>
-          <option value="duration">Longest First</option>
-          <option value="traffic">Most Traffic First</option>
+          <option value="start_time">{t('connections.sort_recent')}</option>
+          <option value="duration">{t('connections.sort_longest')}</option>
+          <option value="traffic">{t('connections.sort_traffic')}</option>
         </select>
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-zinc-400">Loading...</div>
+        <div className="text-center py-8 text-sm text-zinc-400">{t('common.loading')}</div>
       ) : connections.length === 0 ? (
-        <div className="text-center py-8 text-sm text-zinc-400">No connections recorded yet</div>
+        <div className="text-center py-8 text-sm text-zinc-400">{t('connections.no_connections')}</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse">
             <thead>
               <tr className="border-b border-zinc-800 text-left">
-                <th className="py-2 px-2">Start Time</th>
-                <th className="py-2 px-2">Duration</th>
-                <th className="py-2 px-2">Upload</th>
-                <th className="py-2 px-2">Download</th>
-                <th className="py-2 px-2">Total</th>
-                <th className="py-2 px-2">IP Address</th>
-                <th className="py-2 px-2">Device</th>
-                <th className="py-2 px-2">Protocol</th>
-                <th className="py-2 px-2">Status</th>
+                <th className="py-2 px-2">{t('connections.start_time')}</th>
+                <th className="py-2 px-2">{t('connections.duration')}</th>
+                <th className="py-2 px-2">{t('connections.upload')}</th>
+                <th className="py-2 px-2">{t('connections.download')}</th>
+                <th className="py-2 px-2">{t('connections.total')}</th>
+                <th className="py-2 px-2">{t('connections.ip_address')}</th>
+                <th className="py-2 px-2">{t('connections.device')}</th>
+                <th className="py-2 px-2">{t('connections.protocol')}</th>
+                <th className="py-2 px-2">{t('connections.status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -121,9 +123,9 @@ export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
                   </td>
                   <td className="py-2 px-2">
                     {conn.end_time ? (
-                      <span className="text-zinc-500">Ended</span>
+                      <span className="text-zinc-500">{t('connections.ended')}</span>
                     ) : (
-                      <span className="text-green-400">● Active</span>
+                      <span className="text-green-400">● {t('connections.active')}</span>
                     )}
                   </td>
                 </tr>

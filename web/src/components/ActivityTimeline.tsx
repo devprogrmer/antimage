@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18n";
 import { api } from "../lib/api";
 
 interface Activity {
@@ -19,6 +20,7 @@ interface ActivityTimelineProps {
 }
 
 export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
+  const { t } = useTranslation();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
@@ -80,10 +82,10 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffMins < 1) return t('common.just_now');
+    if (diffMins < 60) return t('common.minutes_ago', { count: diffMins });
+    if (diffHours < 24) return t('common.hours_ago', { count: diffHours });
+    if (diffDays < 7) return t('common.days_ago', { count: diffDays });
     return date.toLocaleDateString() + " " + date.toLocaleTimeString();
   }
 
@@ -98,7 +100,7 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
   return (
     <div>
       <div className="mb-4 flex items-center gap-4">
-        <h3 className="text-sm font-semibold">Activity Timeline</h3>
+        <h3 className="text-sm font-semibold">{t('activity.timeline')}</h3>
         <select
           value={eventTypeFilter}
           onChange={(e) => {
@@ -107,20 +109,20 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
           }}
           className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs"
         >
-          <option value="">All Events</option>
-          <option value="connection_start">Connections Start</option>
-          <option value="connection_end">Connections End</option>
-          <option value="traffic_update">Traffic Updates</option>
-          <option value="quota_exceeded">Quota Exceeded</option>
-          <option value="enabled">Enabled</option>
-          <option value="disabled">Disabled</option>
+          <option value="">{t('activity.all_events')}</option>
+          <option value="connection_start">{t('activity.connection_start')}</option>
+          <option value="connection_end">{t('activity.connection_end')}</option>
+          <option value="traffic_update">{t('activity.traffic_update')}</option>
+          <option value="quota_exceeded">{t('activity.quota_exceeded')}</option>
+          <option value="enabled">{t('activity.enabled')}</option>
+          <option value="disabled">{t('activity.disabled')}</option>
         </select>
       </div>
 
       {loading && offset === 0 ? (
-        <div className="text-center py-8 text-sm text-zinc-400">Loading...</div>
+        <div className="text-center py-8 text-sm text-zinc-400">{t('common.loading')}</div>
       ) : activities.length === 0 ? (
-        <div className="text-center py-8 text-sm text-zinc-400">No activity recorded yet</div>
+        <div className="text-center py-8 text-sm text-zinc-400">{t('activity.no_activity')}</div>
       ) : (
         <div className="space-y-3">
           {activities.map((activity) => (
@@ -139,14 +141,14 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
 
                   <div className="text-xs text-zinc-400 space-y-1">
                     {activity.ip_address && (
-                      <div>IP: {activity.ip_address}</div>
+                      <div>{t('activity.ip')}: {activity.ip_address}</div>
                     )}
                     {activity.device_id && (
-                      <div>Device: {activity.device_id}</div>
+                      <div>{t('activity.device')}: {activity.device_id}</div>
                     )}
                     {(activity.bytes_up > 0 || activity.bytes_down > 0) && (
                       <div>
-                        Traffic: ↑ {formatBytes(activity.bytes_up)} / ↓ {formatBytes(activity.bytes_down)}
+                        {t('activity.traffic')}: ↑ {formatBytes(activity.bytes_up)} / ↓ {formatBytes(activity.bytes_down)}
                       </div>
                     )}
                     {activity.details && (
@@ -167,7 +169,7 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
               disabled={loading}
               className="w-full py-2 text-xs text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
             >
-              {loading ? "Loading..." : "Load More"}
+              {loading ? t('common.loading') : t('common.load_more')}
             </button>
           )}
         </div>

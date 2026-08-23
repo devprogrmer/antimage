@@ -90,7 +90,7 @@ export function Dashboard() {
     <div className="p-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <h1 className="text-3xl font-bold">{t('dashboard.title')}</h1>
         <div className="flex items-center space-x-2">
           <div
             className={`w-3 h-3 rounded-full ${
@@ -98,7 +98,7 @@ export function Dashboard() {
             }`}
           ></div>
           <span className="text-sm text-gray-600">
-            {connected ? 'Live' : 'Disconnected'}
+            {connected ? t('dashboard.live') : t('dashboard.disconnected')}
           </span>
         </div>
       </div>
@@ -106,30 +106,30 @@ export function Dashboard() {
       {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <MetricCard
-          title="Active Users"
+          title={t('dashboard.active_users')}
           value={metrics.active_users}
           total={metrics.total_subjects}
           icon="👥"
           color="blue"
         />
         <MetricCard
-          title="Nodes Online"
+          title={t('dashboard.nodes_online')}
           value={metrics.nodes_online}
           total={metrics.nodes_total}
           icon="🖥️"
           color="green"
         />
         <MetricCard
-          title="Traffic Today"
+          title={t('dashboard.traffic_today')}
           value={`${metrics.traffic_today_gb.toFixed(2)} GB`}
           subtitle={`${metrics.bandwidth_mbps.toFixed(1)} Mbps`}
           icon="📊"
           color="purple"
         />
         <MetricCard
-          title="Alerts"
+          title={t('dashboard.alerts')}
           value={metrics.alerts_count}
-          subtitle={`${metrics.frozen_count} frozen`}
+          subtitle={t('dashboard.frozen_count', { count: metrics.frozen_count })}
           icon="⚠️"
           color={metrics.alerts_count > 0 ? 'red' : 'gray'}
         />
@@ -137,7 +137,7 @@ export function Dashboard() {
 
       {/* Nodes Grid */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h2 className="text-xl font-semibold mb-4">Nodes</h2>
+        <h2 className="text-xl font-semibold mb-4">{t('dashboard.nodes')}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {metrics.nodes.map((node) => (
             <NodeCard key={node.id} node={node} />
@@ -188,6 +188,7 @@ interface NodeCardProps {
 }
 
 function NodeCard({ node }: NodeCardProps) {
+  const { t } = useTranslation();
   const statusColors = {
     online: 'bg-green-100 text-green-800 border-green-300',
     degraded: 'bg-yellow-100 text-yellow-800 border-yellow-300',
@@ -208,18 +209,18 @@ function NodeCard({ node }: NodeCardProps) {
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-600">Users</span>
+          <span className="text-gray-600">{t('dashboard.users')}</span>
           <span className="font-medium">{node.user_count}</span>
         </div>
         {node.cpu_percent > 0 && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">CPU</span>
+            <span className="text-gray-600">{t('dashboard.cpu')}</span>
             <span className="font-medium">{node.cpu_percent.toFixed(1)}%</span>
           </div>
         )}
         {node.ram_percent > 0 && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">RAM</span>
+            <span className="text-gray-600">{t('dashboard.ram')}</span>
             <span className="font-medium">{node.ram_percent.toFixed(1)}%</span>
           </div>
         )}

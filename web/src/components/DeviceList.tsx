@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18n";
 import { api } from "../lib/api";
 
 interface Device {
@@ -16,6 +17,7 @@ interface DeviceListProps {
 }
 
 export function DeviceList({ subjectId }: DeviceListProps) {
+  const { t } = useTranslation();
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -52,27 +54,27 @@ export function DeviceList({ subjectId }: DeviceListProps) {
     const diffSeconds = now - lastSeen;
 
     if (diffSeconds < 300) {
-      return { label: "Online", color: "text-green-400" };
+      return { label: t('devices.online'), color: "text-green-400" };
     } else if (diffSeconds < 3600) {
-      return { label: "Recently Active", color: "text-yellow-400" };
+      return { label: t('devices.recently_active'), color: "text-yellow-400" };
     } else {
-      return { label: "Offline", color: "text-zinc-500" };
+      return { label: t('devices.offline'), color: "text-zinc-500" };
     }
   }
 
   return (
     <div>
       <div className="mb-4">
-        <h3 className="text-sm font-semibold">Devices</h3>
+        <h3 className="text-sm font-semibold">{t('devices.title')}</h3>
         <p className="text-xs text-zinc-400 mt-1">
-          {devices.length} device{devices.length !== 1 ? "s" : ""} connected to this subject
+          {t('devices.count', { count: devices.length })}
         </p>
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-zinc-400">Loading...</div>
+        <div className="text-center py-8 text-sm text-zinc-400">{t('common.loading')}</div>
       ) : devices.length === 0 ? (
-        <div className="text-center py-8 text-sm text-zinc-400">No devices connected yet</div>
+        <div className="text-center py-8 text-sm text-zinc-400">{t('devices.no_devices')}</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {devices.map((device) => {
@@ -92,34 +94,34 @@ export function DeviceList({ subjectId }: DeviceListProps) {
 
                 <div className="space-y-2 text-xs text-zinc-400">
                   <div className="flex justify-between">
-                    <span>First Seen:</span>
+                    <span>{t('devices.first_seen')}:</span>
                     <span className="text-zinc-300">{formatTimestamp(device.first_seen)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Last Seen:</span>
+                    <span>{t('devices.last_seen')}:</span>
                     <span className="text-zinc-300">{formatTimestamp(device.last_seen)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Connections:</span>
+                    <span>{t('devices.connections')}:</span>
                     <span className="text-zinc-300">{device.connection_count}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Upload:</span>
+                    <span>{t('devices.upload')}:</span>
                     <span className="text-blue-400">{formatBytes(device.total_bytes_up)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Download:</span>
+                    <span>{t('devices.download')}:</span>
                     <span className="text-green-400">{formatBytes(device.total_bytes_down)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Total Traffic:</span>
+                    <span>{t('devices.total_traffic')}:</span>
                     <span className="text-zinc-100 font-semibold">
                       {formatBytes(device.total_bytes_up + device.total_bytes_down)}
                     </span>
                   </div>
                   {device.last_ip_address && (
                     <div className="flex justify-between pt-2 border-t border-zinc-800">
-                      <span>Last IP:</span>
+                      <span>{t('devices.last_ip')}:</span>
                       <span className="text-zinc-300 font-mono">{device.last_ip_address}</span>
                     </div>
                   )}
