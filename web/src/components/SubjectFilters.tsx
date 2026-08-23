@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useTranslation } from "react-i18n";
+import { t } from "../i18n";
 
 interface FilterParams {
   search: string;
@@ -18,7 +18,6 @@ interface SubjectFiltersProps {
 }
 
 export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
-  const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [trafficMin, setTrafficMin] = useState("");

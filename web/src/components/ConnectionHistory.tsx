@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18n";
 import { api } from "../lib/api";
+import { t } from "../i18n";
 
 interface Connection {
   id: number;
@@ -21,7 +21,6 @@ interface ConnectionHistoryProps {
 }
 
 export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
-  const { t } = useTranslation();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<"start_time" | "duration" | "traffic">("start_time");

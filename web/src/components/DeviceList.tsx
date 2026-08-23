@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18n";
 import { api } from "../lib/api";
+import { t } from "../i18n";
 
 interface Device {
   device_id: string;
@@ -17,7 +17,6 @@ interface DeviceListProps {
 }
 
 export function DeviceList({ subjectId }: DeviceListProps) {
-  const { t } = useTranslation();
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
 

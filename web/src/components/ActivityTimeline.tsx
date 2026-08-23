@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18n";
 import { api } from "../lib/api";
+import { t } from "../i18n";
 
 interface Activity {
   id: number;
@@ -20,7 +20,6 @@ interface ActivityTimelineProps {
 }
 
 export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
-  const { t } = useTranslation();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
