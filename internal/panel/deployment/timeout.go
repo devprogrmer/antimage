@@ -46,7 +46,7 @@ func (o *Orchestrator) EnforceTimeouts(ctx context.Context, config TimeoutConfig
 	if err != nil {
 		return fmt.Errorf("query in-progress deployments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var timedOutDeployments []struct {
 		id       int64

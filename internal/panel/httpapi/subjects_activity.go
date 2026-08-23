@@ -274,6 +274,10 @@ func (d Deps) handleSubjectConnections(w http.ResponseWriter, r *http.Request) {
 		}
 		connections = append(connections, c)
 	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
 
 	countQuery := `SELECT COUNT(*) FROM subject_activity WHERE subject_id = ? AND event_type = 'connection_start'`
 	var total int
@@ -351,6 +355,10 @@ func (d Deps) handleSubjectDevices(w http.ResponseWriter, r *http.Request) {
 			d.LastIPAddress = lastIP.String
 		}
 		devices = append(devices, d)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
 	}
 
 	resp := DeviceListResponse{
