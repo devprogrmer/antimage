@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { t } from "../i18n";
 
 interface BulkActionsProps {
   selectedIds: number[];
@@ -38,7 +39,7 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
   return (
     <div className="sticky top-0 z-10 bg-zinc-900 border-b border-zinc-800 p-3 flex items-center gap-3">
       <span className="text-sm text-zinc-400">
-        {selectedIds.length} selected
+        {selectedIds.length} {t("subject.selected")}
       </span>
 
       <div className="relative">
@@ -48,20 +49,20 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
           disabled={loading}
           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded"
         >
-          Bulk Actions
+          {t("bulk.actions")}
         </button>
 
         {showMenu && (
-          <div className="absolute top-full left-0 mt-1 bg-zinc-800 border border-zinc-700 rounded shadow-lg min-w-48 z-20">
+          <div className="absolute top-full start-0 mt-1 bg-zinc-800 border border-zinc-700 rounded shadow-lg min-w-48 z-20">
             <button
               type="button"
               onClick={() => {
                 setShowMenu(false);
                 setShowConfirm("enable");
               }}
-              className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-700"
+              className="w-full text-start px-4 py-2 text-xs hover:bg-zinc-700"
             >
-              Enable
+              {t("subject.enable")}
             </button>
             <button
               type="button"
@@ -69,9 +70,9 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 setShowMenu(false);
                 setShowConfirm("disable");
               }}
-              className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-700"
+              className="w-full text-start px-4 py-2 text-xs hover:bg-zinc-700"
             >
-              Disable
+              {t("subject.disable")}
             </button>
             <button
               type="button"
@@ -79,9 +80,9 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 setShowMenu(false);
                 setShowExtendDialog(true);
               }}
-              className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-700"
+              className="w-full text-start px-4 py-2 text-xs hover:bg-zinc-700"
             >
-              Extend Expiry
+              {t("subject.extendExpiry")}
             </button>
             <button
               type="button"
@@ -89,9 +90,9 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 setShowMenu(false);
                 setShowConfirm("reset-traffic");
               }}
-              className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-700"
+              className="w-full text-start px-4 py-2 text-xs hover:bg-zinc-700"
             >
-              Reset Traffic
+              {t("subject.resetTraffic")}
             </button>
             <button
               type="button"
@@ -99,9 +100,9 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 setShowMenu(false);
                 setShowQuotaDialog(true);
               }}
-              className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-700"
+              className="w-full text-start px-4 py-2 text-xs hover:bg-zinc-700"
             >
-              Set Quota
+              {t("subject.setQuota")}
             </button>
             <button
               type="button"
@@ -109,9 +110,9 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 setShowMenu(false);
                 setShowConfirm("delete");
               }}
-              className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-zinc-700"
+              className="w-full text-start px-4 py-2 text-xs text-red-400 hover:bg-zinc-700"
             >
-              Delete
+              {t("delete")}
             </button>
           </div>
         )}
@@ -120,22 +121,22 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
       <button
         type="button"
         onClick={onClearSelection}
-        className="ml-auto text-xs text-zinc-400 hover:text-zinc-100"
+        className="ms-auto text-xs text-zinc-400 hover:text-zinc-100"
       >
-        Clear Selection
+        {t("subject.clearSelection")}
       </button>
 
       {loading && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-zinc-800 p-6 rounded">
             <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
-            <p className="mt-4 text-sm text-zinc-400">Processing...</p>
+            <p className="mt-4 text-sm text-zinc-400">{t("loading")}</p>
           </div>
         </div>
       )}
 
       {result && (
-        <div className={`fixed top-4 right-4 p-4 rounded shadow-lg z-50 ${result.success ? "bg-green-900" : "bg-red-900"}`}>
+        <div className={`fixed top-4 end-4 p-4 rounded shadow-lg z-50 ${result.success ? "bg-green-900" : "bg-red-900"}`}>
           <p className="text-sm">
             {result.success ? `${result.action} completed` : `${result.action} failed: ${result.error}`}
           </p>
@@ -146,10 +147,10 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-zinc-800 p-6 rounded max-w-md">
             <h3 className="text-lg font-semibold mb-4">
-              Confirm {showConfirm}
+              {t("confirm")} {showConfirm}
             </h3>
             <p className="text-sm text-zinc-400 mb-6">
-              This will {showConfirm} {selectedIds.length} subjects. Continue?
+              {`${t("bulk.confirmMessage")} ${selectedIds.length}`}
             </p>
             <div className="flex gap-3 justify-end">
               <button
@@ -157,7 +158,7 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 onClick={() => setShowConfirm(null)}
                 className="px-4 py-2 text-xs bg-zinc-700 hover:bg-zinc-600 rounded"
               >
-                Cancel
+                {t("cancel")}
               </button>
               <button
                 type="button"
@@ -167,7 +168,7 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 }}
                 className="px-4 py-2 text-xs bg-red-600 hover:bg-red-700 rounded"
               >
-                Confirm
+                {t("confirm")}
               </button>
             </div>
           </div>
@@ -177,12 +178,12 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
       {showExtendDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-zinc-800 p-6 rounded max-w-md">
-            <h3 className="text-lg font-semibold mb-4">Extend Expiry</h3>
+            <h3 className="text-lg font-semibold mb-4">{t("subject.extendExpiry")}</h3>
             <p className="text-sm text-zinc-400 mb-4">
-              Extend expiry for {selectedIds.length} subjects
+              {`${t("bulk.extendMessage")} ${selectedIds.length}`}
             </p>
             <div className="mb-6">
-              <label className="block text-xs text-zinc-400 mb-2">Days to extend</label>
+              <label className="block text-xs text-zinc-400 mb-2">{t("bulk.daysToExtend")}</label>
               <input
                 type="number"
                 value={extendDays}
@@ -198,7 +199,7 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 onClick={() => setShowExtendDialog(false)}
                 className="px-4 py-2 text-xs bg-zinc-700 hover:bg-zinc-600 rounded"
               >
-                Cancel
+                {t("cancel")}
               </button>
               <button
                 type="button"
@@ -208,7 +209,7 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 }}
                 className="px-4 py-2 text-xs bg-blue-600 hover:bg-blue-700 rounded"
               >
-                Extend
+                {t("subject.extend")}
               </button>
             </div>
           </div>
@@ -218,12 +219,12 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
       {showQuotaDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-zinc-800 p-6 rounded max-w-md">
-            <h3 className="text-lg font-semibold mb-4">Set Quota</h3>
+            <h3 className="text-lg font-semibold mb-4">{t("subject.setQuota")}</h3>
             <p className="text-sm text-zinc-400 mb-4">
-              Set quota for {selectedIds.length} subjects
+              {`${t("bulk.quotaMessage")} ${selectedIds.length}`}
             </p>
             <div className="mb-6">
-              <label className="block text-xs text-zinc-400 mb-2">Quota (GB, 0 = unlimited)</label>
+              <label className="block text-xs text-zinc-400 mb-2">{t("bulk.quotaGB")}</label>
               <input
                 type="number"
                 value={quotaGB}
@@ -239,7 +240,7 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 onClick={() => setShowQuotaDialog(false)}
                 className="px-4 py-2 text-xs bg-zinc-700 hover:bg-zinc-600 rounded"
               >
-                Cancel
+                {t("cancel")}
               </button>
               <button
                 type="button"
@@ -250,7 +251,7 @@ export function BulkActions({ selectedIds, onAction, onClearSelection }: BulkAct
                 }}
                 className="px-4 py-2 text-xs bg-blue-600 hover:bg-blue-700 rounded"
               >
-                Set Quota
+                {t("subject.setQuota")}
               </button>
             </div>
           </div>
