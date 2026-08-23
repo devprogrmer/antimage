@@ -29,6 +29,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/httpapi"
 	"github.com/amyrm/antimage/internal/panel/metrics"
 	"github.com/amyrm/antimage/internal/panel/nodes"
+	"github.com/amyrm/antimage/internal/panel/notify/telegram"
 	"github.com/amyrm/antimage/internal/panel/observability"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/panel/subjects"
@@ -268,6 +269,24 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 	// SP7: Daily rollup generator for observability metrics
 	// Aggregates hourly data into daily summaries
 	go obsRollup.RunDaily(ctx)
+
+	// Telegram bot.
+	//
+	// The token comes from the environment, never a flag: a flag is visible in
+	// `ps` output to every user on the box, and a bot token lets its holder
+	// impersonate the panel to every linked operator.
+	//
+	// An absent token means the bot is simply off, which is the right default:
+	// an operator who has not configured Telegram should not have a component
+	// polling an external service on their behalf.
+	if token := os.Getenv("ANTIMAGE_TELEGRAM_TOKEN"); token != "" {
+		links := telegram.NewStore(st, now)
+		bot := telegram.NewBot(telegram.NewHTTPAPI(token), st, links, now)
+		go bot.Run(ctx)
+	} else {
+		slog.InfoContext(ctx, "telegram bot disabled",
+			"reason", "ANTIMAGE_TELEGRAM_TOKEN is not set")
+	}
 
 	// The control plane is mTLS end to end. Without credentials here the
 	// server speaks plaintext HTTP/2 while both agent paths dial with TLS, so

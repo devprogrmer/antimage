@@ -139,6 +139,15 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/auth/totp/confirm", d.handleTOTPConfirm)
 			private.Post("/auth/totp/disable", d.handleTOTPDisable)
 
+			// Telegram linking is self-service for the same reason: the admin
+			// id comes from the session, never from the request, so there is
+			// no other account to authorize against. Accepting an admin_id
+			// here would let any authenticated caller bind THEIR chat account
+			// to somebody else's panel user.
+			private.Get("/me/telegram", d.handleGetMyTelegram)
+			private.Post("/me/telegram/link", d.handleCreateTelegramLinkCode)
+			private.Delete("/me/telegram", d.handleDeleteMyTelegram)
+
 			private.Get("/nodes", d.handleListNodes)
 			private.Post("/nodes", d.handleCreateNode)
 			private.Get("/nodes/{nodeID}", d.handleGetNode)
