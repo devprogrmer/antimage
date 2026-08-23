@@ -21,12 +21,12 @@ const (
 type DeploymentStatus string
 
 const (
-	StatusPending     DeploymentStatus = "pending"
-	StatusValidating  DeploymentStatus = "validating"
-	StatusInProgress  DeploymentStatus = "in_progress"
-	StatusCompleted   DeploymentStatus = "completed"
-	StatusFailed      DeploymentStatus = "failed"
-	StatusRolledBack  DeploymentStatus = "rolled_back"
+	StatusPending    DeploymentStatus = "pending"
+	StatusValidating DeploymentStatus = "validating"
+	StatusInProgress DeploymentStatus = "in_progress"
+	StatusCompleted  DeploymentStatus = "completed"
+	StatusFailed     DeploymentStatus = "failed"
+	StatusRolledBack DeploymentStatus = "rolled_back"
 )
 
 type NodeDeploymentStatus string
@@ -438,10 +438,6 @@ func (o *Orchestrator) getPendingNodes(ctx context.Context, deploymentID int64) 
 	}
 
 	return nodeIDs, rows.Err()
-}
-
-func (o *Orchestrator) getTargetNodes(ctx context.Context, tx *sql.Tx, nodeID int64) ([]int64, error) {
-	return []int64{nodeID}, nil
 }
 
 func (o *Orchestrator) updateDeploymentStatus(ctx context.Context, deploymentID int64, status DeploymentStatus) error {

@@ -27,25 +27,25 @@ type HealthMetrics struct {
 
 // HealthStatus calculates the overall health status from metrics.
 type HealthStatus struct {
-	Status       Status
-	CPUHealthy   bool
-	MemoryHealthy bool
-	DiskHealthy  bool
+	Status         Status
+	CPUHealthy     bool
+	MemoryHealthy  bool
+	DiskHealthy    bool
 	LatencyHealthy bool
-	LastHeartbeat time.Time
-	Message      string
+	LastHeartbeat  time.Time
+	Message        string
 }
 
 // HealthThresholds defines when a node is considered degraded.
 type HealthThresholds struct {
-	CPUPercentWarning      float64
-	CPUPercentCritical     float64
-	MemoryPercentWarning   float64
-	MemoryPercentCritical  float64
-	DiskPercentWarning     float64
-	DiskPercentCritical    float64
-	LatencyMSWarning       int
-	LatencyMSCritical      int
+	CPUPercentWarning        float64
+	CPUPercentCritical       float64
+	MemoryPercentWarning     float64
+	MemoryPercentCritical    float64
+	DiskPercentWarning       float64
+	DiskPercentCritical      float64
+	LatencyMSWarning         int
+	LatencyMSCritical        int
 	HeartbeatTimeoutDegraded time.Duration
 	HeartbeatTimeoutOffline  time.Duration
 }
@@ -53,14 +53,14 @@ type HealthThresholds struct {
 // DefaultHealthThresholds returns production-ready thresholds.
 func DefaultHealthThresholds() HealthThresholds {
 	return HealthThresholds{
-		CPUPercentWarning:      75.0,
-		CPUPercentCritical:     90.0,
-		MemoryPercentWarning:   80.0,
-		MemoryPercentCritical:  95.0,
-		DiskPercentWarning:     85.0,
-		DiskPercentCritical:    95.0,
-		LatencyMSWarning:       500,
-		LatencyMSCritical:      2000,
+		CPUPercentWarning:        75.0,
+		CPUPercentCritical:       90.0,
+		MemoryPercentWarning:     80.0,
+		MemoryPercentCritical:    95.0,
+		DiskPercentWarning:       85.0,
+		DiskPercentCritical:      95.0,
+		LatencyMSWarning:         500,
+		LatencyMSCritical:        2000,
 		HeartbeatTimeoutDegraded: 2 * time.Minute,
 		HeartbeatTimeoutOffline:  5 * time.Minute,
 	}
@@ -181,12 +181,12 @@ func GetMetricsHistory(ctx context.Context, s *store.Store, nodeID int64, from, 
 func CalculateHealthStatus(metrics *HealthMetrics, lastSeenAt *time.Time, thresholds HealthThresholds) HealthStatus {
 	now := time.Now()
 	status := HealthStatus{
-		Status:        StatusOnline,
-		CPUHealthy:    true,
-		MemoryHealthy: true,
-		DiskHealthy:   true,
+		Status:         StatusOnline,
+		CPUHealthy:     true,
+		MemoryHealthy:  true,
+		DiskHealthy:    true,
 		LatencyHealthy: true,
-		Message:       "all systems operational",
+		Message:        "all systems operational",
 	}
 
 	if lastSeenAt != nil {

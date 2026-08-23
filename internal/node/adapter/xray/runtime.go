@@ -181,8 +181,9 @@ func (r *ExecRuntime) Healthy(ctx context.Context) (bool, string) {
 
 // QueryStats queries Xray's StatsService for per-user traffic counters.
 // Output format from `xray api statsquery` is one line per counter:
-//   user>>>subject-1@antimage>>>traffic>>>uplink       12345
-//   user>>>subject-1@antimage>>>traffic>>>downlink     67890
+//
+//	user>>>subject-1@antimage>>>traffic>>>uplink       12345
+//	user>>>subject-1@antimage>>>traffic>>>downlink     67890
 func (r *ExecRuntime) QueryStats(ctx context.Context) ([]UserStat, error) {
 	if r.APIAddress == "" {
 		return nil, fmt.Errorf("%w: no management API address configured", ErrRuntimeUnavailable)

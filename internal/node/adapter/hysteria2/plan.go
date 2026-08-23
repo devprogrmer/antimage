@@ -2,6 +2,7 @@ package hysteria2
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 )
@@ -35,7 +36,7 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 		}
 
 		// Service exists, check if update needed
-		needsUpdate := a.needsUpdate(dsvc, obs)
+		needsUpdate := a.needsUpdate(dsvc, obs, desired.Subjects)
 		if needsUpdate {
 			steps = append(steps, adapter.Step{
 				Kind:       "restart",
@@ -59,17 +60,40 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 	return adapter.Plan{Steps: steps}, nil
 }
 
-// needsUpdate determines if service needs updating
-func (a *Adapter) needsUpdate(desired adapter.Service, observed adapter.ObservedService) bool {
-	// If config drifted (modified externally), restore it
+// needsUpdate determines if a service needs updating.
+//
+// This previously returned false for every managed service, so Hysteria2 never
+// converged after the initial install: a user added to the desired document
+// was never written to the config, and a revoked user was never removed. The
+// helpers it needed -- UserAuthFromSubjects, GenerateConfig and the applied
+// sidecar -- already existed and were simply never called, which is why the
+// linter reported them as dead.
+//
+// Every change on this adapter is restart-class, so there is no hot path to get
+// wrong; the only questions are whether the file differs from desired and
+// whether the process ever loaded it.
+func (a *Adapter) needsUpdate(
+	desired adapter.Service, observed adapter.ObservedService, subjects []adapter.Subject,
+) bool {
+	// Somebody edited the file by hand. Restore it rather than trusting it.
 	if !observed.Managed {
 		return true
 	}
 
-	// For Hysteria2, any config change requires restart
-	// Compare observed checksum with what we would generate
-	// For now, simplified: assume update needed if not managed
-	// Full implementation would regenerate and compare checksums
+	var params ServiceParams
+	if err := json.Unmarshal(desired.Params, &params); err != nil {
+		return true // unreadable params: rewrite rather than assume
+	}
+	rendered, err := GenerateConfig(desired.ID, params, UserAuthFromSubjects(subjects))
+	if err != nil {
+		return true
+	}
+	want := checksumContent([]byte(rendered))
 
-	return false
+	if observed.Checksum != want {
+		return true
+	}
+	// The file is right. A correct file the process never loaded is not
+	// convergence, so an applied state that does not match forces a restart.
+	return a.applied(desired.ID).Checksum != want
 }

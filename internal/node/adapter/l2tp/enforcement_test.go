@@ -130,16 +130,16 @@ func TestL2TPEnforcementCapabilities(t *testing.T) {
 		// Document what L2TP/IPsec can realistically enforce
 
 		capabilities := map[string]string{
-			"Authentication":        "CONFIGURED", // PAP/CHAP credentials
-			"Connection admission":  "CONFIGURED", // xl2tpd config
-			"Quota tracking":        "CONFIGURED", // nftables counters (accounting.go exists)
-			"Quota enforcement":     "UNSUPPORTED", // No native mechanism to disconnect on quota
-			"Connection limit":      "UNSUPPORTED", // xl2tpd doesn't support per-user limits
-			"Device tracking":       "UNSUPPORTED", // L2TP doesn't expose device info
-			"IP tracking":           "OBSERVED",   // Sessions file tracks IPs
-			"Speed limits":          "BEST_EFFORT", // tc can shape, but not L2TP-native
-			"Live disconnect":       "UNSUPPORTED", // No API to terminate active session
-			"Policy hot-reload":     "UNSUPPORTED", // Requires xl2tpd restart
+			"Authentication":       "CONFIGURED",  // PAP/CHAP credentials
+			"Connection admission": "CONFIGURED",  // xl2tpd config
+			"Quota tracking":       "CONFIGURED",  // nftables counters (accounting.go exists)
+			"Quota enforcement":    "UNSUPPORTED", // No native mechanism to disconnect on quota
+			"Connection limit":     "UNSUPPORTED", // xl2tpd doesn't support per-user limits
+			"Device tracking":      "UNSUPPORTED", // L2TP doesn't expose device info
+			"IP tracking":          "OBSERVED",    // Sessions file tracks IPs
+			"Speed limits":         "BEST_EFFORT", // tc can shape, but not L2TP-native
+			"Live disconnect":      "UNSUPPORTED", // No API to terminate active session
+			"Policy hot-reload":    "UNSUPPORTED", // Requires xl2tpd restart
 		}
 
 		t.Logf("L2TP/IPsec Enforcement Capabilities:")

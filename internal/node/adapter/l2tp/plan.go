@@ -131,7 +131,7 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 
 // buildInstallPayload combines service params and subjects into one payload.
 type installPayload struct {
-	Params   json.RawMessage    `json:"params"`
+	Params   json.RawMessage   `json:"params"`
 	Subjects []adapter.Subject `json:"subjects"`
 }
 

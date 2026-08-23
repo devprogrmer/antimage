@@ -24,10 +24,10 @@ func TestCapabilityForeignKeyConstraint(t *testing.T) {
 
 	// Attempt to record capability for nonexistent node
 	cap := NodeCapability{
-		NodeID:     nonexistentNodeID,
-		Protocol:   ProtocolXray,
-		Available:  true,
-		DetectedAt: now,
+		NodeID:      nonexistentNodeID,
+		Protocol:    ProtocolXray,
+		Available:   true,
+		DetectedAt:  now,
 		LastCheckAt: now,
 	}
 
@@ -68,10 +68,10 @@ func TestCapabilityCascadeDelete(t *testing.T) {
 
 	// Record capability
 	cap := NodeCapability{
-		NodeID:     nodeID,
-		Protocol:   ProtocolXray,
-		Available:  true,
-		DetectedAt: now,
+		NodeID:      nodeID,
+		Protocol:    ProtocolXray,
+		Available:   true,
+		DetectedAt:  now,
 		LastCheckAt: now,
 	}
 

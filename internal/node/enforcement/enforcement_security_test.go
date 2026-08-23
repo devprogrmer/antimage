@@ -23,8 +23,8 @@ func TestSecurityIntegerOverflow(t *testing.T) {
 			expectError:    true,
 		},
 		{
-			name:       "negative device limit",
-			maxDevices: int64Ptr(-1),
+			name:        "negative device limit",
+			maxDevices:  int64Ptr(-1),
 			expectError: true,
 		},
 		{

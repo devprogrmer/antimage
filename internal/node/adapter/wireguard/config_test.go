@@ -234,18 +234,18 @@ func TestAllocatePeerIP(t *testing.T) {
 
 func TestParseMarker(t *testing.T) {
 	tests := []struct {
-		name            string
-		line            string
-		wantServiceID   int64
-		wantChecksum    string
-		wantOK          bool
+		name          string
+		line          string
+		wantServiceID int64
+		wantChecksum  string
+		wantOK        bool
 	}{
 		{
-			name:            "valid marker",
-			line:            "# antimage: service=123 checksum=abcdef123456",
-			wantServiceID:   123,
-			wantChecksum:    "abcdef123456",
-			wantOK:          true,
+			name:          "valid marker",
+			line:          "# antimage: service=123 checksum=abcdef123456",
+			wantServiceID: 123,
+			wantChecksum:  "abcdef123456",
+			wantOK:        true,
 		},
 		{
 			name:   "not a marker",

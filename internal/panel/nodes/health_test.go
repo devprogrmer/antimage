@@ -34,12 +34,12 @@ func TestRecordAndGetLatestMetrics(t *testing.T) {
 	}
 
 	cpu := 45.5
-	memUsed := int64(8 * 1024 * 1024 * 1024)  // 8GB
-	memTotal := int64(16 * 1024 * 1024 * 1024) // 16GB
-	diskUsed := int64(100 * 1024 * 1024 * 1024) // 100GB
+	memUsed := int64(8 * 1024 * 1024 * 1024)     // 8GB
+	memTotal := int64(16 * 1024 * 1024 * 1024)   // 16GB
+	diskUsed := int64(100 * 1024 * 1024 * 1024)  // 100GB
 	diskTotal := int64(500 * 1024 * 1024 * 1024) // 500GB
-	rxBytes := int64(1024 * 1024 * 1024) // 1GB
-	txBytes := int64(2 * 1024 * 1024 * 1024) // 2GB
+	rxBytes := int64(1024 * 1024 * 1024)         // 1GB
+	txBytes := int64(2 * 1024 * 1024 * 1024)     // 2GB
 	conns := 42
 	latency := 50
 
@@ -329,7 +329,7 @@ func TestRecordNodeEvent(t *testing.T) {
 	}
 
 	details := map[string]interface{}{
-		"reason": "test maintenance",
+		"reason":   "test maintenance",
 		"duration": "2h",
 	}
 

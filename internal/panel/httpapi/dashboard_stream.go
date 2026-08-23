@@ -199,14 +199,3 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 
 // handleDashboardMetrics provides a snapshot of dashboard metrics.
 // GET /api/v1/dashboard/metrics
-func (d Deps) handleDashboardMetrics(w http.ResponseWriter, r *http.Request) {
-	metrics, err := d.collectDashboardMetrics(r.Context())
-	if err != nil {
-		http.Error(w, "failed to collect metrics", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(metrics)
-}

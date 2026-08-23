@@ -70,11 +70,3 @@ func (a *Adapter) ensurePolicyConfig(ctx context.Context, desired []byte) error 
 }
 
 // removePolicyConfig removes the policy configuration file when no policies exist.
-func (a *Adapter) removePolicyConfig() error {
-	path := filepath.Join(a.dir, policyConfigFile)
-	err := os.Remove(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove policy config: %w", err)
-	}
-	return nil
-}

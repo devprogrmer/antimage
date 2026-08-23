@@ -48,8 +48,6 @@ const (
 	fileSuffix = ".yaml"
 	// markerPrefix is a YAML comment carrying service ID and checksum
 	markerPrefix = "# antimage:"
-	// appliedSuffix tracks what config the server actually loaded
-	appliedSuffix = ".applied"
 )
 
 // ErrRuntimeUnavailable means hysteria2 binary is missing
@@ -175,20 +173,6 @@ type appliedState struct {
 }
 
 // recordApplied saves applied state after successful server start
-func (a *Adapter) recordApplied(serviceID int64, checksum string, users []string) error {
-	body, err := json.Marshal(appliedState{
-		Checksum: checksum,
-		Users:    users,
-	})
-	if err != nil {
-		return fmt.Errorf("encode applied state: %w", err)
-	}
-	path := a.appliedPath(serviceID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create state dir: %w", err)
-	}
-	return os.WriteFile(path, body, 0o600)
-}
 
 // applied reads last known applied state
 func (a *Adapter) applied(serviceID int64) appliedState {

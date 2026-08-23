@@ -1,0 +1,156 @@
+package wireguard
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/amyrm/antimage/internal/node/adapter"
+)
+
+const testParams = `{"port":51820,"subnet":"10.8.0.1/24","private_key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA="}`
+
+func desiredWith(t *testing.T, users int) adapter.Desired {
+	t.Helper()
+	d := adapter.Desired{
+		SchemaVersion: 1, Revision: 1, NodeID: 1,
+		Services: []adapter.Service{
+			{ID: 10, Kind: "wireguard", Enabled: true, Params: json.RawMessage(testParams)},
+		},
+	}
+	for i := 1; i <= users; i++ {
+		d.Subjects = append(d.Subjects, adapter.Subject{
+			ID: int64(i),
+			Credentials: []adapter.Credential{{
+				Kind:  "keypair",
+				Value: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + string(rune('A'+i)) + "A=",
+			}},
+		})
+	}
+	return d
+}
+
+// WireGuard must actually converge after the initial install.
+//
+// needsUpdate previously returned "no change needed" for every managed
+// service, so a peer added to the desired document was never added to the
+// interface and a revoked peer was never removed. The adapter installed once
+// and then ignored the world.
+func TestPlanConvergesAfterInstall(t *testing.T) {
+	a := New(nil, t.TempDir())
+	obs := adapter.Observed{Services: []adapter.ObservedService{
+		{ID: 10, Present: true, Managed: true, Checksum: "stale-checksum"},
+	}}
+
+	plan, err := a.Plan(context.Background(), desiredWith(t, 2), obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.IsEmpty() {
+		t.Fatal("no steps planned for a membership change; peers would never " +
+			"be added and a revoked peer would never be removed")
+	}
+}
+
+// A config already on disk that the interface never came up with is not
+// convergence: the file says what should be running, not what is.
+func TestPlanRestartsWhenTheInterfaceNeverCameUp(t *testing.T) {
+	dir := t.TempDir()
+	a := New(nil, dir)
+	d := desiredWith(t, 1)
+
+	var params ServiceParams
+	if err := json.Unmarshal(d.Services[0].Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	rendered, err := GenerateConfig(10, params, a.buildPeerList(d.Services[0], d.Subjects))
+	if err != nil {
+		t.Fatalf("GenerateConfig: %v", err)
+	}
+	// The file matches desired, but nothing was ever applied.
+	obs := adapter.Observed{Services: []adapter.ObservedService{
+		{ID: 10, Present: true, Managed: true, Checksum: checksumConfigBody(rendered)},
+	}}
+
+	plan, err := a.Plan(context.Background(), d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.IsEmpty() {
+		t.Fatal("reported converged while the interface never loaded the config")
+	}
+	if plan.MaxDisruption() < adapter.DisruptRestart {
+		t.Errorf("planned %v, want restart", plan.MaxDisruption())
+	}
+}
+
+// Revoking a peer must be restart-class: wg keeps serving a peer until it is
+// explicitly told otherwise, so removing one from the file alone leaves the
+// revoked user connected.
+func TestRemovingAPeerIsRestartClass(t *testing.T) {
+	dir := t.TempDir()
+	a := New(nil, dir)
+
+	two := desiredWith(t, 2)
+	var params ServiceParams
+	if err := json.Unmarshal(two.Services[0].Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	peers := a.buildPeerList(two.Services[0], two.Subjects)
+	rendered, err := GenerateConfig(10, params, peers)
+	if err != nil {
+		t.Fatalf("GenerateConfig: %v", err)
+	}
+	// The interface is up and serving both peers.
+	if err := a.recordApplied(10, checksumConfigBody(rendered), extractPublicKeys(peers)); err != nil {
+		t.Fatalf("recordApplied: %v", err)
+	}
+	obs := adapter.Observed{Services: []adapter.ObservedService{
+		{ID: 10, Present: true, Managed: true, Checksum: checksumConfigBody(rendered)},
+	}}
+
+	// Now desired drops to one peer.
+	plan, err := a.Plan(context.Background(), desiredWith(t, 1), obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.IsEmpty() {
+		t.Fatal("revoking a peer planned nothing")
+	}
+	if plan.MaxDisruption() < adapter.DisruptRestart {
+		t.Errorf("revocation planned as %v, want restart; the revoked peer would "+
+			"stay connected", plan.MaxDisruption())
+	}
+}
+
+// A converged interface must plan nothing, or the node reconciles forever.
+func TestConvergedStatePlansNothing(t *testing.T) {
+	dir := t.TempDir()
+	a := New(nil, dir)
+	d := desiredWith(t, 2)
+
+	var params ServiceParams
+	if err := json.Unmarshal(d.Services[0].Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	peers := a.buildPeerList(d.Services[0], d.Subjects)
+	rendered, err := GenerateConfig(10, params, peers)
+	if err != nil {
+		t.Fatalf("GenerateConfig: %v", err)
+	}
+	sum := checksumConfigBody(rendered)
+	if err := a.recordApplied(10, sum, extractPublicKeys(peers)); err != nil {
+		t.Fatalf("recordApplied: %v", err)
+	}
+	obs := adapter.Observed{Services: []adapter.ObservedService{
+		{ID: 10, Present: true, Managed: true, Checksum: sum},
+	}}
+
+	plan, err := a.Plan(context.Background(), d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if !plan.IsEmpty() {
+		t.Errorf("converged state still plans %+v", plan.Steps)
+	}
+}

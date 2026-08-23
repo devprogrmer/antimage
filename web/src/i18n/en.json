@@ -184,5 +184,12 @@
   "telegram.lastSeen": "Last used",
   "telegram.loadFailed": "Could not load the Telegram status.",
   "telegram.issueFailed": "Could not create a link code.",
-  "telegram.unlinkFailed": "Could not unlink the account."
+  "telegram.unlinkFailed": "Could not unlink the account.",
+  "dashboard.live": "Live",
+  "dashboard.disconnected": "Disconnected",
+  "dashboard.active_users": "Active Users",
+  "dashboard.nodes_online": "Nodes Online",
+  "dashboard.traffic_today": "Traffic Today",
+  "dashboard.alerts": "Alerts",
+  "dashboard.frozen": "frozen"
 }

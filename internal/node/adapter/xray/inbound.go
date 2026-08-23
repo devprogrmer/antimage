@@ -67,10 +67,10 @@ type Inbound struct {
 	// Reality material, required when Security is reality.
 	// Reality is an anti-censorship protocol that disguises traffic as
 	// legitimate TLS to a real destination without requiring certificates.
-	Dest        string   `json:"dest"`          // destination address (e.g., "example.com:443")
-	ServerNames []string `json:"server_names"`  // SNI values to accept
-	PrivateKey  string   `json:"private_key"`   // x25519 private key (base64)
-	ShortIDs    []string `json:"short_ids"`     // client authentication short IDs
+	Dest        string   `json:"dest"`         // destination address (e.g., "example.com:443")
+	ServerNames []string `json:"server_names"` // SNI values to accept
+	PrivateKey  string   `json:"private_key"`  // x25519 private key (base64)
+	ShortIDs    []string `json:"short_ids"`    // client authentication short IDs
 
 	// Transport detail.
 	Path string `json:"path"` // ws and grpc

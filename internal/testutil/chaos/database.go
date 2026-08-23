@@ -77,13 +77,13 @@ func (i *Injector) InjectDatabaseSlowQuery(delay time.Duration) (*Fault, error) 
 
 // FaultyDB wraps a sql.DB with fault injection
 type FaultyDB struct {
-	mu           sync.Mutex
-	db           *sql.DB
-	failNext     bool
-	delay        time.Duration
-	lockTimeout  time.Duration
-	queryCount   int
-	failEveryN   int // Fail every Nth query
+	mu          sync.Mutex
+	db          *sql.DB
+	failNext    bool
+	delay       time.Duration
+	lockTimeout time.Duration
+	queryCount  int
+	failEveryN  int // Fail every Nth query
 }
 
 // NewFaultyDB creates a database wrapper with fault injection

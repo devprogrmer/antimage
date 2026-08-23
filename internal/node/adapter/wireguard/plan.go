@@ -40,7 +40,7 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 		}
 
 		// Service exists, check if it needs updates
-		needsRestart, needsReload, reason := a.needsUpdate(dsvc, obs)
+		needsRestart, needsReload, reason := a.needsUpdate(dsvc, obs, desired.Subjects)
 
 		if needsRestart {
 			steps = append(steps, adapter.Step{
@@ -55,7 +55,7 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 				Disruption: adapter.DisruptNone,
 			})
 		}
-		_ = reason // unused for now
+		_ = reason // surfaced in step payloads by a later change
 	}
 
 	// 2. Handle services that should be removed
@@ -72,21 +72,67 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 	return adapter.Plan{Steps: steps}, nil
 }
 
-// needsUpdate determines if a service needs updating and why.
-// Returns (needsRestart, needsReload, reason).
-func (a *Adapter) needsUpdate(desired adapter.Service, observed adapter.ObservedService) (bool, bool, string) {
-	// If config is drifted (modified externally), always restore it
+// needsUpdate decides whether an existing interface has to change, and how
+// disruptively. Returns (needsRestart, needsReload, reason).
+//
+// This previously returned "no change needed" for every managed service, which
+// meant WireGuard never converged after the initial install: a peer added to
+// the desired document was never added to the interface, and a revoked peer was
+// never removed. The helpers it needed -- buildPeerList, removedPeers and the
+// applied sidecar -- already existed and were simply never called, which is why
+// the linter reported them as dead.
+//
+// The classification mirrors the Xray adapter:
+//
+//   - the file matches desired but the interface never came up with it ->
+//     restart, because a correct file the runtime never loaded is not
+//     convergence;
+//   - any peer removed -> restart, because wg keeps serving a peer until it is
+//     explicitly told otherwise, so dropping one from the file alone leaves a
+//     revoked user connected;
+//   - peers added only -> reload, which applies without dropping sessions;
+//   - anything else (port, key, subnet) -> restart.
+func (a *Adapter) needsUpdate(
+	desired adapter.Service, observed adapter.ObservedService, subjects []adapter.Subject,
+) (bool, bool, string) {
+	// Somebody edited the file by hand. Restore it rather than trusting it.
 	if !observed.Managed {
 		return true, false, "config drift detected"
 	}
 
-	// For WireGuard, we need to check if observed checksum matches what we expect
-	// A full implementation would regenerate the config and compare checksums
-	// For now, trust that if it's managed and present, only explicit changes need updates
+	var params ServiceParams
+	if err := json.Unmarshal(desired.Params, &params); err != nil {
+		return true, false, "service params are unreadable"
+	}
 
-	// Simple heuristic: assume no update needed if observed and managed
-	// A real implementation would compare observed checksum with regenerated config
-	return false, false, ""
+	peers := a.buildPeerList(desired, subjects)
+	rendered, err := GenerateConfig(desired.ID, params, peers)
+	if err != nil {
+		return true, false, "config could not be rendered"
+	}
+	want := checksumConfigBody(rendered)
+	applied := a.applied(desired.ID)
+
+	if observed.Checksum == want {
+		// The file is right. Did the interface actually come up with it?
+		if applied.Checksum != want {
+			return true, false, "interface never came up with this configuration"
+		}
+		return false, false, ""
+	}
+
+	// Content differs. A removal is restart-class, the same property the Xray
+	// adapter enforces and for the same reason.
+	if len(removedPeers(applied.Peers, extractPublicKeys(peers))) > 0 {
+		return true, false, "peer removed"
+	}
+
+	// Purely additive, and only when we know what the interface is serving. An
+	// unknown applied state forces a restart, which is the safe direction.
+	if applied.Checksum != "" && onlyMembershipChanged(params, applied.Checksum, want) {
+		return false, true, "peers added"
+	}
+	return true, false, "configuration changed"
 }
 
 // buildPeerList constructs PeerConfig entries from desired subjects.
@@ -169,5 +215,3 @@ func onlyMembershipChanged(params ServiceParams, oldChecksum, newChecksum string
 	// can prove otherwise through more detailed parsing.
 	return structChecksum == oldChecksum
 }
-
-

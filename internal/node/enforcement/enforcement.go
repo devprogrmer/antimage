@@ -25,11 +25,11 @@ type Policy struct {
 
 // Connection represents an active connection being tracked.
 type Connection struct {
-	ID         string
-	SubjectID  int64
-	DeviceID   string // hardware ID or device fingerprint
-	SourceIP   string
-	Protocol   string
+	ID          string
+	SubjectID   int64
+	DeviceID    string // hardware ID or device fingerprint
+	SourceIP    string
+	Protocol    string
 	ConnectedAt time.Time
 	LastSeenAt  time.Time
 }
@@ -41,7 +41,7 @@ type Enforcer struct {
 	connections map[string]Connection // connectionID -> connection
 
 	// Index structures for fast lookups
-	subjectConns map[int64][]string           // subjectID -> []connectionID
+	subjectConns map[int64][]string            // subjectID -> []connectionID
 	subjectIPs   map[int64]map[string]struct{} // subjectID -> set of IPs
 	subjectDevs  map[int64]map[string]struct{} // subjectID -> set of deviceIDs
 

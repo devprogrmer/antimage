@@ -41,9 +41,6 @@ const (
 	// markerPrefix begins a comment line in every config we write, carrying
 	// the service ID and content checksum for drift detection.
 	markerPrefix = "# antimage:"
-	// appliedSuffix names the sidecar recording the checksum the interface was
-	// last successfully brought up with. Written only after wg-quick up succeeds.
-	appliedSuffix = ".applied"
 )
 
 // ErrRuntimeUnavailable means wg-quick or the kernel module is missing.

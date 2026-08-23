@@ -33,8 +33,8 @@ func (r *SingBoxRenderer) Render(ctx context.Context, servers []Server) ([]byte,
 	}
 
 	selector := map[string]interface{}{
-		"type":     "selector",
-		"tag":      "proxy",
+		"type":      "selector",
+		"tag":       "proxy",
 		"outbounds": outboundTags,
 		"default":   outboundTags[0],
 	}
@@ -93,11 +93,11 @@ func (r *SingBoxRenderer) renderServer(srv Server) (map[string]interface{}, erro
 // renderVLESS generates a sing-box VLESS outbound.
 func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
-		"type":   "vless",
-		"tag":    srv.NodeName,
-		"server": srv.NodeAddress,
+		"type":        "vless",
+		"tag":         srv.NodeName,
+		"server":      srv.NodeAddress,
 		"server_port": srv.Port,
-		"uuid":   srv.UUID,
+		"uuid":        srv.UUID,
 	}
 
 	// Network type
@@ -146,13 +146,13 @@ func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 // renderVMess generates a sing-box VMess outbound.
 func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
-		"type":   "vmess",
-		"tag":    srv.NodeName,
-		"server": srv.NodeAddress,
+		"type":        "vmess",
+		"tag":         srv.NodeName,
+		"server":      srv.NodeAddress,
 		"server_port": srv.Port,
-		"uuid":   srv.UUID,
-		"alter_id": 0,
-		"security": "auto",
+		"uuid":        srv.UUID,
+		"alter_id":    0,
+		"security":    "auto",
 	}
 
 	// Network type
@@ -201,11 +201,11 @@ func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 // renderTrojan generates a sing-box Trojan outbound.
 func (r *SingBoxRenderer) renderTrojan(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
-		"type":     "trojan",
-		"tag":      srv.NodeName,
-		"server":   srv.NodeAddress,
+		"type":        "trojan",
+		"tag":         srv.NodeName,
+		"server":      srv.NodeAddress,
 		"server_port": srv.Port,
-		"password": srv.Password,
+		"password":    srv.Password,
 	}
 
 	// TLS (Trojan requires TLS)

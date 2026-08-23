@@ -28,9 +28,9 @@ type Subject struct {
 	ID          int64        `json:"id"`
 	Credentials []Credential `json:"credentials"`
 	// Enforcement policies (schema v2+)
-	MaxDevices      *int64 `json:"max_devices,omitempty"`
-	MaxIPs          *int64 `json:"max_ips,omitempty"`
-	MaxConnections  *int64 `json:"max_connections,omitempty"`
+	MaxDevices         *int64 `json:"max_devices,omitempty"`
+	MaxIPs             *int64 `json:"max_ips,omitempty"`
+	MaxConnections     *int64 `json:"max_connections,omitempty"`
 	SpeedLimitUpKbps   *int64 `json:"speed_limit_up_kbps,omitempty"`
 	SpeedLimitDownKbps *int64 `json:"speed_limit_down_kbps,omitempty"`
 }

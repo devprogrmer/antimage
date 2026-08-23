@@ -7,16 +7,17 @@
 // - gRPC failures (connection drops, timeouts)
 //
 // Usage:
-//   injector := chaos.NewInjector()
-//   defer injector.Cleanup()
 //
-//   // Inject network timeout
-//   fault := injector.InjectNetworkTimeout(5 * time.Second)
-//   defer injector.RemoveFault(fault.ID)
+//	injector := chaos.NewInjector()
+//	defer injector.Cleanup()
 //
-//   // Test system behavior under failure
-//   err := systemUnderTest.Connect()
-//   assert.Error(t, err) // Should handle timeout gracefully
+//	// Inject network timeout
+//	fault := injector.InjectNetworkTimeout(5 * time.Second)
+//	defer injector.RemoveFault(fault.ID)
+//
+//	// Test system behavior under failure
+//	err := systemUnderTest.Connect()
+//	assert.Error(t, err) // Should handle timeout gracefully
 package chaos
 
 import (

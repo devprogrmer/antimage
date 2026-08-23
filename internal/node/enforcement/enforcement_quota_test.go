@@ -10,8 +10,8 @@ func TestImmediateQuotaEnforcement(t *testing.T) {
 
 	t.Run("connection rejected when quota exhausted", func(t *testing.T) {
 		// Set quota: 1GB total, 1GB used (exhausted)
-		quotaBytes := int64(1024 * 1024 * 1024)      // 1 GB
-		usedBytes := int64(1024 * 1024 * 1024)       // 1 GB (100%)
+		quotaBytes := int64(1024 * 1024 * 1024) // 1 GB
+		usedBytes := int64(1024 * 1024 * 1024)  // 1 GB (100%)
 
 		policy := Policy{
 			SubjectID:      100,
@@ -42,8 +42,8 @@ func TestImmediateQuotaEnforcement(t *testing.T) {
 		e2 := New()
 
 		// Set quota: 1GB total, 500MB used (50%)
-		quotaBytes := int64(1024 * 1024 * 1024)      // 1 GB
-		usedBytes := int64(512 * 1024 * 1024)        // 512 MB (50%)
+		quotaBytes := int64(1024 * 1024 * 1024) // 1 GB
+		usedBytes := int64(512 * 1024 * 1024)   // 512 MB (50%)
 
 		policy := Policy{
 			SubjectID:      100,
@@ -70,8 +70,8 @@ func TestImmediateQuotaEnforcement(t *testing.T) {
 		e3 := New()
 
 		// Set quota: 1GB total, 990MB used (99%)
-		quotaBytes := int64(1024 * 1024 * 1024)      // 1 GB
-		usedBytes := int64(1013 * 1024 * 1024)       // ~99%
+		quotaBytes := int64(1024 * 1024 * 1024) // 1 GB
+		usedBytes := int64(1013 * 1024 * 1024)  // ~99%
 
 		policy := Policy{
 			SubjectID:      100,
@@ -92,8 +92,8 @@ func TestImmediateQuotaEnforcement(t *testing.T) {
 		e4 := New()
 
 		// Set quota: exactly at limit
-		quotaBytes := int64(1024 * 1024 * 1024)      // 1 GB
-		usedBytes := int64(1024 * 1024 * 1024)       // 1 GB (exactly 100%)
+		quotaBytes := int64(1024 * 1024 * 1024) // 1 GB
+		usedBytes := int64(1024 * 1024 * 1024)  // 1 GB (exactly 100%)
 
 		policy := Policy{
 			SubjectID:      100,
@@ -114,8 +114,8 @@ func TestImmediateQuotaEnforcement(t *testing.T) {
 		e5 := New()
 
 		// Set quota: exceeded
-		quotaBytes := int64(1024 * 1024 * 1024)      // 1 GB
-		usedBytes := int64(1100 * 1024 * 1024)       // 1.1 GB (110%)
+		quotaBytes := int64(1024 * 1024 * 1024) // 1 GB
+		usedBytes := int64(1100 * 1024 * 1024)  // 1.1 GB (110%)
 
 		policy := Policy{
 			SubjectID:      100,
@@ -197,8 +197,8 @@ func TestQuotaUpdateDuringActiveConnections(t *testing.T) {
 	e := New()
 
 	// Start with available quota
-	quotaBytes := int64(1024 * 1024 * 1024)      // 1 GB
-	usedBytes := int64(512 * 1024 * 1024)        // 512 MB (50%)
+	quotaBytes := int64(1024 * 1024 * 1024) // 1 GB
+	usedBytes := int64(512 * 1024 * 1024)   // 512 MB (50%)
 
 	policy := Policy{
 		SubjectID:      100,
@@ -220,7 +220,7 @@ func TestQuotaUpdateDuringActiveConnections(t *testing.T) {
 	}
 
 	// Update policy: quota now exhausted
-	exhaustedBytes := int64(1024 * 1024 * 1024)  // 1 GB used (100%)
+	exhaustedBytes := int64(1024 * 1024 * 1024) // 1 GB used (100%)
 	policyExhausted := Policy{
 		SubjectID:      100,
 		QuotaBytes:     &quotaBytes,

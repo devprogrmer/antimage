@@ -14,8 +14,8 @@ import (
 // accountingCursor persists the last poll time and per-peer counters.
 // This enables delta computation across agent restarts.
 type accountingCursor struct {
-	LastPoll int64                    `json:"last_poll"`
-	Peers    map[string]peerCounters  `json:"peers"` // publicKey -> counters
+	LastPoll int64                   `json:"last_poll"`
+	Peers    map[string]peerCounters `json:"peers"` // publicKey -> counters
 }
 
 type peerCounters struct {
@@ -26,8 +26,9 @@ type peerCounters struct {
 // Usage implements the UsageReporter interface for WireGuard.
 //
 // WireGuard provides per-peer traffic stats via `wg show {interface} transfer`:
-//   publicKey1  rxBytes  txBytes
-//   publicKey2  rxBytes  txBytes
+//
+//	publicKey1  rxBytes  txBytes
+//	publicKey2  rxBytes  txBytes
 //
 // The adapter:
 // 1. Reads current counters from all managed interfaces

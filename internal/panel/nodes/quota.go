@@ -132,10 +132,10 @@ type QuotaResetSweeper struct {
 // Run finds subjects past their reset time and resets them.
 func (s *QuotaResetSweeper) Run(ctx context.Context, now int64) error {
 	var toReset []struct {
-		ID            int64
-		ResetAt       int64
-		QuotaBytes    sql.NullInt64
-		FrozenReason  sql.NullString
+		ID           int64
+		ResetAt      int64
+		QuotaBytes   sql.NullInt64
+		FrozenReason sql.NullString
 	}
 
 	// Find subjects past their reset time.
@@ -152,10 +152,10 @@ func (s *QuotaResetSweeper) Run(ctx context.Context, now int64) error {
 
 	for rows.Next() {
 		var r struct {
-			ID            int64
-			ResetAt       int64
-			QuotaBytes    sql.NullInt64
-			FrozenReason  sql.NullString
+			ID           int64
+			ResetAt      int64
+			QuotaBytes   sql.NullInt64
+			FrozenReason sql.NullString
 		}
 		if err := rows.Scan(&r.ID, &r.ResetAt, &r.QuotaBytes, &r.FrozenReason); err != nil {
 			return err

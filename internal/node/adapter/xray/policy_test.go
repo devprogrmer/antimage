@@ -38,8 +38,8 @@ func TestGeneratePolicyConfig(t *testing.T) {
 	})
 
 	t.Run("with speed limits", func(t *testing.T) {
-		upLimit := int64(1000)    // 1000 kbps = 128000 bytes/sec
-		downLimit := int64(5000)  // 5000 kbps = 640000 bytes/sec
+		upLimit := int64(1000)   // 1000 kbps = 128000 bytes/sec
+		downLimit := int64(5000) // 5000 kbps = 640000 bytes/sec
 
 		subjects := []adapter.Subject{
 			{
@@ -229,8 +229,8 @@ func TestSpeedLimitConversion(t *testing.T) {
 		kbps     int64
 		expected int64
 	}{
-		{"1 Mbps", 1000, 128000},      // 1000 kbps = 128 KB/s
-		{"10 Mbps", 10000, 1280000},   // 10000 kbps = 1.28 MB/s
+		{"1 Mbps", 1000, 128000},       // 1000 kbps = 128 KB/s
+		{"10 Mbps", 10000, 1280000},    // 10000 kbps = 1.28 MB/s
 		{"100 Mbps", 100000, 12800000}, // 100000 kbps = 12.8 MB/s
 		{"500 kbps", 500, 64000},
 	}

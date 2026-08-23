@@ -108,14 +108,14 @@ func (r *ClashRenderer) renderVLESS(srv Server) map[string]interface{} {
 // renderVMess generates a Clash VMess proxy.
 func (r *ClashRenderer) renderVMess(srv Server) map[string]interface{} {
 	proxy := map[string]interface{}{
-		"name":     srv.NodeName,
-		"type":     "vmess",
-		"server":   srv.NodeAddress,
-		"port":     srv.Port,
-		"uuid":     srv.UUID,
-		"alterId":  0,
-		"cipher":   "auto",
-		"udp":      true,
+		"name":    srv.NodeName,
+		"type":    "vmess",
+		"server":  srv.NodeAddress,
+		"port":    srv.Port,
+		"uuid":    srv.UUID,
+		"alterId": 0,
+		"cipher":  "auto",
+		"udp":     true,
 	}
 
 	// Network type

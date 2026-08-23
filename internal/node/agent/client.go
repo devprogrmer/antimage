@@ -89,7 +89,7 @@ type Client struct {
 func NewClient(cfg *Config, ad adapter.Adapter, clk Clock, cert tls.Certificate, caDER []byte) *Client {
 	return &Client{
 		cfg: cfg, ad: ad, clk: clk, cert: cert, caDER: caDER,
-		rec: NewReconciler(ad, clk, ReconcileOptions{MaxRetries: 3, RetryBase: 2 * time.Second}),
+		rec:      NewReconciler(ad, clk, ReconcileOptions{MaxRetries: 3, RetryBase: 2 * time.Second}),
 		enforcer: enforcement.New(),
 	}
 }

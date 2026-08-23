@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/amyrm/antimage/internal/panel/audit"
-	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/resellers"
 	"github.com/amyrm/antimage/internal/panel/service"
@@ -392,39 +390,9 @@ func (d Deps) handleRotateCredential(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"kind": string(kind), "value": fresh})
 }
 
-// republishSubject bumps the revision of every node this subject reaches.
-func (d Deps) republishSubject(
-	ctx context.Context, r *http.Request, actor *rbac.Actor, subjectID int64, reason string,
-) error {
-	ids, err := d.subjectStore().NodeIDsForRead(ctx, subjectID)
-	if err != nil {
-		return err
-	}
-	return d.republishNodes(ctx, r, actor, ids, reason)
-}
-
 // republishNodes commits an empty change to each node, which rebuilds its
 // desired document and bumps the revision only if the document actually
 // changed. CommitNodeChange remains the single path that may do so.
-func (d Deps) republishNodes(
-	ctx context.Context, r *http.Request, actor *rbac.Actor, nodeIDs []int64, reason string,
-) error {
-	for _, nodeID := range nodeIDs {
-		result, err := nodes.CommitNodeChange(ctx, d.Store, nodeID,
-			d.actorAudit(actor, r), RequestID(ctx), reason,
-			func(*sql.Tx) error { return nil }, d.snapshotOpts()...)
-		if err != nil {
-			return err
-		}
-		// Only signal when something actually moved, so a no-op edit does not
-		// wake every agent in the fleet.
-		if result.Changed {
-			d.Hub.Notify(nodeID, result.Revision)
-		}
-	}
-	return nil
-}
-
 // rejectSubject records a refused write, per spec invariant 9.
 func (d Deps) rejectSubject(
 	w http.ResponseWriter, r *http.Request, actor *rbac.Actor, action string, cause error,

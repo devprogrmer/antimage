@@ -17,8 +17,8 @@ import (
 type AlertType string
 
 const (
-	AlertTypeCertExpiry   AlertType = "cert_expiry"
-	AlertTypeQuotaWarning AlertType = "quota_warning"
+	AlertTypeCertExpiry    AlertType = "cert_expiry"
+	AlertTypeQuotaWarning  AlertType = "quota_warning"
 	AlertTypeQuotaExceeded AlertType = "quota_exceeded"
 )
 
@@ -173,14 +173,14 @@ func ResolveAlert(ctx context.Context, s *store.Store, dedupKey string, now time
 
 // AlertFilters specifies query criteria for ListAlerts.
 type AlertFilters struct {
-	Scope      rbac.Scope  // Required: enforces admin scope filtering
-	State      AlertState  // Filter by state (required: 'active', 'resolved', or empty for all)
-	AlertType  AlertType   // Filter by alert type (optional)
-	Severity   Severity    // Filter by severity (optional)
-	TargetType TargetType  // Filter by target type (optional)
-	TargetID   *int64      // Filter by specific target ID (optional)
-	Limit      int         // Max results (default 50, max 200)
-	Offset     int         // Pagination offset
+	Scope      rbac.Scope // Required: enforces admin scope filtering
+	State      AlertState // Filter by state (required: 'active', 'resolved', or empty for all)
+	AlertType  AlertType  // Filter by alert type (optional)
+	Severity   Severity   // Filter by severity (optional)
+	TargetType TargetType // Filter by target type (optional)
+	TargetID   *int64     // Filter by specific target ID (optional)
+	Limit      int        // Max results (default 50, max 200)
+	Offset     int        // Pagination offset
 }
 
 // ListAlerts queries alerts with filtering, pagination, and scope enforcement.

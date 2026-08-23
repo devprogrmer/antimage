@@ -114,7 +114,7 @@ func generateServerConfigWithBuffer(t *testing.T, dir string, port int, bufferSi
 		"routing": map[string]interface{}{
 			"rules": []map[string]interface{}{
 				{
-					"inboundTag": []string{"api-in"},
+					"inboundTag":  []string{"api-in"},
 					"outboundTag": "api",
 					"type":        "field",
 				},

@@ -15,13 +15,13 @@ type PolicyConfig struct {
 }
 
 type LevelPolicy struct {
-	StatsUserUplink   bool  `json:"statsUserUplink,omitempty"`
-	StatsUserDownlink bool  `json:"statsUserDownlink,omitempty"`
-	Handshake         *int  `json:"handshake,omitempty"`
-	ConnIdle          *int  `json:"connIdle,omitempty"`
-	UplinkOnly        *int  `json:"uplinkOnly,omitempty"`
-	DownlinkOnly      *int  `json:"downlinkOnly,omitempty"`
-	BufferSize        *int  `json:"bufferSize,omitempty"`
+	StatsUserUplink   bool `json:"statsUserUplink,omitempty"`
+	StatsUserDownlink bool `json:"statsUserDownlink,omitempty"`
+	Handshake         *int `json:"handshake,omitempty"`
+	ConnIdle          *int `json:"connIdle,omitempty"`
+	UplinkOnly        *int `json:"uplinkOnly,omitempty"`
+	DownlinkOnly      *int `json:"downlinkOnly,omitempty"`
+	BufferSize        *int `json:"bufferSize,omitempty"`
 	// Speed limits in bytes/sec (Xray uses bytes, we receive kbps)
 	UpSpeed   *int64 `json:"upSpeed,omitempty"`
 	DownSpeed *int64 `json:"downSpeed,omitempty"`

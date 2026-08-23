@@ -1,8 +1,6 @@
 package hysteria2
 
 import (
-	"context"
-	"fmt"
 	"testing"
 )
 
@@ -84,12 +82,12 @@ func TestHysteria2RuntimeBandwidthEnforcement(t *testing.T) {
 // bandwidth fields correctly, but does NOT verify enforcement.
 func TestHysteria2BandwidthConfigGeneration(t *testing.T) {
 	params := ServiceParams{
-		Port:       20001,
-		Password:   "testpassword",
-		CertFile:   "/tmp/cert.pem",
-		KeyFile:    "/tmp/key.pem",
-		UpMbps:     10,
-		DownMbps:   50,
+		Port:     20001,
+		Password: "testpassword",
+		CertFile: "/tmp/cert.pem",
+		KeyFile:  "/tmp/key.pem",
+		UpMbps:   10,
+		DownMbps: 50,
 	}
 
 	config, err := GenerateConfig(1, params, nil)
@@ -129,23 +127,6 @@ func containsAt(s, substr string) bool {
 
 // measureHysteria2Throughput connects to Hysteria2 server and measures upload speed.
 // This is a placeholder - actual implementation requires Hysteria2 protocol client.
-func measureHysteria2Throughput(ctx context.Context, serverAddr, password string, durationSec int) (bytesPerSec int64, err error) {
-	// TODO: Implement Hysteria2 client
-	//
-	// Hysteria2 uses QUIC (UDP-based) with custom protocol:
-	// 1. TLS handshake over QUIC
-	// 2. Authentication frame with password
-	// 3. Data frames for upload/download
-	//
-	// Options:
-	// A. Use official Hysteria2 Go client library (if exists)
-	// B. Implement minimal QUIC client with quic-go
-	// C. Shell out to hysteria client binary
-	// D. Use curl/wget if Hysteria2 supports HTTP proxy mode
-	//
-	// For now: document the requirement
-	return 0, fmt.Errorf("Hysteria2 client not implemented - requires quic-go or official client")
-}
 
 // BenchmarkHysteria2BaselineThroughput measures unconstrained throughput.
 // Useful for comparison against rate-limited test.

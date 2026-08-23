@@ -130,7 +130,7 @@ export function Dashboard() {
         <MetricCard
           title={t('dashboard.alerts')}
           value={metrics.alerts_count}
-          subtitle={t('dashboard.frozen_count', { count: metrics.frozen_count })}
+          subtitle={metrics.frozen_count + ' ' + t('dashboard.frozen')}
           icon="⚠️"
           color={metrics.alerts_count > 0 ? 'red' : 'gray'}
         />
@@ -189,7 +189,6 @@ interface NodeCardProps {
 }
 
 function NodeCard({ node }: NodeCardProps) {
-  const { t } = useTranslation();
   const statusColors = {
     online: 'bg-green-100 text-green-800 border-green-300',
     degraded: 'bg-yellow-100 text-yellow-800 border-yellow-300',

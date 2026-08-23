@@ -64,9 +64,6 @@ func (d Deps) auditRBACDenied(w http.ResponseWriter, r *http.Request, actor *rba
 
 // auditRBACGranted logs a successful authorization check.
 // Only called for sensitive operations that need full audit trail.
-func (d Deps) auditRBACGranted(w http.ResponseWriter, r *http.Request, actor *rbac.Actor, perm rbac.Permission, target rbac.Target) {
-	d.auditRBAC(w, r, actor, perm, target, "ok")
-}
 
 // requirePermission checks RBAC and audits denials.
 // Returns true if authorized, false if denied (already logged and responded).
@@ -84,16 +81,3 @@ func (d Deps) requirePermission(w http.ResponseWriter, r *http.Request, perm rba
 
 // requirePermissionAuditGrant checks RBAC and audits both denials and grants.
 // Use for sensitive operations that need full audit trail of all access.
-func (d Deps) requirePermissionAuditGrant(w http.ResponseWriter, r *http.Request, perm rbac.Permission, target rbac.Target) bool {
-	actor := ActorFrom(r.Context())
-
-	if err := rbac.Check(actor, perm, target); err != nil {
-		d.auditRBACDenied(w, r, actor, perm, target)
-		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
-		return false
-	}
-
-	// Audit successful checks for sensitive operations
-	d.auditRBACGranted(w, r, actor, perm, target)
-	return true
-}

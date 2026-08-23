@@ -76,17 +76,5 @@ func derivePublicKey(privateKeyB64 string) string {
 }
 
 // Add peerRegistry to Adapter struct
-func (a *Adapter) initRegistry() {
-	// This is called in New() or first Plan()
-	if a.registry == nil {
-		a.registry = newPeerRegistry()
-	}
-}
 
 // Update publicKeyToSubject to use registry
-func (a *Adapter) publicKeyToSubjectWithRegistry(publicKey string) (int64, bool) {
-	if a.registry == nil {
-		return 0, false
-	}
-	return a.registry.lookup(publicKey)
-}

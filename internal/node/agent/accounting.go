@@ -20,7 +20,7 @@ import (
 
 // AccountingState persists deltas and sequence numbers between polls.
 type AccountingState struct {
-	Sequence int64                   `json:"sequence"`
+	Sequence int64                     `json:"sequence"`
 	Pending  []*antimagev1.UsageSample `json:"pending"`
 }
 

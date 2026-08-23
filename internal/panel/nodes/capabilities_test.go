@@ -38,27 +38,27 @@ func TestRecordAndGetCapabilities(t *testing.T) {
 	xrayVersion := "1.8.4"
 	capabilities := []NodeCapability{
 		{
-			NodeID:     nodeID,
-			Protocol:   ProtocolXray,
-			Available:  true,
-			Version:    &xrayVersion,
-			DetectedAt: now,
+			NodeID:      nodeID,
+			Protocol:    ProtocolXray,
+			Available:   true,
+			Version:     &xrayVersion,
+			DetectedAt:  now,
 			LastCheckAt: now,
 		},
 		{
-			NodeID:     nodeID,
-			Protocol:   ProtocolWireGuard,
-			Available:  true,
-			Version:    nil,
-			DetectedAt: now,
+			NodeID:      nodeID,
+			Protocol:    ProtocolWireGuard,
+			Available:   true,
+			Version:     nil,
+			DetectedAt:  now,
 			LastCheckAt: now,
 		},
 		{
-			NodeID:     nodeID,
-			Protocol:   ProtocolHysteria2,
-			Available:  false,
-			Version:    nil,
-			DetectedAt: now,
+			NodeID:      nodeID,
+			Protocol:    ProtocolHysteria2,
+			Available:   false,
+			Version:     nil,
+			DetectedAt:  now,
 			LastCheckAt: now,
 		},
 	}
@@ -187,11 +187,11 @@ func TestCapabilityUpdate(t *testing.T) {
 	// Initial capability: Xray available
 	v1 := "1.8.0"
 	cap := NodeCapability{
-		NodeID:     nodeID,
-		Protocol:   ProtocolXray,
-		Available:  true,
-		Version:    &v1,
-		DetectedAt: now,
+		NodeID:      nodeID,
+		Protocol:    ProtocolXray,
+		Available:   true,
+		Version:     &v1,
+		DetectedAt:  now,
 		LastCheckAt: now,
 	}
 

@@ -65,14 +65,15 @@ func (d Deps) handleCreateTelegramLinkCode(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	ctx := r.Context()
 	var code string
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		var err error
-		code, err = d.telegramLinks().IssueCode(r.Context(), tx, actor.AdminID)
+		code, err = d.telegramLinks().IssueCode(ctx, tx, actor.AdminID)
 		if err != nil {
 			return err
 		}
-		return audit.InTx(r.Context(), tx, RequestID(r.Context()),
+		return audit.InTx(ctx, tx, RequestID(ctx),
 			d.actorAudit(actor, r), audit.Record{
 				Action: "telegram.code_issued", TargetType: "admin",
 				TargetID: sql.NullInt64{Int64: actor.AdminID, Valid: true},
@@ -106,11 +107,12 @@ func (d Deps) handleDeleteMyTelegram(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
-		if err := d.telegramLinks().RevokeByAdmin(r.Context(), tx, actor.AdminID); err != nil {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
+		if err := d.telegramLinks().RevokeByAdmin(ctx, tx, actor.AdminID); err != nil {
 			return err
 		}
-		return audit.InTx(r.Context(), tx, RequestID(r.Context()),
+		return audit.InTx(ctx, tx, RequestID(ctx),
 			d.actorAudit(actor, r), audit.Record{
 				Action: "telegram.unlink", TargetType: "admin",
 				TargetID: sql.NullInt64{Int64: actor.AdminID, Valid: true},

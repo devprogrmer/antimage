@@ -35,9 +35,9 @@ func TestCreateOrUpdateAlert_NewAlert(t *testing.T) {
 		ThresholdValue: "30 days",
 		CurrentValue:   "25 days",
 		Metadata: map[string]interface{}{
-			"node_name":       "node-tokyo-01",
-			"days_remaining":  25,
-			"cert_not_after":  "2027-01-15T10:30:00Z",
+			"node_name":      "node-tokyo-01",
+			"days_remaining": 25,
+			"cert_not_after": "2027-01-15T10:30:00Z",
 		},
 	}
 

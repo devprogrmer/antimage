@@ -21,11 +21,11 @@ const (
 
 // NodeCapability represents a protocol capability for a node.
 type NodeCapability struct {
-	NodeID     int64
-	Protocol   Protocol
-	Available  bool
-	Version    *string
-	DetectedAt time.Time
+	NodeID      int64
+	Protocol    Protocol
+	Available   bool
+	Version     *string
+	DetectedAt  time.Time
 	LastCheckAt time.Time
 }
 
@@ -40,7 +40,7 @@ func RecordCapability(ctx context.Context, s *store.Store, cap NodeCapability) e
 				version = excluded.version,
 				last_check_at = excluded.last_check_at
 		`, cap.NodeID, cap.Protocol, boolToInt(cap.Available), cap.Version,
-		   cap.DetectedAt.Unix(), cap.LastCheckAt.Unix())
+			cap.DetectedAt.Unix(), cap.LastCheckAt.Unix())
 		return err
 	})
 }
@@ -61,9 +61,9 @@ func GetNodeCapabilities(ctx context.Context, s *store.Store, nodeID int64) ([]N
 	var capabilities []NodeCapability
 	for rows.Next() {
 		var (
-			cap          NodeCapability
-			availableInt int
-			detectedUnix int64
+			cap           NodeCapability
+			availableInt  int
+			detectedUnix  int64
 			lastCheckUnix int64
 		)
 		err := rows.Scan(

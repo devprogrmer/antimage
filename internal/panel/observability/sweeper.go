@@ -133,9 +133,9 @@ func (sw *Sweeper) checkCertificates(ctx context.Context, now time.Time) error {
 				ThresholdValue: threshold,
 				CurrentValue:   fmt.Sprintf("%d days", daysRemaining),
 				Metadata: map[string]interface{}{
-					"node_name":       nodeName,
-					"cert_not_after":  certNotAfter.Format(time.RFC3339),
-					"days_remaining":  daysRemaining,
+					"node_name":        nodeName,
+					"cert_not_after":   certNotAfter.Format(time.RFC3339),
+					"days_remaining":   daysRemaining,
 					"cert_fingerprint": "", // Could be populated from nodes.cert_fingerprint if needed
 				},
 			}

@@ -11,17 +11,17 @@ import (
 
 // ServiceParams are operator-supplied Hysteria2 service settings
 type ServiceParams struct {
-	Port                  int      `json:"port" yaml:"listen"`
-	Password              string   `json:"password" yaml:"-"` // Handled separately
-	CertFile              string   `json:"cert_file,omitempty" yaml:"-"`
-	KeyFile               string   `json:"key_file,omitempty" yaml:"-"`
-	SNI                   string   `json:"sni,omitempty" yaml:"-"`
-	Obfs                  string   `json:"obfs,omitempty" yaml:"-"`
-	ObfsPassword          string   `json:"obfs_password,omitempty" yaml:"-"`
-	UpMbps                int      `json:"up_mbps,omitempty" yaml:"-"`
-	DownMbps              int      `json:"down_mbps,omitempty" yaml:"-"`
-	Masquerade            string   `json:"masquerade,omitempty" yaml:"-"`
-	IgnoreClientBandwidth bool     `json:"ignore_client_bandwidth,omitempty" yaml:"ignoreClientBandwidth,omitempty"`
+	Port                  int    `json:"port" yaml:"listen"`
+	Password              string `json:"password" yaml:"-"` // Handled separately
+	CertFile              string `json:"cert_file,omitempty" yaml:"-"`
+	KeyFile               string `json:"key_file,omitempty" yaml:"-"`
+	SNI                   string `json:"sni,omitempty" yaml:"-"`
+	Obfs                  string `json:"obfs,omitempty" yaml:"-"`
+	ObfsPassword          string `json:"obfs_password,omitempty" yaml:"-"`
+	UpMbps                int    `json:"up_mbps,omitempty" yaml:"-"`
+	DownMbps              int    `json:"down_mbps,omitempty" yaml:"-"`
+	Masquerade            string `json:"masquerade,omitempty" yaml:"-"`
+	IgnoreClientBandwidth bool   `json:"ignore_client_bandwidth,omitempty" yaml:"ignoreClientBandwidth,omitempty"`
 }
 
 // Validate checks service params are well-formed
@@ -81,7 +81,7 @@ func GenerateConfig(serviceID int64, params ServiceParams, users []UserAuth) (st
 			}
 		}
 		config["auth"] = map[string]interface{}{
-			"type":   "userpass",
+			"type":     "userpass",
 			"userpass": authList,
 		}
 	} else {

@@ -565,7 +565,7 @@ func TestExpandTemplateVariables(t *testing.T) {
 		},
 	}
 
-		for _, tt := range tests {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := expandTemplateVariables(tt.input)
 			if !tt.validate(result) {
