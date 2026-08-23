@@ -63,6 +63,23 @@ const subjectScopePredicate = `
         JOIN resellers r ON r.id = rs.reseller_id
        WHERE r.admin_id = ?))`
 
+// SubjectScopeSQL exposes the predicate to other packages that read subjects,
+// so there is exactly ONE definition of "which subjects may this caller see".
+//
+// Exported as the constant rather than reimplemented per package on purpose: a
+// second copy is a second thing to get wrong, and the two would drift the first
+// time ownership rules changed. Callers must bind ScopeArgs in the same order.
+const SubjectScopeSQL = subjectScopePredicate
+
+// ScopeArgs returns the bound parameters SubjectScopeSQL expects, in order.
+//
+// Returning them from here rather than letting callers write
+// boolToInt(sc.IsSuper), sc.AdminID by hand removes the chance of transposing
+// the two -- which would silently grant super powers to admin id 1.
+func ScopeArgs(sc rbac.Scope) []any {
+	return []any{boolToInt(sc.IsSuper), sc.AdminID}
+}
+
 // resellerScopePredicate restricts the tenant records themselves.
 //
 // A non-super caller can only ever match their own reseller row. This is what

@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/shared/secrets"
 )
@@ -261,20 +262,37 @@ func (s *Store) Credential(ctx context.Context, subjectID int64, kind Credential
 	return string(plain), nil
 }
 
-// Get reads one subject without its credentials.
-func (s *Store) Get(ctx context.Context, id int64) (*Subject, error) {
+// Get reads one subject without its credentials, restricted to what this
+// caller may see.
+//
+// The scope is a required argument rather than an option, and there is no
+// unscoped variant. That is the whole design: a caller who wants every subject
+// has to pass rbac.Scope{IsSuper: true} explicitly, which is greppable in
+// review, whereas an unscoped Get sitting beside a scoped one gets reached for
+// by accident and leaks every tenant's customers.
+//
+// Returns sql.ErrNoRows for a subject that does not exist AND for one owned by
+// another reseller. The two must be indistinguishable, or a tenant can probe
+// the id space to count a competitor's customers.
+func (s *Store) Get(ctx context.Context, sc rbac.Scope, id int64) (*Subject, error) {
+	args := append([]any{id}, store.ScopeArgs(sc)...)
 	row := s.db.Read().QueryRowContext(ctx,
 		`SELECT id, name, enabled, expires_at, expired_at, created_at, note
-		   FROM subjects WHERE id = ?`, id)
+		   FROM subjects
+		  WHERE subjects.id = ? AND `+store.SubjectScopeSQL, args...)
 	return scanSubject(row)
 }
 
-// List returns every subject, newest first. Credentials are deliberately not
-// included: a list endpoint must not be able to leak them.
-func (s *Store) List(ctx context.Context) ([]Subject, error) {
+// List returns the subjects visible to this caller, newest first.
+//
+// Credentials are deliberately not included: a list endpoint must not be able
+// to leak them. Scope is required for the same reason as on Get.
+func (s *Store) List(ctx context.Context, sc rbac.Scope) ([]Subject, error) {
 	rows, err := s.db.Read().QueryContext(ctx,
 		`SELECT id, name, enabled, expires_at, expired_at, created_at, note
-		   FROM subjects ORDER BY id DESC`)
+		   FROM subjects
+		  WHERE `+store.SubjectScopeSQL+`
+		  ORDER BY id DESC`, store.ScopeArgs(sc)...)
 	if err != nil {
 		return nil, fmt.Errorf("list subjects: %w", err)
 	}
@@ -574,4 +592,3 @@ func (s *Store) Enable(ctx context.Context, tx *sql.Tx, subjectID int64) error {
 	}
 	return nil
 }
-

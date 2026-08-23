@@ -148,7 +148,7 @@ func BenchmarkSubjectGet(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		subjectID := ids[i%len(ids)]
-		_, err := subjStore.Get(ctx, subjectID)
+		_, err := subjStore.Get(ctx, rbac.Scope{IsSuper: true}, subjectID)
 		if err != nil {
 			b.Fatalf("get subject: %v", err)
 		}
@@ -173,7 +173,7 @@ func BenchmarkSubjectList(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				subjs, err := subjStoreLocal.List(ctx)
+				subjs, err := subjStoreLocal.List(ctx, rbac.Scope{IsSuper: true})
 				if err != nil {
 					b.Fatalf("list subjects: %v", err)
 				}
@@ -368,7 +368,7 @@ func BenchmarkConcurrentReads(b *testing.B) {
 		i := 0
 		for pb.Next() {
 			subjectID := ids[i%len(ids)]
-			_, err := subjStore.Get(ctx, subjectID)
+			_, err := subjStore.Get(ctx, rbac.Scope{IsSuper: true}, subjectID)
 			if err != nil {
 				b.Fatalf("concurrent read: %v", err)
 			}

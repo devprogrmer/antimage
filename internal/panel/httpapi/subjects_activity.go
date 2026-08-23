@@ -12,16 +12,16 @@ import (
 
 // ActivityEvent represents a subject activity event.
 type ActivityEvent struct {
-	ID         int64  `json:"id"`
-	SubjectID  int64  `json:"subject_id"`
-	EventType  string `json:"event_type"`
-	Timestamp  int64  `json:"timestamp"`
-	Details    string `json:"details,omitempty"`
-	IPAddress  string `json:"ip_address,omitempty"`
-	DeviceID   string `json:"device_id,omitempty"`
-	NodeID     *int64 `json:"node_id,omitempty"`
-	BytesUp    int64  `json:"bytes_up"`
-	BytesDown  int64  `json:"bytes_down"`
+	ID        int64  `json:"id"`
+	SubjectID int64  `json:"subject_id"`
+	EventType string `json:"event_type"`
+	Timestamp int64  `json:"timestamp"`
+	Details   string `json:"details,omitempty"`
+	IPAddress string `json:"ip_address,omitempty"`
+	DeviceID  string `json:"device_id,omitempty"`
+	NodeID    *int64 `json:"node_id,omitempty"`
+	BytesUp   int64  `json:"bytes_up"`
+	BytesDown int64  `json:"bytes_down"`
 }
 
 // ActivityListResponse contains activity events with pagination.
@@ -159,17 +159,17 @@ func (d Deps) handleSubjectActivity(w http.ResponseWriter, r *http.Request) {
 
 // ConnectionSummary represents an active or past connection.
 type ConnectionSummary struct {
-	ID           int64  `json:"id"`
-	SubjectID    int64  `json:"subject_id"`
-	StartTime    int64  `json:"start_time"`
-	EndTime      *int64 `json:"end_time,omitempty"`
-	Duration     int64  `json:"duration"` // seconds
-	BytesUp      int64  `json:"bytes_up"`
-	BytesDown    int64  `json:"bytes_down"`
-	IPAddress    string `json:"ip_address,omitempty"`
-	DeviceID     string `json:"device_id,omitempty"`
-	NodeID       *int64 `json:"node_id,omitempty"`
-	Protocol     string `json:"protocol,omitempty"`
+	ID        int64  `json:"id"`
+	SubjectID int64  `json:"subject_id"`
+	StartTime int64  `json:"start_time"`
+	EndTime   *int64 `json:"end_time,omitempty"`
+	Duration  int64  `json:"duration"` // seconds
+	BytesUp   int64  `json:"bytes_up"`
+	BytesDown int64  `json:"bytes_down"`
+	IPAddress string `json:"ip_address,omitempty"`
+	DeviceID  string `json:"device_id,omitempty"`
+	NodeID    *int64 `json:"node_id,omitempty"`
+	Protocol  string `json:"protocol,omitempty"`
 }
 
 // ConnectionListResponse contains connection history with pagination.
@@ -290,13 +290,13 @@ func (d Deps) handleSubjectConnections(w http.ResponseWriter, r *http.Request) {
 
 // DeviceSummary represents a device that connected to the subject.
 type DeviceSummary struct {
-	DeviceID      string `json:"device_id"`
-	FirstSeen     int64  `json:"first_seen"`
-	LastSeen      int64  `json:"last_seen"`
-	ConnectionCount int  `json:"connection_count"`
-	TotalBytesUp  int64  `json:"total_bytes_up"`
-	TotalBytesDown int64 `json:"total_bytes_down"`
-	LastIPAddress string `json:"last_ip_address,omitempty"`
+	DeviceID        string `json:"device_id"`
+	FirstSeen       int64  `json:"first_seen"`
+	LastSeen        int64  `json:"last_seen"`
+	ConnectionCount int    `json:"connection_count"`
+	TotalBytesUp    int64  `json:"total_bytes_up"`
+	TotalBytesDown  int64  `json:"total_bytes_down"`
+	LastIPAddress   string `json:"last_ip_address,omitempty"`
 }
 
 // DeviceListResponse contains device history.

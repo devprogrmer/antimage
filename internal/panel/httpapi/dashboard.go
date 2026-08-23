@@ -40,9 +40,9 @@ func (d Deps) handleDashboardOverview(w http.ResponseWriter, r *http.Request) {
 			"total_bytes":    stats.Traffic24hUplink + stats.Traffic24hDownlink,
 		},
 		"quota": map[string]any{
-			"total_bytes":       stats.QuotaTotalBytes,
-			"used_bytes":        stats.QuotaUsedBytes,
-			"utilization_pct":   stats.QuotaUtilizationPct,
+			"total_bytes":     stats.QuotaTotalBytes,
+			"used_bytes":      stats.QuotaUsedBytes,
+			"utilization_pct": stats.QuotaUtilizationPct,
 		},
 		"computed_at": stats.ComputedAt,
 	}

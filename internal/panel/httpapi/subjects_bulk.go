@@ -14,10 +14,10 @@ import (
 // bulkCreateRequest contains parameters for bulk subject creation.
 type bulkCreateRequest struct {
 	Subjects []struct {
-		Name       string            `json:"name"`
-		Note       string            `json:"note"`
-		ExpiresAt  *int64            `json:"expires_at"`
-		ServiceIDs []int64           `json:"service_ids"`
+		Name        string            `json:"name"`
+		Note        string            `json:"note"`
+		ExpiresAt   *int64            `json:"expires_at"`
+		ServiceIDs  []int64           `json:"service_ids"`
 		Credentials map[string]string `json:"credentials"`
 	} `json:"subjects"`
 }
@@ -144,9 +144,9 @@ func (d Deps) handleBulkCreateSubjects(w http.ResponseWriter, r *http.Request) {
 type bulkUpdateRequest struct {
 	SubjectIDs []int64 `json:"subject_ids"`
 	Updates    struct {
-		Enabled   *bool  `json:"enabled"`
+		Enabled   *bool   `json:"enabled"`
 		Note      *string `json:"note"`
-		ExpiresAt *int64 `json:"expires_at"`
+		ExpiresAt *int64  `json:"expires_at"`
 	} `json:"updates"`
 }
 

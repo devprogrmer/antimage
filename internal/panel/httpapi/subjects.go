@@ -55,6 +55,32 @@ func (d Deps) subjectStore() *subjects.Store {
 	return subjects.NewStore(d.Store, d.Box, d.now)
 }
 
+// requireSubjectInScope is the second enforcement layer for every handler that
+// acts on a subject by id.
+//
+// authorize() decides whether this actor may perform the operation at all;
+// this decides whether the subject exists as far as they are concerned. Both
+// must run: PermSubjectWrite says a reseller may edit customers, not that they
+// may edit ANY customer.
+//
+// Denials are 404, never 403. A 403 would confirm the id is real, which lets
+// one tenant walk the id space and count a competitor's customers. That is the
+// same reason GetSubjectScoped collapses out-of-scope into sql.ErrNoRows.
+func (d Deps) requireSubjectInScope(
+	w http.ResponseWriter, r *http.Request, actor *rbac.Actor, id int64,
+) bool {
+	inScope, err := d.Store.SubjectInScope(r.Context(), rbac.ScopeOf(actor), id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not check subject")
+		return false
+	}
+	if !inScope {
+		WriteError(w, http.StatusNotFound, "not_found", "subject not found")
+		return false
+	}
+	return true
+}
+
 func (d Deps) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireActor(w, r)
 	if !ok {
@@ -63,7 +89,11 @@ func (d Deps) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	if !d.authorize(w, r, actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
-	list, err := d.subjectStore().List(r.Context())
+	// Scope is the SECOND enforcement layer. The authorize() call above decided
+	// that this actor may read subjects at all; this decides which subjects
+	// exist as far as they are concerned. A reseller passes their own scope and
+	// sees only their own customers.
+	list, err := d.subjectStore().List(r.Context(), rbac.ScopeOf(actor))
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "could not list subjects")
 		return
@@ -88,7 +118,10 @@ func (d Deps) handleGetSubject(w http.ResponseWriter, r *http.Request) {
 	if !d.authorize(w, r, actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
-	s, err := d.subjectStore().Get(r.Context(), id)
+	// Out-of-scope and missing both arrive here as sql.ErrNoRows and both
+	// become 404. Returning 403 for the former would let one reseller probe
+	// the id space and count a competitor's customers.
+	s, err := d.subjectStore().Get(r.Context(), rbac.ScopeOf(actor), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "not_found", "subject not found")
 		return
@@ -213,6 +246,9 @@ func (d Deps) handleUpdateSubject(w http.ResponseWriter, r *http.Request) {
 	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
 
 	var req updateSubjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -286,6 +322,9 @@ func (d Deps) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
 	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
 
 	ctx := r.Context()
 	store := d.subjectStore()
@@ -342,6 +381,12 @@ func (d Deps) handleRevealCredential(w http.ResponseWriter, r *http.Request) {
 	if !d.authorize(w, r, actor, rbac.PermCredReveal, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
+	// The highest-value endpoint in the panel: it returns the secret a user
+	// connects with. Without this gate, credential:reveal on any subject id
+	// disclosed any tenant's customer credential to any other tenant.
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
 	kind := subjects.CredentialKind(chi.URLParam(r, "kind"))
 
 	value, err := d.subjectStore().Credential(r.Context(), id, kind)
@@ -376,6 +421,11 @@ func (d Deps) handleRotateCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	// Rotation is as sensitive as reveal in the other direction: rotating a
+	// foreign customer's credential would cut off a competitor's user.
+	if !d.requireSubjectInScope(w, r, actor, id) {
 		return
 	}
 	kind := subjects.CredentialKind(chi.URLParam(r, "kind"))

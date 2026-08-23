@@ -34,12 +34,12 @@ func (d Deps) auditRBAC(w http.ResponseWriter, r *http.Request, actor *rbac.Acto
 
 	// Build audit metadata
 	metadata := map[string]any{
-		"permission":   string(perm),
-		"target_kind":  targetKindString(target.Kind),
-		"actor_role":   actor.RoleName,
-		"is_super":     actor.IsSuper,
-		"method":       r.Method,
-		"path":         r.URL.Path,
+		"permission":  string(perm),
+		"target_kind": targetKindString(target.Kind),
+		"actor_role":  actor.RoleName,
+		"is_super":    actor.IsSuper,
+		"method":      r.Method,
+		"path":        r.URL.Path,
 	}
 
 	if target.ID != 0 {

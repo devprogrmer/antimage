@@ -11,16 +11,16 @@ import (
 
 // DashboardMetrics represents real-time dashboard data.
 type DashboardMetrics struct {
-	Timestamp      int64            `json:"timestamp"`
-	ActiveUsers    int              `json:"active_users"`
-	TotalSubjects  int              `json:"total_subjects"`
-	NodesOnline    int              `json:"nodes_online"`
-	NodesTotal     int              `json:"nodes_total"`
-	TrafficTodayGB float64          `json:"traffic_today_gb"`
-	BandwidthMbps  float64          `json:"bandwidth_mbps"`
-	AlertsCount    int              `json:"alerts_count"`
-	FrozenCount    int              `json:"frozen_count"`
-	Nodes          []NodeMetric     `json:"nodes"`
+	Timestamp      int64        `json:"timestamp"`
+	ActiveUsers    int          `json:"active_users"`
+	TotalSubjects  int          `json:"total_subjects"`
+	NodesOnline    int          `json:"nodes_online"`
+	NodesTotal     int          `json:"nodes_total"`
+	TrafficTodayGB float64      `json:"traffic_today_gb"`
+	BandwidthMbps  float64      `json:"bandwidth_mbps"`
+	AlertsCount    int          `json:"alerts_count"`
+	FrozenCount    int          `json:"frozen_count"`
+	Nodes          []NodeMetric `json:"nodes"`
 }
 
 // NodeMetric represents per-node metrics.

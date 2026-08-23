@@ -214,13 +214,13 @@ func (d Deps) handleCreateUserPreset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name         string          `json:"name"`
-		Description  string          `json:"description"`
-		QuotaBytes   *int64          `json:"quota_bytes"`
-		ValidityDays *int            `json:"validity_days"`
+		Name                   string          `json:"name"`
+		Description            string          `json:"description"`
+		QuotaBytes             *int64          `json:"quota_bytes"`
+		ValidityDays           *int            `json:"validity_days"`
 		AutoAssignServicesJSON json.RawMessage `json:"auto_assign_services_json"`
 		AutoAssignNodeTagsJSON json.RawMessage `json:"auto_assign_node_tags_json"`
-		IsPublic     bool            `json:"is_public"`
+		IsPublic               bool            `json:"is_public"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "bad_request", "malformed request body")

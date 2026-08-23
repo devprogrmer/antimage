@@ -137,12 +137,12 @@ func (d Deps) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 
 // HistoryDataPoint represents a single metric data point.
 type HistoryDataPoint struct {
-	Timestamp string  `json:"timestamp"`
-	Value     *int64  `json:"value,omitempty"`     // For raw samples
-	Avg       *int64  `json:"avg,omitempty"`       // For rollups
-	Min       *int64  `json:"min,omitempty"`       // For rollups (RTT only)
-	Max       *int64  `json:"max,omitempty"`       // For rollups (RTT only)
-	Samples   *int    `json:"samples,omitempty"`   // For rollups
+	Timestamp string `json:"timestamp"`
+	Value     *int64 `json:"value,omitempty"`   // For raw samples
+	Avg       *int64 `json:"avg,omitempty"`     // For rollups
+	Min       *int64 `json:"min,omitempty"`     // For rollups (RTT only)
+	Max       *int64 `json:"max,omitempty"`     // For rollups (RTT only)
+	Samples   *int   `json:"samples,omitempty"` // For rollups
 }
 
 // NodeHistoryResponse is the response structure for GET /api/v1/nodes/{nodeID}/history.

@@ -44,23 +44,23 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 
 	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
-		// Check if subject exists and collect affected nodes
-		rows, err := tx.QueryContext(r.Context(), `
+			// Check if subject exists and collect affected nodes
+			rows, err := tx.QueryContext(r.Context(), `
 			SELECT node_id FROM subject_services WHERE subject_id = ?
 		`, subjectID)
-		if err != nil {
-			errors = append(errors, err.Error())
-			failed++
-			continue
-		}
-
-		for rows.Next() {
-			var nodeID int64
-			if err := rows.Scan(&nodeID); err == nil {
-				affectedNodes[nodeID] = struct{}{}
+			if err != nil {
+				errors = append(errors, err.Error())
+				failed++
+				continue
 			}
-		}
-		rows.Close()
+
+			for rows.Next() {
+				var nodeID int64
+				if err := rows.Scan(&nodeID); err == nil {
+					affectedNodes[nodeID] = struct{}{}
+				}
+			}
+			rows.Close()
 
 			// Delete subject
 			result, err := tx.ExecContext(r.Context(), `DELETE FROM subjects WHERE id = ?`, subjectID)

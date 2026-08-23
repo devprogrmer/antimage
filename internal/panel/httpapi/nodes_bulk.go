@@ -25,10 +25,10 @@ type BulkNodeActionRequest struct {
 
 // BulkNodeActionResponse represents the result of a bulk operation
 type BulkNodeActionResponse struct {
-	TotalNodes     int                     `json:"total_nodes"`
-	SuccessCount   int                     `json:"success_count"`
-	FailureCount   int                     `json:"failure_count"`
-	Results        []BulkNodeActionResult  `json:"results"`
+	TotalNodes   int                    `json:"total_nodes"`
+	SuccessCount int                    `json:"success_count"`
+	FailureCount int                    `json:"failure_count"`
+	Results      []BulkNodeActionResult `json:"results"`
 }
 
 // BulkNodeActionResult represents the result for a single node
@@ -112,7 +112,7 @@ func (d Deps) handleBulkNodeAction(w http.ResponseWriter, r *http.Request) {
 					TargetID:   sql.NullInt64{Int64: nID, Valid: true},
 					Result:     "denied",
 					After: map[string]any{
-						"permission": string(rbac.PermNodeWrite),
+						"permission":  string(rbac.PermNodeWrite),
 						"bulk_action": req.Action,
 					},
 				})
