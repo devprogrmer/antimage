@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
 
 interface Activity {
@@ -25,11 +25,7 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
   const [offset, setOffset] = useState(0);
   const [eventTypeFilter, setEventTypeFilter] = useState("");
 
-  useEffect(() => {
-    loadActivities();
-  }, [subjectId, eventTypeFilter]);
-
-  async function loadActivities() {
+  const loadActivities = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -51,7 +47,11 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [subjectId, offset, eventTypeFilter]);
+
+  useEffect(() => {
+    loadActivities();
+  }, [loadActivities]);
 
   function loadMore() {
     setOffset(prev => prev + 50);

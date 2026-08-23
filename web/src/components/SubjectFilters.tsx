@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface FilterParams {
   search: string;
@@ -26,14 +26,14 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
   const [expiresAfter, setExpiresAfter] = useState("");
   const [sort, setSort] = useState("created");
   const [order, setOrder] = useState("desc");
-  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (searchTimeout) {
-      clearTimeout(searchTimeout);
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
     }
 
-    const timeout = setTimeout(() => {
+    timeoutRef.current = setTimeout(() => {
       onFilterChange({
         search,
         status,
@@ -47,14 +47,12 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
       });
     }, 300);
 
-    setSearchTimeout(timeout);
-
     return () => {
-      if (timeout) {
-        clearTimeout(timeout);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
       }
     };
-  }, [search, status, trafficMin, trafficMax, quotaStatus, expiresBefore, expiresAfter, sort, order]);
+  }, [search, status, trafficMin, trafficMax, quotaStatus, expiresBefore, expiresAfter, sort, order, onFilterChange]);
 
   function clearFilters() {
     setSearch("");

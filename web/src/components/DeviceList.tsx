@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
 
 interface Device {
@@ -19,11 +19,7 @@ export function DeviceList({ subjectId }: DeviceListProps) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadDevices();
-  }, [subjectId]);
-
-  async function loadDevices() {
+  const loadDevices = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.get<any>(`/api/v1/subjects/${subjectId}/devices`);
@@ -33,7 +29,11 @@ export function DeviceList({ subjectId }: DeviceListProps) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [subjectId]);
+
+  useEffect(() => {
+    loadDevices();
+  }, [loadDevices]);
 
   function formatBytes(bytes: number): string {
     if (bytes === 0) return "0 B";

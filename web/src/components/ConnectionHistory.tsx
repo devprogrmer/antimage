@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
 
 interface Connection {
@@ -24,11 +24,7 @@ export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<"start_time" | "duration" | "traffic">("start_time");
 
-  useEffect(() => {
-    loadConnections();
-  }, [subjectId]);
-
-  async function loadConnections() {
+  const loadConnections = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.get<any>(`/api/v1/subjects/${subjectId}/connections?limit=100`);
@@ -38,7 +34,11 @@ export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [subjectId]);
+
+  useEffect(() => {
+    loadConnections();
+  }, [loadConnections]);
 
   function formatDuration(seconds: number): string {
     if (seconds < 60) return `${seconds}s`;
