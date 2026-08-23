@@ -44,8 +44,13 @@ var ErrNotFound = errors.New("subject not found")
 
 // Notifier wakes an agent after its node's revision moves. The HTTP layer
 // passes control.Hub; tests pass a recorder.
+//
+// The bool reports whether the agent was connected to receive the nudge. A
+// false is NOT a failure: a disconnected agent fetches the new revision when it
+// reconnects, which is the whole point of a desired-state model. Treating it as
+// an error would fail operator actions because a node happened to be offline.
 type Notifier interface {
-	Notify(nodeID, revision int64)
+	Notify(nodeID, revision int64) bool
 }
 
 // Subjects orchestrates subject lifecycle for every caller.
@@ -155,6 +160,99 @@ func (s *Subjects) Credential(
 		Result:   "ok",
 	})
 	return value, nil
+}
+
+// Create adds a platform-owned subject.
+//
+// Distinct from Provision, which creates a subject OWNED BY a reseller and
+// debits their credit. A subject created here belongs to the platform and is
+// invisible to every tenant, which is the fail-closed direction: an unowned
+// subject must not default to being everybody's.
+func (s *Subjects) Create(
+	ctx context.Context, a Actor, in subjects.CreateInput,
+) (int64, error) {
+	if err := s.authorize(ctx, a, rbac.PermSubjectWrite, 0); err != nil {
+		return 0, err
+	}
+	var id int64
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		var err error
+		id, err = s.subjects.Create(ctx, tx, in)
+		if err != nil {
+			return err
+		}
+		return audit.InTx(ctx, tx, a.RequestID, a.Audit, audit.Record{
+			Action: "subject.create", TargetType: "subject",
+			TargetID: sql.NullInt64{Int64: id, Valid: true},
+			// Name and service count only; the credentials never are.
+			After: map[string]any{
+				"name": in.Name, "services": len(in.ServiceIDs), "via": a.Via,
+			},
+			Result: "ok",
+		})
+	}); err != nil {
+		return 0, err
+	}
+	if err := s.republishFor(ctx, a, id, "subject created"); err != nil {
+		return id, err
+	}
+	return id, nil
+}
+
+// Update edits a subject and republishes every node it touches.
+//
+// Republishes the UNION of the node sets before and after, because changing
+// ServiceIDs moves a subject between nodes: the gaining node has to learn
+// about them and the losing node has to stop serving them. Publishing only the
+// new set would leave the old node serving somebody it no longer should.
+func (s *Subjects) Update(
+	ctx context.Context, a Actor, id int64, in subjects.UpdateInput,
+) error {
+	if err := s.authorize(ctx, a, rbac.PermSubjectWrite, id); err != nil {
+		return err
+	}
+	before, err := s.subjects.NodeIDsForRead(ctx, id)
+	if err != nil {
+		return fmt.Errorf("resolve nodes before update: %w", err)
+	}
+
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		if err := s.subjects.Update(ctx, tx, id, in); err != nil {
+			return err
+		}
+		return audit.InTx(ctx, tx, a.RequestID, a.Audit, audit.Record{
+			Action: "subject.update", TargetType: "subject",
+			TargetID: sql.NullInt64{Int64: id, Valid: true},
+			After: map[string]any{
+				"enabled": in.Enabled, "clear_expiry": in.ClearExpiry, "via": a.Via,
+			},
+			Result: "ok",
+		})
+	}); err != nil {
+		return err
+	}
+
+	after, err := s.subjects.NodeIDsForRead(ctx, id)
+	if err != nil {
+		return fmt.Errorf("resolve nodes after update: %w", err)
+	}
+	return s.republish(ctx, a, unionNodes(before, after), "subject updated")
+}
+
+// unionNodes merges two node sets, preserving order and dropping duplicates.
+func unionNodes(a, b []int64) []int64 {
+	seen := make(map[int64]struct{}, len(a)+len(b))
+	out := make([]int64, 0, len(a)+len(b))
+	for _, set := range [][]int64{a, b} {
+		for _, id := range set {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // SetEnabled enables or disables a subject and republishes its nodes.
@@ -325,7 +423,7 @@ func (s *Subjects) republish(ctx context.Context, a Actor, nodeIDs []int64, reas
 		// Signal only when something moved, so a no-op edit does not wake
 		// every agent in the fleet.
 		if result.Changed && s.notify != nil {
-			s.notify.Notify(nodeID, result.Revision)
+			_ = s.notify.Notify(nodeID, result.Revision)
 		}
 	}
 	return nil

@@ -13,6 +13,8 @@ import (
 	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/amyrm/antimage/internal/panel/resellers"
+	"github.com/amyrm/antimage/internal/panel/service"
 	"github.com/amyrm/antimage/internal/panel/subjects"
 )
 
@@ -53,6 +55,55 @@ func toSubjectDTO(s subjects.Subject) subjectDTO {
 // correct: storing credential material unsealed would put it in every backup.
 func (d Deps) subjectStore() *subjects.Store {
 	return subjects.NewStore(d.Store, d.Box, d.now)
+}
+
+// subjectService is the single orchestration path.
+//
+// Handlers own HTTP concerns -- decoding, status codes, headers -- and nothing
+// else. Permission checks, tenant scope, transactions, node republishing and
+// audit all live in the service, so the Telegram bot and the CLI get identical
+// behaviour by calling the same methods rather than reimplementing them.
+//
+// Built lazily like subjectStore, so no Deps construction site has to change.
+func (d Deps) subjectService() *service.Subjects {
+	subj := d.subjectStore()
+	return service.NewSubjects(
+		d.Store, subj,
+		resellers.NewStore(d.Store, subj, d.now),
+		d.Hub, d.now, d.snapshotOpts()...,
+	)
+}
+
+// svcActor bundles identity and request context for the service layer.
+func (d Deps) svcActor(r *http.Request, actor *rbac.Actor) service.Actor {
+	return service.Actor{
+		RBAC:      actor,
+		Audit:     d.actorAudit(actor, r),
+		RequestID: RequestID(r.Context()),
+		Via:       "http",
+	}
+}
+
+// writeServiceError maps service errors onto status codes in ONE place, so
+// every handler reports the same outcome for the same cause.
+//
+// service.ErrNotFound covers both "no such subject" and "not yours", and both
+// become 404: a 403 would confirm the id is real and let one tenant count
+// another's customers by walking the id space.
+func (d Deps) writeServiceError(
+	w http.ResponseWriter, r *http.Request, actor *rbac.Actor, action string, err error,
+) {
+	switch {
+	case errors.Is(err, service.ErrNotFound), errors.Is(err, sql.ErrNoRows):
+		WriteError(w, http.StatusNotFound, "not_found", "subject not found")
+	case errors.Is(err, subjects.ErrNameTaken):
+		WriteError(w, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, rbac.ErrForbidden):
+		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+	default:
+		// Denied attempts are audited here, per invariant 9.
+		d.rejectSubject(w, r, actor, action, err)
+	}
 }
 
 // requireSubjectInScope is the second enforcement layer for every handler that
@@ -113,16 +164,11 @@ func (d Deps) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !d.authorize(w, r, actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
-		return
-	}
-	// Scope is the SECOND enforcement layer. The authorize() call above decided
-	// that this actor may read subjects at all; this decides which subjects
-	// exist as far as they are concerned. A reseller passes their own scope and
-	// sees only their own customers.
-	list, err := d.subjectStore().List(r.Context(), rbac.ScopeOf(actor))
+	// Permission and tenant scope are both enforced inside the service, so this
+	// handler cannot forget either one.
+	list, err := d.subjectService().List(r.Context(), d.svcActor(r, actor))
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", "could not list subjects")
+		d.writeServiceError(w, r, actor, "subject.list", err)
 		return
 	}
 	out := make([]subjectDTO, 0, len(list))
@@ -142,19 +188,9 @@ func (d Deps) handleGetSubject(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
 		return
 	}
-	if !d.authorize(w, r, actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
-		return
-	}
-	// Out-of-scope and missing both arrive here as sql.ErrNoRows and both
-	// become 404. Returning 403 for the former would let one reseller probe
-	// the id space and count a competitor's customers.
-	s, err := d.subjectStore().Get(r.Context(), rbac.ScopeOf(actor), id)
-	if errors.Is(err, sql.ErrNoRows) {
-		WriteError(w, http.StatusNotFound, "not_found", "subject not found")
-		return
-	}
+	s, err := d.subjectService().Get(r.Context(), d.svcActor(r, actor), id)
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", "could not load subject")
+		d.writeServiceError(w, r, actor, "subject.get", err)
 		return
 	}
 	WriteJSON(w, http.StatusOK, toSubjectDTO(*s))
@@ -211,36 +247,9 @@ func (d Deps) handleCreateSubject(w http.ResponseWriter, r *http.Request) {
 		in.Credentials[k] = value
 	}
 
-	ctx := r.Context()
-	store := d.subjectStore()
-
-	var subjectID int64
-	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
-		id, err := store.Create(ctx, tx, in)
-		if err != nil {
-			return err
-		}
-		subjectID = id
-		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
-			Action: "subject.create", TargetType: "subject",
-			TargetID: sql.NullInt64{Int64: id, Valid: true},
-			// The name and expiry are recorded; the credentials never are.
-			After:  map[string]any{"name": in.Name, "services": len(in.ServiceIDs)},
-			Result: "ok",
-		})
-	})
+	subjectID, err := d.subjectService().Create(r.Context(), d.svcActor(r, actor), in)
 	if err != nil {
-		if errors.Is(err, subjects.ErrNameTaken) {
-			WriteError(w, http.StatusConflict, "conflict", err.Error())
-			return
-		}
-		d.rejectSubject(w, r, actor, "subject.create", err)
-		return
-	}
-
-	if err := d.republishSubject(ctx, r, actor, subjectID, "subject created"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal",
-			"the subject was created but could not be published to every node")
+		d.writeServiceError(w, r, actor, "subject.create", err)
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]any{"id": subjectID})
@@ -283,51 +292,18 @@ func (d Deps) handleUpdateSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-	store := d.subjectStore()
-
-	before, err := store.NodeIDsForRead(ctx, id)
-	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", "could not read subject")
-		return
+	up := subjects.UpdateInput{
+		Name: req.Name, Note: req.Note, Enabled: req.Enabled,
+		ClearExpiry: req.ClearExpiry, ServiceIDs: req.ServiceIDs,
 	}
-
-	err = d.Store.Write(ctx, func(tx *sql.Tx) error {
-		up := subjects.UpdateInput{
-			Name: req.Name, Note: req.Note, Enabled: req.Enabled,
-			ClearExpiry: req.ClearExpiry, ServiceIDs: req.ServiceIDs,
-		}
-		if req.ExpiresAt != nil {
-			t := time.Unix(*req.ExpiresAt, 0).UTC()
-			up.ExpiresAt = &t
-		}
-		if err := store.Update(ctx, tx, id, up); err != nil {
-			return err
-		}
-		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
-			Action: "subject.update", TargetType: "subject",
-			TargetID: sql.NullInt64{Int64: id, Valid: true},
-			After:    map[string]any{"enabled": req.Enabled, "clear_expiry": req.ClearExpiry},
-			Result:   "ok",
-		})
-	})
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			WriteError(w, http.StatusNotFound, "not_found", "subject not found")
-			return
-		}
-		if errors.Is(err, subjects.ErrNameTaken) {
-			WriteError(w, http.StatusConflict, "conflict", err.Error())
-			return
-		}
-		d.rejectSubject(w, r, actor, "subject.update", err)
-		return
+	if req.ExpiresAt != nil {
+		t := time.Unix(*req.ExpiresAt, 0).UTC()
+		up.ExpiresAt = &t
 	}
-
-	after, _ := store.NodeIDsForRead(ctx, id)
-	if err := d.republishNodes(ctx, r, actor, union(before, after), "subject updated"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal",
-			"the subject was updated but could not be published to every node")
+	// The service republishes the union of the node sets before and after, so
+	// moving a subject between services stops the losing node serving them.
+	if err := d.subjectService().Update(r.Context(), d.svcActor(r, actor), id, up); err != nil {
+		d.writeServiceError(w, r, actor, "subject.update", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -346,45 +322,10 @@ func (d Deps) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
 		return
 	}
-	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
-		return
-	}
-	if !d.requireSubjectInScope(w, r, actor, id) {
-		return
-	}
-
-	ctx := r.Context()
-	store := d.subjectStore()
-
-	// Captured BEFORE the delete: the cascade removes the grants that name
-	// these nodes, so afterwards there is nothing left to ask.
-	affected, err := store.NodeIDsForRead(ctx, id)
-	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", "could not read subject")
-		return
-	}
-
-	err = d.Store.Write(ctx, func(tx *sql.Tx) error {
-		if err := store.Delete(ctx, tx, id); err != nil {
-			return err
-		}
-		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
-			Action: "subject.delete", TargetType: "subject",
-			TargetID: sql.NullInt64{Int64: id, Valid: true}, Result: "ok",
-		})
-	})
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			WriteError(w, http.StatusNotFound, "not_found", "subject not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, "internal", "could not delete subject")
-		return
-	}
-
-	if err := d.republishNodes(ctx, r, actor, affected, "subject deleted"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal",
-			"the subject was deleted but some nodes still serve them")
+	// The service captures the affected nodes BEFORE deleting, since the
+	// cascade removes the grants that name them.
+	if err := d.subjectService().Delete(r.Context(), d.svcActor(r, actor), id); err != nil {
+		d.writeServiceError(w, r, actor, "subject.delete", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -405,32 +346,16 @@ func (d Deps) handleRevealCredential(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
 		return
 	}
-	if !d.authorize(w, r, actor, rbac.PermCredReveal, rbac.Target{Kind: rbac.TargetNone}) {
-		return
-	}
-	// The highest-value endpoint in the panel: it returns the secret a user
-	// connects with. Without this gate, credential:reveal on any subject id
-	// disclosed any tenant's customer credential to any other tenant.
-	if !d.requireSubjectInScope(w, r, actor, id) {
-		return
-	}
 	kind := subjects.CredentialKind(chi.URLParam(r, "kind"))
 
-	value, err := d.subjectStore().Credential(r.Context(), id, kind)
+	// The highest-value read in the panel. Permission, tenant scope and the
+	// by-kind audit record all live in the service, so the bot gets the same
+	// three guarantees without repeating them.
+	value, err := d.subjectService().Credential(r.Context(), d.svcActor(r, actor), id, kind)
 	if err != nil {
-		WriteError(w, http.StatusNotFound, "not_found", "no such credential")
+		d.writeServiceError(w, r, actor, "credential.reveal", err)
 		return
 	}
-
-	ctx := r.Context()
-	audit.BestEffort(ctx, d.Store, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
-		Action: "credential.reveal", TargetType: "subject",
-		TargetID: sql.NullInt64{Int64: id, Valid: true},
-		// The KIND is recorded so an operator can see what was exposed. The
-		// VALUE never is: the audit log is readable by every audit:read holder.
-		After:  map[string]any{"kind": string(kind)},
-		Result: "ok",
-	})
 	// no-store: a credential must not sit in a browser or proxy cache.
 	w.Header().Set("Cache-Control", "no-store")
 	WriteJSON(w, http.StatusOK, map[string]any{"kind": string(kind), "value": value})
@@ -457,31 +382,10 @@ func (d Deps) handleRotateCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	kind := subjects.CredentialKind(chi.URLParam(r, "kind"))
 
-	ctx := r.Context()
-	store := d.subjectStore()
-
-	var fresh string
-	err = d.Store.Write(ctx, func(tx *sql.Tx) error {
-		v, err := store.Rotate(ctx, tx, id, kind)
-		if err != nil {
-			return err
-		}
-		fresh = v
-		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
-			Action: "credential.rotate", TargetType: "subject",
-			TargetID: sql.NullInt64{Int64: id, Valid: true},
-			After:    map[string]any{"kind": string(kind)},
-			Result:   "ok",
-		})
-	})
+	fresh, err := d.subjectService().RotateCredential(
+		r.Context(), d.svcActor(r, actor), id, kind)
 	if err != nil {
-		d.rejectSubject(w, r, actor, "credential.rotate", err)
-		return
-	}
-
-	if err := d.republishSubject(ctx, r, actor, id, "credential rotated"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal",
-			"the credential was rotated but could not be published to every node")
+		d.writeServiceError(w, r, actor, "credential.rotate", err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -531,19 +435,4 @@ func (d Deps) rejectSubject(
 		After: map[string]any{"reason": cause.Error()},
 	})
 	WriteError(w, http.StatusUnprocessableEntity, "validation", cause.Error())
-}
-
-func union(a, b []int64) []int64 {
-	seen := make(map[int64]struct{}, len(a)+len(b))
-	var out []int64
-	for _, list := range [][]int64{a, b} {
-		for _, id := range list {
-			if _, dup := seen[id]; dup {
-				continue
-			}
-			seen[id] = struct{}{}
-			out = append(out, id)
-		}
-	}
-	return out
 }

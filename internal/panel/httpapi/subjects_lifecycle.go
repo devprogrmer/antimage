@@ -1,13 +1,11 @@
 package httpapi
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
 
 	"github.com/amyrm/antimage/internal/panel/rbac"
-	"github.com/amyrm/antimage/internal/panel/subjects"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -46,28 +44,11 @@ func (d Deps) handleFreezeSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := subjects.NewStore(d.Store, d.Box, d.Now)
-	ctx := r.Context()
-
-	err = d.Store.Write(ctx, func(tx *sql.Tx) error {
-		return store.Freeze(ctx, tx, subjectID, req.Reason)
-	})
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			WriteError(w, http.StatusNotFound, "not_found", "subject not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+	if err := d.subjectService().SetFrozen(
+		r.Context(), d.svcActor(r, actor), subjectID, true, req.Reason); err != nil {
+		d.writeServiceError(w, r, actor, "subject.freeze", err)
 		return
 	}
-
-	// Republish affected nodes
-	if err := d.republishSubject(ctx, r, actor, subjectID, "subject frozen"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", "failed to republish nodes")
-		return
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -94,28 +75,11 @@ func (d Deps) handleUnfreezeSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := subjects.NewStore(d.Store, d.Box, d.Now)
-	ctx := r.Context()
-
-	err = d.Store.Write(ctx, func(tx *sql.Tx) error {
-		return store.Unfreeze(ctx, tx, subjectID)
-	})
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			WriteError(w, http.StatusNotFound, "not_found", "subject not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+	if err := d.subjectService().SetFrozen(
+		r.Context(), d.svcActor(r, actor), subjectID, false, ""); err != nil {
+		d.writeServiceError(w, r, actor, "subject.unfreeze", err)
 		return
 	}
-
-	// Republish affected nodes
-	if err := d.republishSubject(ctx, r, actor, subjectID, "subject unfrozen"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", "failed to republish nodes")
-		return
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -142,28 +106,13 @@ func (d Deps) handleDisableSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := subjects.NewStore(d.Store, d.Box, d.Now)
-	ctx := r.Context()
-
-	err = d.Store.Write(ctx, func(tx *sql.Tx) error {
-		return store.Disable(ctx, tx, subjectID)
-	})
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			WriteError(w, http.StatusNotFound, "not_found", "subject not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+	// Through the service: this path previously wrote no audit record at all,
+	// so a disable left no trace of who did it.
+	if err := d.subjectService().SetEnabled(
+		r.Context(), d.svcActor(r, actor), subjectID, false); err != nil {
+		d.writeServiceError(w, r, actor, "subject.disable", err)
 		return
 	}
-
-	// Republish affected nodes
-	if err := d.republishSubject(ctx, r, actor, subjectID, "subject disabled"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", "failed to republish nodes")
-		return
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -190,27 +139,10 @@ func (d Deps) handleEnableSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := subjects.NewStore(d.Store, d.Box, d.Now)
-	ctx := r.Context()
-
-	err = d.Store.Write(ctx, func(tx *sql.Tx) error {
-		return store.Enable(ctx, tx, subjectID)
-	})
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			WriteError(w, http.StatusNotFound, "not_found", "subject not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+	if err := d.subjectService().SetEnabled(
+		r.Context(), d.svcActor(r, actor), subjectID, true); err != nil {
+		d.writeServiceError(w, r, actor, "subject.enable", err)
 		return
 	}
-
-	// Republish affected nodes
-	if err := d.republishSubject(ctx, r, actor, subjectID, "subject enabled"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", "failed to republish nodes")
-		return
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }

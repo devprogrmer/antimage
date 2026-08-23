@@ -24,7 +24,7 @@ var testNow = time.Unix(1_700_000_000, 0).UTC()
 // actually woke the agents it should have.
 type recorder struct{ woken []int64 }
 
-func (r *recorder) Notify(nodeID, _ int64) { r.woken = append(r.woken, nodeID) }
+func (r *recorder) Notify(nodeID, _ int64) bool { r.woken = append(r.woken, nodeID); return true }
 
 type fixture struct {
 	db    *store.Store
