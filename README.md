@@ -214,38 +214,41 @@ antimage uses a **desired-state reconciliation** model. The panel publishes what
 
 ## Installation
 
-### Quick Start (Recommended)
+### Production Installation (Recommended)
 
-#### 1. Clone and Build
+**Zero npm/Node.js required for end users.**
 
-```bash
-git clone https://github.com/devprogrmer/antimage.git
-cd antimage
-```
+#### 1. Download Pre-Built Binary
 
-#### 2. Build Web UI
+Download the latest release for your platform from [GitHub Releases](https://github.com/devprogrmer/antimage/releases):
 
 ```bash
-cd web && npm ci && npm run build && cd ..
+# Linux x86-64
+wget https://github.com/devprogrmer/antimage/releases/download/v1.0.0/antimage-panel-linux-amd64
+wget https://github.com/devprogrmer/antimage/releases/download/v1.0.0/antimage-ctl-linux-amd64
+wget https://github.com/devprogrmer/antimage/releases/download/v1.0.0/SHA256SUMS
+
+# Verify checksums
+sha256sum -c SHA256SUMS --ignore-missing
+
+# Make executable
+chmod +x antimage-panel-linux-amd64 antimage-ctl-linux-amd64
 ```
 
-#### 3. Build Binaries
+> **Note**: Pre-built binaries contain the embedded web UI. No npm/Node.js installation required.
+
+#### 2. Install to System
 
 ```bash
-make build
-# Or without make:
-CGO_ENABLED=0 go build -trimpath -o bin/antimage-panel ./cmd/antimage-panel
-CGO_ENABLED=0 go build -trimpath -o bin/antimage-node  ./cmd/antimage-node
-CGO_ENABLED=0 go build -trimpath -o bin/antimage-ctl   ./cmd/antimage-ctl
+sudo mv antimage-panel-linux-amd64 /usr/local/bin/antimage-panel
+sudo mv antimage-ctl-linux-amd64 /usr/local/bin/antimage-ctl
 ```
 
-> **Note**: `CGO_ENABLED=0` produces static binaries with no libc dependency.
-
-#### 4. Start the Panel
+#### 3. Start the Panel
 
 ```bash
 sudo mkdir -p /var/lib/antimage && sudo chmod 700 /var/lib/antimage
-sudo ./bin/antimage-panel \
+sudo /usr/local/bin/antimage-panel \
   --data-dir /var/lib/antimage \
   --http :8080 \
   --grpc :8443 \
@@ -260,16 +263,65 @@ level=INFO msg="antimage-panel listening" http=:8080 grpc=:8443 ca_fingerprint=s
 
 > **Critical**: `--grpc-hosts` must match the DNS name agents use to connect.
 
-#### 5. Create First Admin
+#### 4. Create First Admin
 
 ```bash
-sudo ./bin/antimage-ctl --data-dir /var/lib/antimage \
+sudo /usr/local/bin/antimage-ctl --data-dir /var/lib/antimage \
   create-admin admin 'your-strong-passphrase' super_admin
 ```
 
-#### 6. Access Web UI
+#### 5. Access Web UI
 
-Open `http://localhost:8080` and sign in with the credentials from step 5.
+Open `http://SERVER_IP:8080` and sign in with the credentials from step 4.
+
+---
+
+### Development Installation
+
+**For contributors and developers only.**
+
+#### 1. Clone Repository
+
+```bash
+git clone https://github.com/devprogrmer/antimage.git
+cd antimage
+```
+
+#### 2. Build Frontend
+
+```bash
+cd web && npm install && npm run build && cd ..
+```
+
+#### 3. Build Binaries
+
+```bash
+CGO_ENABLED=0 go build -trimpath -o bin/antimage-panel ./cmd/antimage-panel
+CGO_ENABLED=0 go build -trimpath -o bin/antimage-node  ./cmd/antimage-node
+CGO_ENABLED=0 go build -trimpath -o bin/antimage-ctl   ./cmd/antimage-ctl
+```
+
+#### 4. Start Development Panel
+
+```bash
+sudo mkdir -p /var/lib/antimage && sudo chmod 700 /var/lib/antimage
+sudo ./bin/antimage-panel \
+  --data-dir /var/lib/antimage \
+  --http :8080 \
+  --grpc :8443 \
+  --grpc-hosts localhost
+```
+
+For frontend development with hot reload:
+
+```bash
+# Terminal 1: Start panel with dev proxy
+sudo ./bin/antimage-panel --dev-proxy http://localhost:5173 \
+  --data-dir /var/lib/antimage --http :8080 --grpc :8443
+
+# Terminal 2: Start Vite dev server
+cd web && npm run dev
+```
 
 ---
 
