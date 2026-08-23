@@ -94,5 +94,22 @@
   "bulk.extendMessage": "Продлить срок для",
   "bulk.quotaGB": "Квота (ГБ, 0 = без ограничений)",
   "bulk.quotaMessage": "Установить квоту для",
-  "confirm": "Подтвердить"
+  "confirm": "Подтвердить",
+  "nav.profile": "Профиль",
+  "profile.title": "Профиль",
+  "common.cancel": "Отмена",
+  "telegram.title": "Телеграм",
+  "telegram.description": "Управляйте пользователями через Telegram. Привязывается только этот аккаунт; ваши права не меняются.",
+  "telegram.link": "Привязать Telegram",
+  "telegram.linkHint": "Вы получите одноразовый код для отправки боту.",
+  "telegram.unlink": "Отвязать",
+  "telegram.unlinkHint": "Бот сразу перестанет принимать команды от этого аккаунта.",
+  "telegram.sendToBot": "Отправьте это сообщение боту:",
+  "telegram.expiresIn": "Истекает через",
+  "telegram.account": "Аккаунт",
+  "telegram.linkedAt": "Привязан",
+  "telegram.lastSeen": "Последнее использование",
+  "telegram.loadFailed": "Не удалось загрузить состояние Telegram.",
+  "telegram.issueFailed": "Не удалось создать код привязки.",
+  "telegram.unlinkFailed": "Не удалось отвязать аккаунт."
 }

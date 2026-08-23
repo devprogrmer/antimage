@@ -6,11 +6,12 @@ import { NodeDetail } from "./routes/NodeDetail";
 import { Observability } from "./routes/Observability";
 import { Subjects } from "./routes/Subjects";
 import { SubjectDetail } from "./routes/SubjectDetail";
+import { Profile } from "./routes/Profile";
 import { api } from "./lib/api";
 import { getLocale, locales, setLocale, t } from "./i18n";
 import type { Locale } from "./i18n";
 
-type Route = "dashboard" | "nodes" | "observability" | "subjects";
+type Route = "dashboard" | "nodes" | "observability" | "subjects" | "profile";
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
@@ -84,6 +85,16 @@ export default function App() {
           >
             {t("observability.title")}
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRoute("profile");
+              setSelected(null);
+            }}
+            className={route === "profile" ? "text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}
+          >
+            {t("nav.profile")}
+          </button>
         </nav>
         <select
           value={locale}
@@ -109,6 +120,8 @@ export default function App() {
       <main className="p-4">
         {route === "dashboard" ? (
           <Dashboard />
+        ) : route === "profile" ? (
+          <Profile />
         ) : route === "observability" ? (
           <Observability />
         ) : route === "subjects" ? (

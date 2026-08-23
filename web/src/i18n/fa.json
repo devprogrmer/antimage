@@ -94,5 +94,22 @@
   "bulk.extendMessage": "تمدید انقضا برای",
   "bulk.quotaGB": "سهمیه (گیگابایت، 0 = نامحدود)",
   "bulk.quotaMessage": "تنظیم سهمیه برای",
-  "confirm": "تأیید"
+  "confirm": "تأیید",
+  "nav.profile": "پروفایل",
+  "profile.title": "پروفایل",
+  "common.cancel": "انصراف",
+  "telegram.title": "تلگرام",
+  "telegram.description": "کاربران خود را از تلگرام مدیریت کنید. فقط همین حساب متصل می‌شود و دسترسی‌های شما تغییر نمی‌کند.",
+  "telegram.link": "اتصال تلگرام",
+  "telegram.linkHint": "یک کد یک‌بارمصرف دریافت می‌کنید تا برای ربات بفرستید.",
+  "telegram.unlink": "قطع اتصال",
+  "telegram.unlinkHint": "ربات بلافاصله دستورهای این حساب را نمی‌پذیرد.",
+  "telegram.sendToBot": "این پیام را برای ربات بفرستید:",
+  "telegram.expiresIn": "انقضا تا",
+  "telegram.account": "حساب",
+  "telegram.linkedAt": "زمان اتصال",
+  "telegram.lastSeen": "آخرین استفاده",
+  "telegram.loadFailed": "وضعیت تلگرام بارگیری نشد.",
+  "telegram.issueFailed": "ساخت کد اتصال ممکن نشد.",
+  "telegram.unlinkFailed": "قطع اتصال حساب ممکن نشد."
 }

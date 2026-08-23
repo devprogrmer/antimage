@@ -94,5 +94,22 @@
   "bulk.extendMessage": "延长到期时间",
   "bulk.quotaGB": "配额（GB，0 = 无限制）",
   "bulk.quotaMessage": "设置配额",
-  "confirm": "确认"
+  "confirm": "确认",
+  "nav.profile": "个人资料",
+  "profile.title": "个人资料",
+  "common.cancel": "取消",
+  "telegram.title": "电报",
+  "telegram.description": "通过 Telegram 管理用户。仅绑定此账号，您的权限不会改变。",
+  "telegram.link": "绑定 Telegram",
+  "telegram.linkHint": "您将获得一个一次性代码，发送给机器人。",
+  "telegram.unlink": "解除绑定",
+  "telegram.unlinkHint": "机器人将立即停止接受此账号的命令。",
+  "telegram.sendToBot": "将此消息发送给机器人：",
+  "telegram.expiresIn": "有效期剩余",
+  "telegram.account": "账号",
+  "telegram.linkedAt": "绑定时间",
+  "telegram.lastSeen": "最近使用",
+  "telegram.loadFailed": "无法加载 Telegram 状态。",
+  "telegram.issueFailed": "无法创建绑定代码。",
+  "telegram.unlinkFailed": "无法解除账号绑定。"
 }

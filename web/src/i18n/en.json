@@ -167,5 +167,22 @@
   "filters.unlimited": "Unlimited",
   "filters.expires_after": "Expires After",
   "filters.expires_before": "Expires Before",
-  "filters.clear_filters": "Clear Filters"
+  "filters.clear_filters": "Clear Filters",
+  "nav.profile": "Profile",
+  "profile.title": "Profile",
+  "common.cancel": "Cancel",
+  "telegram.title": "Telegram",
+  "telegram.description": "Manage your users from Telegram. Only this account is linked; your permissions are unchanged.",
+  "telegram.link": "Link Telegram",
+  "telegram.linkHint": "You will get a one-time code to send to the bot.",
+  "telegram.unlink": "Unlink",
+  "telegram.unlinkHint": "The bot stops accepting commands from this account immediately.",
+  "telegram.sendToBot": "Send this message to the bot:",
+  "telegram.expiresIn": "Expires in",
+  "telegram.account": "Account",
+  "telegram.linkedAt": "Linked",
+  "telegram.lastSeen": "Last used",
+  "telegram.loadFailed": "Could not load the Telegram status.",
+  "telegram.issueFailed": "Could not create a link code.",
+  "telegram.unlinkFailed": "Could not unlink the account."
 }

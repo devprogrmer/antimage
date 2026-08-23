@@ -94,5 +94,22 @@
   "bulk.extendMessage": "تمديد الصلاحية لـ",
   "bulk.quotaGB": "الحصة (جيجابايت، 0 = غير محدود)",
   "bulk.quotaMessage": "تعيين الحصة لـ",
-  "confirm": "تأكيد"
+  "confirm": "تأكيد",
+  "nav.profile": "الملف الشخصي",
+  "profile.title": "الملف الشخصي",
+  "common.cancel": "إلغاء",
+  "telegram.title": "تيليجرام",
+  "telegram.description": "أدر مستخدميك من تيليجرام. يُربط هذا الحساب فقط، وصلاحياتك لا تتغير.",
+  "telegram.link": "ربط تيليجرام",
+  "telegram.linkHint": "ستحصل على رمز لمرة واحدة لإرساله إلى البوت.",
+  "telegram.unlink": "إلغاء الربط",
+  "telegram.unlinkHint": "سيتوقف البوت فوراً عن قبول الأوامر من هذا الحساب.",
+  "telegram.sendToBot": "أرسل هذه الرسالة إلى البوت:",
+  "telegram.expiresIn": "ينتهي خلال",
+  "telegram.account": "الحساب",
+  "telegram.linkedAt": "تاريخ الربط",
+  "telegram.lastSeen": "آخر استخدام",
+  "telegram.loadFailed": "تعذّر تحميل حالة تيليجرام.",
+  "telegram.issueFailed": "تعذّر إنشاء رمز الربط.",
+  "telegram.unlinkFailed": "تعذّر إلغاء ربط الحساب."
 }
