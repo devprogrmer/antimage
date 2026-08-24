@@ -87,11 +87,44 @@ var serviceSchema = json.RawMessage(`{
   }
 }`)
 
+// outboundSchema validates Outbound.Params, exactly as serviceSchema validates
+// Service.Params.
+//
+// The kind enum is the honest list: these are the five Xray outbound protocols
+// this adapter renders. An operator cannot select one the adapter would refuse,
+// because a refused outbound is not a validation error at the panel -- it is an
+// Xray process that fails to start, taking every working inbound on the node
+// down with it.
+var outboundSchema = json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "address":         {"type": "string"},
+    "port":            {"type": "integer", "minimum": 1, "maximum": 65535},
+    "username":        {"type": "string"},
+    "password":        {"type": "string"},
+    "private_key":     {"type": "string"},
+    "peer_public_key": {"type": "string"},
+    "endpoint":        {"type": "string"},
+    "local_addresses": {"type": "array", "items": {"type": "string"}},
+    "mtu":             {"type": "integer", "minimum": 576, "maximum": 9000}
+  }
+}`)
+
+// OutboundKinds is the set of Outbound.Kind values this adapter can render.
+// Published so the panel can offer exactly these and no more.
+var OutboundKinds = []string{"direct", "block", "socks", "http", "wireguard"}
+
 func (a *Adapter) Descriptor() adapter.Descriptor {
 	return adapter.Descriptor{
 		Kind:    Kind,
 		Version: "1",
 		Caps: adapter.Caps{
+			// Xray has a full routing engine and named outbounds, so it can
+			// apply the egress half of a v3 document.
+			SupportsOutbounds: true,
+			SupportsRouting:   true,
+			OutboundSchema:    outboundSchema,
 			// Declared from the runtime's actual capability, not hardcoded.
 			// The panel records this at Hello so the UI can tell an operator
 			// BEFORE they click whether adding a user drops sessions.
@@ -249,6 +282,26 @@ func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
 			!strings.HasSuffix(name, fileSuffix) || strings.HasSuffix(name, appliedSuffix) {
 			continue
 		}
+		// Egress is node-scoped, so it carries no service id and must not go
+		// through the per-service path below -- which would try to parse
+		// "egress" as an int64, fail, and drop the file silently, leaving a
+		// hand edit to the routing table permanently undetected.
+		if name == egressFile {
+			raw, err := os.ReadFile(filepath.Join(a.dir, name))
+			if err != nil {
+				return obs, fmt.Errorf("read %s: %w", name, err)
+			}
+			body := string(raw)
+			_, managed := parseEgressMarker(body)
+			obs.Egress = &adapter.ObservedEgress{
+				Present: true,
+				Managed: managed,
+				// Computed from disk, not read from the marker: comparing the
+				// two is what catches an edit.
+				Checksum: checksumOf([]byte(payloadOf(body))),
+			}
+			continue
+		}
 		raw, err := os.ReadFile(filepath.Join(a.dir, name))
 		if err != nil {
 			return obs, fmt.Errorf("read %s: %w", name, err)
@@ -318,6 +371,10 @@ const (
 	// StepRestartService reapplies a config already on disk that the runtime
 	// never successfully loaded.
 	StepRestartService = "restart_service"
+	// Egress steps are node-scoped: they carry no ServiceID, because outbounds
+	// and routing belong to the node rather than to any one inbound.
+	StepWriteEgress  = "write_egress"
+	StepRemoveEgress = "remove_egress"
 )
 
 // Plan diffs desired against observed. It is pure and repeatable: it performs
@@ -474,7 +531,64 @@ func (a *Adapter) Plan(
 		})
 	}
 
+	egressStep, err := a.planEgress(desired, observed, seq)
+	if err != nil {
+		return adapter.Plan{}, err
+	}
+	if egressStep != nil {
+		plan.Steps = append(plan.Steps, *egressStep)
+	}
+
 	return plan, nil
+}
+
+// planEgress diffs the node's outbound and routing document.
+//
+// Every outcome is restart-class. Xray reads its confdir once at startup and
+// exposes no runtime API for outbounds or routing, so a change here is only
+// live after the process restarts. Reporting anything cheaper would tell the
+// panel a routing change had taken effect while traffic still followed the old
+// table.
+func (a *Adapter) planEgress(
+	desired adapter.Desired, observed adapter.Observed, seq int,
+) (*adapter.Step, error) {
+	rendered, err := GenerateEgressConfig(desired.Outbounds, desired.Routing)
+	if err != nil {
+		return nil, fmt.Errorf("generate egress config: %w", err)
+	}
+
+	// Nothing desired.
+	if rendered == nil {
+		if observed.Egress != nil && observed.Egress.Present && observed.Egress.Managed {
+			return &adapter.Step{
+				Seq: seq + 1, Kind: StepRemoveEgress,
+				Disruption: adapter.DisruptRestart,
+			}, nil
+		}
+		// Absent, or present but not ours. An unmanaged egress file is left
+		// alone for the same reason an unmanaged service file is: this adapter
+		// never overwrites something a human put there.
+		return nil, nil
+	}
+
+	want := checksumOf(rendered)
+
+	if observed.Egress != nil && observed.Egress.Present {
+		if !observed.Egress.Managed {
+			return nil, fmt.Errorf(
+				"%s exists but was not written by antimage; refusing to overwrite it. "+
+					"Move it aside to let the panel manage egress on this node", egressFile)
+		}
+		if observed.Egress.Checksum == want {
+			return nil, nil // converged
+		}
+	}
+
+	return &adapter.Step{
+		Seq: seq + 1, Kind: StepWriteEgress,
+		Disruption: adapter.DisruptRestart,
+		Payload:    mustPayload(stepPayload{Config: string(rendered)}),
+	}, nil
 }
 
 // userDelta reports whether the only difference is the user set, and what
@@ -625,6 +739,32 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		// Recorded only after the runtime is actually serving it.
 		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config)), p.Users); err != nil {
 			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
+		}
+
+	case StepWriteEgress:
+		if err := a.writeEgress([]byte(p.Config)); err != nil {
+			return fail(err)
+		}
+		// Xray reads outbounds and routing once, at startup. Without the
+		// restart the file is correct and the running process still routes by
+		// the previous table, which is the failure mode the applied sidecar
+		// exists to prevent elsewhere: converged on disk, wrong in memory.
+		if err := a.ensureStatsConfig(ctx); err != nil {
+			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
+		if err := a.rt.Restart(ctx); err != nil {
+			return fail(fmt.Errorf("restart after writing egress: %w", err))
+		}
+
+	case StepRemoveEgress:
+		if err := os.Remove(filepath.Join(a.dir, egressFile)); err != nil && !os.IsNotExist(err) {
+			return fail(fmt.Errorf("remove %s: %w", egressFile, err))
+		}
+		if err := a.ensureStatsConfig(ctx); err != nil {
+			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
+		if err := a.rt.Restart(ctx); err != nil {
+			return fail(fmt.Errorf("restart after removing egress: %w", err))
 		}
 
 	case StepRestartService:
@@ -794,3 +934,42 @@ func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
 
 // compile-time proof that the contract is satisfied.
 var _ adapter.Adapter = (*Adapter)(nil)
+
+// writeEgress installs the node-scoped outbound and routing document.
+//
+// Same atomic write as writeService -- temp file, sync, chmod, rename -- so a
+// crash mid-write leaves either the old document or the new one, never a
+// truncated file that would stop Xray from starting and take every inbound on
+// the node down with it.
+func (a *Adapter) writeEgress(rendered []byte) error {
+	if err := os.MkdirAll(a.dir, 0o700); err != nil {
+		return fmt.Errorf("create xray confdir: %w", err)
+	}
+	body := egressMarker(checksumOf(rendered)) + "\n" + string(rendered)
+
+	tmp, err := os.CreateTemp(a.dir, filePrefix+"*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp egress config: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed
+
+	if _, err := tmp.WriteString(body); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp egress config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temp egress config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp egress config: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		return fmt.Errorf("chmod temp egress config: %w", err)
+	}
+	if err := os.Rename(tmpName, filepath.Join(a.dir, egressFile)); err != nil {
+		return fmt.Errorf("install egress config: %w", err)
+	}
+	return nil
+}
