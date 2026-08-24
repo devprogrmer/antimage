@@ -2,6 +2,7 @@ package xray
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,9 +10,36 @@ import (
 )
 
 // mockRuntime for testing connection tracker
+// Guarded by a mutex: StartEnforcement runs EnforcementLoop on its own
+// goroutine, which calls QueryStats and RemoveUser while the test writes
+// stats from the test goroutine. The unsynchronised access was a genuine
+// race, not a detector artefact.
 type mockRuntime struct {
+	mu          sync.Mutex
 	stats       []UserStat
 	removedUser map[string]bool // track which users were removed
+}
+
+// setStats replaces the reported stats. Tests use this rather than assigning
+// the field, so the write is ordered against the loop goroutine.
+func (m *mockRuntime) setStats(stats []UserStat) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stats = stats
+}
+
+// appendStats adds to the reported stats under the same lock.
+func (m *mockRuntime) appendStats(stats ...UserStat) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stats = append(m.stats, stats...)
+}
+
+// wasRemoved reports whether the loop removed a user.
+func (m *mockRuntime) wasRemoved(email string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.removedUser[email]
 }
 
 func (m *mockRuntime) Available(ctx context.Context) error { return nil }
@@ -21,6 +49,8 @@ func (m *mockRuntime) AddUser(ctx context.Context, tag string, u User, protocol 
 }
 
 func (m *mockRuntime) RemoveUser(ctx context.Context, tag, email string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.removedUser == nil {
 		m.removedUser = make(map[string]bool)
 	}
@@ -35,7 +65,13 @@ func (m *mockRuntime) Healthy(ctx context.Context) (bool, string) {
 }
 
 func (m *mockRuntime) QueryStats(ctx context.Context) ([]UserStat, error) {
-	return m.stats, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// A copy: handing out the slice would let the caller read it after the
+	// lock is released, which is the same race one level removed.
+	out := make([]UserStat, len(m.stats))
+	copy(out, m.stats)
+	return out, nil
 }
 
 func TestConnectionTracker(t *testing.T) {
@@ -91,7 +127,7 @@ func TestConnectionTracker(t *testing.T) {
 		tracker.Sync(ctx, "test-inbound")
 
 		// Add second connection
-		runtime.stats = append(runtime.stats,
+		runtime.appendStats(
 			UserStat{Email: "subject-1@antimage", Uplink: 500, Downlink: 1000})
 
 		// This should succeed (connection 2)
@@ -134,7 +170,7 @@ func TestConnectionTracker(t *testing.T) {
 		}
 
 		// Verify the user was removed from Xray
-		if !runtime.removedUser["subject-1@antimage"] {
+		if !runtime.wasRemoved("subject-1@antimage") {
 			t.Error("expected violating user to be removed from Xray")
 		}
 
@@ -171,7 +207,7 @@ func TestConnectionTracker(t *testing.T) {
 		}
 
 		// Remove from stats (simulate disconnect)
-		runtime.stats = []UserStat{}
+		runtime.setStats(nil)
 
 		// Sync again
 		tracker.Sync(ctx, "test-inbound")

@@ -30,9 +30,9 @@ func TestEndToEndConnectionLimitEnforcement(t *testing.T) {
 		})
 
 		// Step 2: First connection arrives
-		runtime.stats = []UserStat{
+		runtime.setStats([]UserStat{
 			{Email: "subject-1@antimage", Uplink: 1000, Downlink: 2000},
-		}
+		})
 		tracker.Sync(ctx, "test-inbound")
 
 		// Verify: Connection registered
@@ -41,7 +41,7 @@ func TestEndToEndConnectionLimitEnforcement(t *testing.T) {
 		}
 
 		// Step 3: Second connection arrives
-		runtime.stats = append(runtime.stats, UserStat{
+		runtime.appendStats(UserStat{
 			Email: "subject-1@antimage-2", Uplink: 500, Downlink: 1000,
 		})
 		tracker.Sync(ctx, "test-inbound")
@@ -52,14 +52,14 @@ func TestEndToEndConnectionLimitEnforcement(t *testing.T) {
 		}
 
 		// Step 4: Third connection attempt (exceeds limit)
-		runtime.stats = append(runtime.stats, UserStat{
+		runtime.appendStats(UserStat{
 			Email: "subject-1@antimage-3", Uplink: 100, Downlink: 200,
 		})
 
 		tracker.Sync(ctx, "test-inbound")
 
 		// Verify: Third connection was terminated
-		if runtime.removedUser == nil || !runtime.removedUser["subject-1@antimage-3"] {
+		if !runtime.wasRemoved("subject-1@antimage-3") {
 			t.Error("expected third connection to be terminated due to limit")
 		}
 
@@ -269,9 +269,9 @@ func TestEndToEndDeviceRevocation(t *testing.T) {
 	})
 
 	// Step 2: Register connection
-	runtime.stats = []UserStat{
+	runtime.setStats([]UserStat{
 		{Email: "subject-1@antimage", Uplink: 1000, Downlink: 2000},
-	}
+	})
 
 	tracker.Sync(ctx, "test-inbound")
 
@@ -289,9 +289,9 @@ func TestEndToEndDeviceRevocation(t *testing.T) {
 	}
 
 	// Step 4: Verify reconnection attempt without policy is not tracked
-	runtime.stats = []UserStat{
+	runtime.setStats([]UserStat{
 		{Email: "subject-1@antimage", Uplink: 2000, Downlink: 4000},
-	}
+	})
 
 	// Reset tracker state so it sees this as a "new" connection
 	tracker.Reset()
@@ -333,9 +333,9 @@ func TestRuntimeEnforcementIntegration(t *testing.T) {
 		})
 
 		// Simulate connection arriving
-		runtime.stats = []UserStat{
+		runtime.setStats([]UserStat{
 			{Email: "subject-1@antimage", Uplink: 1000, Downlink: 2000},
-		}
+		})
 
 		// Wait for at least one enforcement cycle
 		time.Sleep(150 * time.Millisecond)
