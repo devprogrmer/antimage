@@ -118,6 +118,29 @@ type Adapter struct {
 
 func New(dir string, rt Runtime) *Adapter { return &Adapter{dir: dir, rt: rt} }
 
+// outboundSchema validates Outbound.Params, as serviceSchema validates
+// Service.Params. Identical in shape to the Xray adapter's, because the
+// document's outbound vocabulary is the panel's rather than any one proxy's --
+// the per-proxy differences are handled when rendering, not when validating.
+var outboundSchema = json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "address":         {"type": "string"},
+    "port":            {"type": "integer", "minimum": 1, "maximum": 65535},
+    "username":        {"type": "string"},
+    "password":        {"type": "string"},
+    "private_key":     {"type": "string"},
+    "peer_public_key": {"type": "string"},
+    "endpoint":        {"type": "string"},
+    "local_addresses": {"type": "array", "items": {"type": "string"}},
+    "mtu":             {"type": "integer", "minimum": 576, "maximum": 9000}
+  }
+}`)
+
+// OutboundKinds is the set of Outbound.Kind values this adapter can render.
+var OutboundKinds = []string{"direct", "block", "socks", "http", "wireguard"}
+
 var serviceSchema = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -152,6 +175,11 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			RequiresPKI:     false,
 			CredentialKinds: []adapter.CredentialKind{"uuid", "password"},
 			ServiceSchema:   serviceSchema,
+			// sing-box has a full route block with named outbounds, so it can
+			// apply the egress half of a v3 document.
+			SupportsOutbounds: true,
+			SupportsRouting:   true,
+			OutboundSchema:    outboundSchema,
 		},
 	}
 }
@@ -210,6 +238,26 @@ func (a *Adapter) Observe(_ context.Context) (adapter.Observed, error) {
 			!strings.HasSuffix(name, fileSuffix) || strings.HasSuffix(name, markerSuffix) {
 			continue
 		}
+		// Egress is node-scoped and carries no service id, so it must be read
+		// before the numeric parse below -- which would fail on "egress" and
+		// skip the file, leaving a hand edit to the routing table permanently
+		// invisible.
+		if name == egressFile {
+			body, err := os.ReadFile(filepath.Join(a.dir, name))
+			if err != nil {
+				return obs, fmt.Errorf("read %s: %w", name, err)
+			}
+			eg := adapter.ObservedEgress{Present: true}
+			if _, err := os.Stat(a.egressMarkerPath()); err == nil {
+				eg.Managed = true
+				// From disk, not from the marker: comparing the two is what
+				// catches an edit.
+				eg.Checksum = checksumOf(body)
+			}
+			obs.Egress = &eg
+			continue
+		}
+
 		trimmed := strings.TrimSuffix(strings.TrimPrefix(name, filePrefix), fileSuffix)
 		id, err := strconv.ParseInt(trimmed, 10, 64)
 		if err != nil {
@@ -243,6 +291,10 @@ const (
 	// StepRestartService reapplies a config already on disk that the runtime
 	// never successfully loaded.
 	StepRestartService = "restart_service"
+	// Egress steps are node-scoped: no ServiceID, because outbounds and
+	// routing belong to the node rather than to any one inbound.
+	StepWriteEgress  = "write_egress"
+	StepRemoveEgress = "remove_egress"
 )
 
 // Plan diffs desired against observed. Pure and repeatable.
@@ -339,6 +391,14 @@ func (a *Adapter) Plan(
 		})
 	}
 
+	egressStep, err := a.planEgress(desired, observed, seq)
+	if err != nil {
+		return adapter.Plan{}, err
+	}
+	if egressStep != nil {
+		plan.Steps = append(plan.Steps, *egressStep)
+	}
+
 	return plan, nil
 }
 
@@ -407,6 +467,25 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		// Recorded only after the runtime is actually serving it.
 		if err := a.recordApplied(step.ServiceID, checksumOf([]byte(p.Config))); err != nil {
 			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
+		}
+
+	case StepWriteEgress:
+		if err := a.writeEgress([]byte(p.Config)); err != nil {
+			return fail(err)
+		}
+		// sing-box reads outbounds and routing only at startup. Without the
+		// restart the file is correct and the running process still routes by
+		// the previous table -- converged on disk, wrong in memory.
+		if err := a.rt.Restart(ctx); err != nil {
+			return fail(fmt.Errorf("restart after writing egress: %w", err))
+		}
+
+	case StepRemoveEgress:
+		if err := a.removeEgress(); err != nil {
+			return fail(err)
+		}
+		if err := a.rt.Restart(ctx); err != nil {
+			return fail(fmt.Errorf("restart after removing egress: %w", err))
 		}
 
 	case StepRestartService:
@@ -492,3 +571,82 @@ func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
+
+// egressPath is the node-scoped outbound and routing document.
+func (a *Adapter) egressPath() string { return filepath.Join(a.dir, egressFile) }
+
+// egressMarkerPath is the sidecar proving this adapter wrote the egress file.
+//
+// A sidecar rather than a marker line, for the same reason service files use
+// one: sing-box parses every .json in its config directory strictly and would
+// reject a leading comment.
+func (a *Adapter) egressMarkerPath() string { return a.egressPath() + markerSuffix }
+
+// planEgress diffs the node's outbound and routing document.
+//
+// Every outcome is restart-class. sing-box reads its config directory once at
+// startup and exposes no management API for outbounds or routing, so a change
+// here is only live after the process restarts.
+func (a *Adapter) planEgress(
+	desired adapter.Desired, observed adapter.Observed, seq int,
+) (*adapter.Step, error) {
+	rendered, err := GenerateEgressConfig(desired.Outbounds, desired.Routing)
+	if err != nil {
+		return nil, fmt.Errorf("generate egress config: %w", err)
+	}
+
+	if rendered == nil {
+		if observed.Egress != nil && observed.Egress.Present && observed.Egress.Managed {
+			return &adapter.Step{
+				Seq: seq + 1, Kind: StepRemoveEgress,
+				Disruption: adapter.DisruptRestart,
+			}, nil
+		}
+		return nil, nil
+	}
+
+	want := checksumOf(rendered)
+
+	if observed.Egress != nil && observed.Egress.Present {
+		if !observed.Egress.Managed {
+			return nil, fmt.Errorf(
+				"%s exists but was not written by antimage; refusing to overwrite it. "+
+					"Move it aside to let the panel manage egress on this node", egressFile)
+		}
+		if observed.Egress.Checksum == want {
+			return nil, nil // converged
+		}
+	}
+
+	return &adapter.Step{
+		Seq: seq + 1, Kind: StepWriteEgress,
+		Disruption: adapter.DisruptRestart,
+		Payload:    mustPayload(stepPayload{Config: string(rendered)}),
+	}, nil
+}
+
+// writeEgress installs the egress document and its marker atomically.
+func (a *Adapter) writeEgress(rendered []byte) error {
+	if err := os.MkdirAll(a.dir, 0o700); err != nil {
+		return fmt.Errorf("create sing-box config dir: %w", err)
+	}
+	if err := writeFileAtomic(a.dir, a.egressPath(), rendered); err != nil {
+		return err
+	}
+	return writeFileAtomic(a.dir, a.egressMarkerPath(), []byte(checksumOf(rendered)+"\n"))
+}
+
+// removeEgress drops the document and its marker.
+//
+// The marker goes too: leaving it behind would make a later hand-written
+// egress file look managed, and this adapter would then overwrite something a
+// human put there.
+func (a *Adapter) removeEgress() error {
+	if err := os.Remove(a.egressPath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", egressFile, err)
+	}
+	if err := os.Remove(a.egressMarkerPath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove egress marker: %w", err)
+	}
+	return nil
+}
