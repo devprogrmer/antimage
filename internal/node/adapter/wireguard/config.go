@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"golang.org/x/crypto/curve25519"
 )
 
 // ServiceParams are the operator-supplied settings for a WireGuard service.
@@ -47,20 +49,8 @@ func (p ServiceParams) Validate() error {
 }
 
 // PublicKey derives the WireGuard public key from the private key.
-// Note: This requires golang.org/x/crypto/curve25519 which may not be available.
-// For production, use `wg pubkey` command or the wireguard-go library.
 func (p ServiceParams) PublicKey() (string, error) {
-	// Simplified implementation - in production, shell out to `wg pubkey`
-	// or use proper WireGuard key derivation library
-	privBytes, err := base64.StdEncoding.DecodeString(p.PrivateKey)
-	if err != nil {
-		return "", fmt.Errorf("decode private key: %w", err)
-	}
-	if len(privBytes) != 32 {
-		return "", fmt.Errorf("private key must be 32 bytes, got %d", len(privBytes))
-	}
-	// For now, just return a placeholder - real implementation would use curve25519
-	return "", fmt.Errorf("public key derivation not implemented - use wg command")
+	return PublicKeyFromPrivate(p.PrivateKey)
 }
 
 // PeerConfig describes a single WireGuard peer (client).
@@ -198,8 +188,22 @@ func AllocatePeerIP(subnet string, subjectID int64) (string, error) {
 	return fmt.Sprintf("%s/32", ip.String()), nil
 }
 
-// PublicKeyFromPrivate is a convenience wrapper for deriving public keys.
+// PublicKeyFromPrivate derives a WireGuard public key from a base64 private key.
+// WireGuard keys are curve25519 keys, so the public key is the private scalar
+// multiplied by the curve basepoint, matching `wg pubkey`.
 func PublicKeyFromPrivate(privateKey string) (string, error) {
-	p := ServiceParams{PrivateKey: privateKey, Port: 51820, Subnet: "10.0.0.1/24"}
-	return p.PublicKey()
+	privBytes, err := base64.StdEncoding.DecodeString(privateKey)
+	if err != nil {
+		return "", fmt.Errorf("decode private key: %w", err)
+	}
+	if len(privBytes) != curve25519.ScalarSize {
+		return "", fmt.Errorf("private key must be %d bytes, got %d", curve25519.ScalarSize, len(privBytes))
+	}
+
+	pubBytes, err := curve25519.X25519(privBytes, curve25519.Basepoint)
+	if err != nil {
+		return "", fmt.Errorf("derive public key: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(pubBytes), nil
 }

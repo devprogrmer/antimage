@@ -37,6 +37,7 @@ Successfully implemented complete WireGuard VPN adapter for antimage node agent,
 ✅ wg-quick configuration generation
 ✅ Hot peer add/remove via `wg syncconf`
 ✅ Deterministic peer IP allocation from subnet
+✅ Curve25519 public key derivation from private key (no `wg` binary needed)
 ✅ Traffic accounting via `wg show transfer`
 ✅ Drift detection and repair
 ✅ Interface lifecycle management
@@ -155,7 +156,6 @@ Panel → Desired State → Node Agent
 
 ## Known Limitations
 
-- Public key derivation not implemented (use `wg pubkey` externally)
 - Apply() requires desired state context (reconciler provides this)
 - Traffic accounting interface defined but not fully implemented
 - No IPv6 support yet

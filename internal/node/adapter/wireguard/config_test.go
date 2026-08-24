@@ -78,6 +78,78 @@ func TestServiceParams_Validate(t *testing.T) {
 	}
 }
 
+// RFC 7748 section 6.1 X25519 test vector, cross-checked against the Go
+// standard library's own vector in crypto/ecdh/ecdh_test.go. WireGuard keys are
+// curve25519 keys in base64, so the same pair applies here.
+const (
+	rfc7748PrivateKey = "dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo="
+	rfc7748PublicKey  = "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo="
+)
+
+func TestServiceParams_PublicKey(t *testing.T) {
+	params := ServiceParams{
+		Port:       51820,
+		Subnet:     "10.8.0.1/24",
+		PrivateKey: rfc7748PrivateKey,
+	}
+
+	got, err := params.PublicKey()
+	if err != nil {
+		t.Fatalf("PublicKey() error = %v, want nil", err)
+	}
+	if got != rfc7748PublicKey {
+		t.Errorf("PublicKey() = %q, want %q", got, rfc7748PublicKey)
+	}
+}
+
+func TestServiceParams_PublicKey_Errors(t *testing.T) {
+	tests := []struct {
+		name       string
+		privateKey string
+	}{
+		{name: "empty private key", privateKey: ""},
+		{name: "not base64", privateKey: "this is not base64!!!!!!!!!!!!!!!!!!!!!!!!!!"},
+		{name: "decodes to wrong length", privateKey: "YWJj"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params := ServiceParams{Port: 51820, Subnet: "10.8.0.1/24", PrivateKey: tt.privateKey}
+			got, err := params.PublicKey()
+			if err == nil {
+				t.Fatalf("PublicKey() error = nil, want error (got key %q)", got)
+			}
+			if got != "" {
+				t.Errorf("PublicKey() = %q, want empty string on error", got)
+			}
+		})
+	}
+}
+
+func TestPublicKeyFromPrivate(t *testing.T) {
+	got, err := PublicKeyFromPrivate(rfc7748PrivateKey)
+	if err != nil {
+		t.Fatalf("PublicKeyFromPrivate() error = %v, want nil", err)
+	}
+	if got != rfc7748PublicKey {
+		t.Errorf("PublicKeyFromPrivate() = %q, want %q", got, rfc7748PublicKey)
+	}
+}
+
+func TestPublicKeyFromPrivate_Deterministic(t *testing.T) {
+	first, err := PublicKeyFromPrivate(rfc7748PrivateKey)
+	if err != nil {
+		t.Fatalf("PublicKeyFromPrivate() error = %v", err)
+	}
+	second, err := PublicKeyFromPrivate(rfc7748PrivateKey)
+	if err != nil {
+		t.Fatalf("PublicKeyFromPrivate() error = %v", err)
+	}
+	if first != second {
+		t.Errorf("PublicKeyFromPrivate() not deterministic: %q vs %q", first, second)
+	}
+}
+
 func TestGenerateConfig(t *testing.T) {
 	params := ServiceParams{
 		Port:       51820,
