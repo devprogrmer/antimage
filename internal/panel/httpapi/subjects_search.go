@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/amyrm/antimage/internal/panel/store"
 )
 
 // SubjectListV2Response includes pagination metadata.
@@ -19,6 +22,19 @@ type SubjectListV2Response struct {
 // handleListSubjectsV2 returns a paginated, searchable, filterable list of subjects.
 // GET /api/v2/subjects?page=1&page_size=50&search=john&status=active&expires_before=2026-12-31&expires_after=2026-01-01
 func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
+	// This route had neither guard. It was not a live leak only because it
+	// also selected columns that do not exist and scanned six of the eleven it
+	// asked for, so it returned 500 on every call. Repairing the SQL without
+	// adding both would have turned a broken endpoint into a paginated,
+	// searchable dump of every tenant's customers.
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
 	// Parse pagination
 	page := 1
 	if p := r.URL.Query().Get("page"); p != "" {
@@ -43,9 +59,11 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	expiresAfterStr := strings.TrimSpace(r.URL.Query().Get("expires_after"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 
-	// Build query
-	conditions := []string{"1=1"}
-	args := []interface{}{}
+	// Build query. The scope predicate goes in first so its bound parameters
+	// lead the argument list, and it is a constant from the store package --
+	// never assembled here, so no filter written below can widen it.
+	conditions := []string{store.SubjectScopeSQL}
+	args := append([]any{}, store.ScopeArgs(rbac.ScopeOf(actor))...)
 
 	if search != "" {
 		conditions = append(conditions, "(name LIKE ? OR note LIKE ?)")
@@ -55,12 +73,14 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 
 	if statusFilter != "" {
 		switch statusFilter {
+		// `enabled` carries the inverted sense of the API's "disabled", and
+		// `frozen_at` is a nullable timestamp rather than a flag.
 		case "active":
-			conditions = append(conditions, "disabled = 0 AND frozen = 0")
+			conditions = append(conditions, "enabled = 1 AND frozen_at IS NULL")
 		case "disabled":
-			conditions = append(conditions, "disabled = 1")
+			conditions = append(conditions, "enabled = 0")
 		case "frozen":
-			conditions = append(conditions, "frozen = 1")
+			conditions = append(conditions, "frozen_at IS NOT NULL")
 		case "expired":
 			conditions = append(conditions, "expires_at IS NOT NULL AND expires_at <= ?")
 			args = append(args, time.Now().Unix())
@@ -119,7 +139,11 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		whereClause = strings.Join(conditions, " AND ")
 	}
 
-	baseQuery := "SELECT id, name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at FROM subjects WHERE " + whereClause
+	// Exactly the columns subjectDTO carries, in scan order. The previous
+	// version selected eleven and scanned six, which is a guaranteed error
+	// even once the column names are real. subscription_token is deliberately
+	// absent: it is a credential, and a list endpoint must not hand one out.
+	baseQuery := "SELECT id, name, note, enabled, expires_at, expired_at, created_at FROM subjects WHERE " + whereClause
 
 	// Count total
 	countQuery := "SELECT COUNT(*) FROM (" + baseQuery + ") AS filtered"
@@ -167,7 +191,7 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		var expiresAt, expiredAt *int64
 		var note string
 
-		err := rows.Scan(&id, &name, &note, &enabled, &expiresAt, &createdAt)
+		err := rows.Scan(&id, &name, &note, &enabled, &expiresAt, &expiredAt, &createdAt)
 		if err != nil {
 			http.Error(w, "failed to scan subject", http.StatusInternalServerError)
 			return

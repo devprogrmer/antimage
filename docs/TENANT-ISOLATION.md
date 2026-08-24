@@ -74,7 +74,8 @@ All 21 subject-bearing routes, plus device revoke.
 | `/subjects/{id}/connections` | GET | `subject:read` | `requireSubjectInScope` |
 | `/subjects/{id}/enforcement` | GET | `subject:read` | `requireSubjectInScope` |
 | `/subjects/export` | GET | `subject:read` | `SubjectScopeSQL` in the query |
-| `/subjects/import` | POST | `subject:write` | none — see gap 1, imports are platform-owned |
+| `/subjects/import` | POST | `subject:write` (+ `reseller:write` to name an owner) | ownership assigned via `ProvisionSubject` |
+| `/v2/subjects` | GET | `subject:read` | `SubjectScopeSQL` in the query |
 | `/subjects/bulk/enable` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/subjects/bulk/delete` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/subjects/bulk/extend` | POST | `subject:write` | `scopeFilterSubjectIDs` |
@@ -121,6 +122,8 @@ Reseller-side reads are scoped by `resellerScopePredicate`:
 | `httpapi/subject_surface_isolation_test.go` | Every remaining endpoint: devices, connections, enforcement, disable, freeze, bulk, export |
 | `httpapi/subject_bulk_permission_test.go` | The bulk endpoints' permission gate, independent of scope: an owner without `subject:write` is refused, the check precedes body parsing, and a holder of `subject:write` still passes |
 | `httpapi/subjects_bulk_schema_test.go` | That bulk, export and import actually reach the database: real column writes, the delete republish, CSV round-trip |
+| `httpapi/subjects_import_owner_test.go` | Import ownership: rows land on the named reseller and become visible to them, the ledger is debited, a tenant cannot name an owner, replays are recognised |
+| `httpapi/subjects_search_test.go` | `/v2/subjects` returns real rows and stays scoped under every filter, sort and page size |
 | `rbac/reseller_perm_test.go` | Privilege separation of `credit:grant`; reseller holds no tenancy permissions |
 | `resellers/resellers_test.go` | Ledger invariants, atomic provisioning, idempotency |
 
@@ -128,15 +131,29 @@ All mutation-verified: reverting a guard makes a named test fail.
 
 ## Known gaps
 
-1. **`POST /subjects/import` is not scoped.** It creates subjects and does not
-   assign ownership, so imported rows are platform-owned and invisible to every
-   tenant. Not a leak, but a reseller cannot use it and an admin import will not
-   belong to anyone. Needs an owner parameter before resellers go live.
+1. **CLOSED.** Import assigned no ownership, so every imported row was
+   platform-owned and invisible to every tenant. It now takes an optional
+   `reseller_id`, and when set, each row is created through
+   `ProvisionSubject` — the same path the ordinary provisioning flow uses — so
+   ownership, the reseller's ceilings, the credit floor and the ledger debit
+   all apply in the transaction that creates the subject.
 
-   Now reachable: gap 4 made import actually work, where before it failed at
-   SQL on every row. It requires `subject:write`, so only an actor who could
-   already create subjects can reach it — but a reseller who imports will not
-   see what they imported.
+   Naming an owner requires **`reseller:write`** on top of `subject:write`.
+   Deciding whose account a customer lands on is a billing decision, and a
+   tenant who could name their own id would be provisioning onto their own
+   account at a cost they also chose. `TestImportOwnerRequiresResellerWrite`
+   holds that line.
+
+   Import also no longer inserts rows by hand. It goes through
+   `subjects.Create`, so credentials are sealed and services granted; the raw
+   INSERT it replaced produced subjects that could not authenticate and
+   appeared on no node. `SubscriptionToken` is deliberately not imported —
+   tokens are issued lazily by `subjects/tokens.go` and carry a UNIQUE index,
+   so replaying an exported one would collide or clone a live credential.
+
+   Retries are safe: the idempotency key is derived from the CSV body and the
+   row name, so re-POSTing an identical import is recognised as a replay rather
+   than charged again.
 2. **CLOSED.** Bulk endpoints had no permission check, only the scope filter.
    All five now call `d.authorize(..., PermSubjectWrite, ...)` before reading
    the request body. The actor that exposed this owns a subject but holds no
