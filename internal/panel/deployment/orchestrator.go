@@ -3,6 +3,7 @@ package deployment
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -426,7 +427,7 @@ func (o *Orchestrator) getPendingNodes(ctx context.Context, deploymentID int64) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var nodeIDs []int64
 	for rows.Next() {
@@ -470,7 +471,7 @@ func (o *Orchestrator) initiateRollback(ctx context.Context, deploymentID int64)
 	if err != nil {
 		return fmt.Errorf("query deployed nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var nodeIDs []int64
 	for rows.Next() {
@@ -503,7 +504,7 @@ func (o *Orchestrator) initiateRollback(ctx context.Context, deploymentID int64)
 		 AND revision < ?
 		 ORDER BY revision DESC LIMIT 1`,
 		deploymentID, deployment.RevisionID).Scan(&previousRevision)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		// No previous revision, cannot rollback
 		return fmt.Errorf("no previous revision found for rollback")
 	}

@@ -3,6 +3,7 @@ package devices
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -149,7 +150,7 @@ func TestRegisterDevice(t *testing.T) {
 			_, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-003", "Device 3", "192.168.1.1", "Agent")
 			return err
 		})
-		if err != ErrDeviceLimitReached {
+		if !errors.Is(err, ErrDeviceLimitReached) {
 			t.Errorf("expected ErrDeviceLimitReached, got %v", err)
 		}
 	})
@@ -178,7 +179,7 @@ func TestRegisterDevice(t *testing.T) {
 			_, err := deviceStore.RegisterDevice(ctx, tx, subjectID, "hwid-revoke", "Device", "192.168.1.1", "Agent")
 			return err
 		})
-		if err != ErrDeviceRevoked {
+		if !errors.Is(err, ErrDeviceRevoked) {
 			t.Errorf("expected ErrDeviceRevoked, got %v", err)
 		}
 	})
@@ -249,7 +250,7 @@ func TestCheckIPLimit(t *testing.T) {
 
 		// Try to connect from 3rd IP - should fail
 		err := deviceStore.CheckIPLimit(ctx, subjectID, "192.168.1.3")
-		if err != ErrIPLimitReached {
+		if !errors.Is(err, ErrIPLimitReached) {
 			t.Errorf("expected ErrIPLimitReached, got %v", err)
 		}
 	})
@@ -301,7 +302,7 @@ func TestCheckConnectionLimit(t *testing.T) {
 
 		// Try to open 4th connection - should fail
 		err := deviceStore.CheckConnectionLimit(ctx, subjectID)
-		if err != ErrConnectionLimit {
+		if !errors.Is(err, ErrConnectionLimit) {
 			t.Errorf("expected ErrConnectionLimit, got %v", err)
 		}
 	})

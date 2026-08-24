@@ -19,7 +19,7 @@ func (o *Orchestrator) RecoverStaleDeployments(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("query stale deployments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var id int64

@@ -76,7 +76,7 @@ func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request
 		http.Error(w, "database error", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var runs []map[string]interface{}
 	for rows.Next() {
@@ -103,6 +103,10 @@ func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request
 		}
 		runs = append(runs, run)
 	}
+	if err := rows.Err(); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not read rows")
+		return
+	}
 
 	response := map[string]interface{}{
 		"node_id":          nodeID,
@@ -123,5 +127,5 @@ func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }

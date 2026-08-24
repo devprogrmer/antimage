@@ -233,9 +233,8 @@ func (in Inbound) Generate(users []User) ([]byte, error) {
 		}
 		// XTLS flow is valid on VLESS with TCP transport and TLS/Reality security
 		if in.Protocol == VLESS && in.Network == TCP {
-			if in.Security == SecurityTLS {
-				entry.Flow = "xtls-rprx-vision"
-			} else if in.Security == SecurityReality {
+			switch in.Security {
+			case SecurityTLS, SecurityReality:
 				entry.Flow = "xtls-rprx-vision"
 			}
 		}

@@ -136,6 +136,9 @@ func TestCodesAreStoredHashedNotPlaintext(t *testing.T) {
 			t.Errorf("stored value is %d bytes, want a 32-byte sha256", len(stored))
 		}
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate codes: %v", err)
+	}
 	if n == 0 {
 		t.Fatal("no codes stored; this test would pass vacuously")
 	}

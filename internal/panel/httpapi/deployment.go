@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -35,7 +36,7 @@ func (d Deps) handleDeploymentValidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func (d Deps) handleDeploymentPreview(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +77,7 @@ func (d Deps) handleDeploymentPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"node_id":            req.NodeID,
 		"current_revision":   currentRevision,
 		"target_revision":    req.Revision,
@@ -128,15 +129,19 @@ func (d Deps) handleDeploymentCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// context.WithoutCancel, not r.Context(): the request context is cancelled
+	// the moment this handler returns its 201, which would kill the deployment
+	// it just started. The values (request id, actor) are kept for logging.
+	bg := context.WithoutCancel(r.Context())
 	go func() {
-		if err := orchestrator.ExecuteDeployment(r.Context(), deploymentID); err != nil {
-			slog.ErrorContext(r.Context(), "execute deployment", "error", err, "deployment_id", deploymentID)
+		if err := orchestrator.ExecuteDeployment(bg, deploymentID); err != nil {
+			slog.ErrorContext(bg, "execute deployment", "error", err, "deployment_id", deploymentID)
 		}
 	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"deployment_id": deploymentID,
 		"status":        "pending",
 	})
@@ -193,7 +198,7 @@ func (d Deps) handleDeploymentGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to get node status", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type nodeStatus struct {
 		NodeID      int64  `json:"node_id"`
@@ -212,9 +217,15 @@ func (d Deps) handleDeploymentGet(w http.ResponseWriter, r *http.Request) {
 		}
 		nodeStatuses = append(nodeStatuses, ns)
 	}
+	if err := rows.Err(); err != nil {
+		// A mid-iteration failure would silently return a truncated list as if
+		// it were complete.
+		WriteError(w, http.StatusInternalServerError, "internal", "could not read rows")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"deployment":  dep,
 		"node_status": nodeStatuses,
 	})
@@ -234,7 +245,7 @@ func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to list deployments", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type deploymentRow struct {
 		ID          int64  `json:"id"`
@@ -257,9 +268,15 @@ func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
 		}
 		deployments = append(deployments, d)
 	}
+	if err := rows.Err(); err != nil {
+		// A mid-iteration failure would silently return a truncated list as if
+		// it were complete.
+		WriteError(w, http.StatusInternalServerError, "internal", "could not read rows")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"deployments": deployments,
 	})
 }
@@ -295,7 +312,7 @@ func (d Deps) handleDeploymentRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"deployment_id": deploymentID,
 		"status":        "rolled_back",
 	})

@@ -148,7 +148,7 @@ func GetMetricsHistory(ctx context.Context, s *store.Store, nodeID int64, from, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var metrics []HealthMetrics
 	for rows.Next() {

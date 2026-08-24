@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -62,8 +63,8 @@ func (d Deps) handleDashboardStream(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Send heartbeat
-			fmt.Fprintf(w, "event: heartbeat\n")
-			fmt.Fprintf(w, "data: {\"timestamp\": %d}\n\n", time.Now().Unix())
+			_, _ = fmt.Fprintf(w, "event: heartbeat\n")
+			_, _ = fmt.Fprintf(w, "data: {\"timestamp\": %d}\n\n", time.Now().Unix())
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
@@ -82,8 +83,8 @@ func (d Deps) sendDashboardMetrics(ctx context.Context, w http.ResponseWriter) e
 		return err
 	}
 
-	fmt.Fprintf(w, "event: metrics\n")
-	fmt.Fprintf(w, "data: %s\n\n", data)
+	_, _ = fmt.Fprintf(w, "event: metrics\n")
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -100,7 +101,7 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 	err := d.Store.Read().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM subjects
 	`).Scan(&metrics.TotalSubjects)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 
@@ -111,7 +112,7 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 		WHERE disabled = 0 AND frozen = 0
 		AND (expires_at IS NULL OR expires_at > ?)
 	`, now).Scan(&metrics.ActiveUsers)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 
@@ -119,7 +120,7 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 	err = d.Store.Read().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM subjects WHERE frozen = 1
 	`).Scan(&metrics.FrozenCount)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 
@@ -127,7 +128,7 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 	err = d.Store.Read().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM alerts WHERE resolved_at IS NULL
 	`).Scan(&metrics.AlertsCount)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		metrics.AlertsCount = 0
 	}
 
@@ -135,7 +136,7 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 	err = d.Store.Read().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM nodes
 	`).Scan(&metrics.NodesTotal)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 
@@ -144,7 +145,7 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 	err = d.Store.Read().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM nodes WHERE last_seen >= ?
 	`, cutoff).Scan(&metrics.NodesOnline)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 
@@ -169,7 +170,7 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 	if err != nil {
 		return metrics, nil // Return what we have so far
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var nm NodeMetric
@@ -192,6 +193,11 @@ func (d Deps) collectDashboardMetrics(ctx context.Context) (*DashboardMetrics, e
 		nm.RAMPercent = 0
 
 		metrics.Nodes = append(metrics.Nodes, nm)
+	}
+	if err := rows.Err(); err != nil {
+		// A mid-iteration failure would silently return a truncated list as if
+		// it were complete.
+		return nil, err
 	}
 
 	return metrics, nil

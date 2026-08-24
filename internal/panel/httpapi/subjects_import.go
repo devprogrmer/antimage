@@ -113,8 +113,9 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 
 		// Insert subject
 		now := time.Now().Unix()
-		err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
-			_, err := tx.ExecContext(r.Context(), `
+		ctx := r.Context()
+		err := d.Store.Write(ctx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `
 				INSERT INTO subjects (name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
 			`, name, note, disabled, frozen, expiresAt, quotaBytes, subscriptionToken, now, now)

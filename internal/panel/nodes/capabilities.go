@@ -56,7 +56,7 @@ func GetNodeCapabilities(ctx context.Context, s *store.Store, nodeID int64) ([]N
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var capabilities []NodeCapability
 	for rows.Next() {
@@ -97,7 +97,7 @@ func GetAvailableProtocols(ctx context.Context, s *store.Store, nodeID int64) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var protocols []Protocol
 	for rows.Next() {

@@ -169,7 +169,7 @@ func TestGenerateConfig_Deterministic(t *testing.T) {
 		t.Fatal("peers not found in config")
 	}
 
-	if !(aaaIdx < bbbIdx && bbbIdx < cccIdx) {
+	if aaaIdx >= bbbIdx || bbbIdx >= cccIdx {
 		t.Errorf("peers not sorted: aaa@%d, bbb@%d, ccc@%d", aaaIdx, bbbIdx, cccIdx)
 	}
 }

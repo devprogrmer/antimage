@@ -40,7 +40,7 @@ func TestRBACAuditLogging(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to query all audit logs: %v", err)
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		t.Log("All audit logs after freeze attempt:")
 		for rows.Next() {
@@ -48,6 +48,9 @@ func TestRBACAuditLogging(t *testing.T) {
 			var action, result string
 			rows.Scan(&id, &action, &result)
 			t.Logf("  id=%d action=%s result=%s", id, action, result)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("iterate audit logs: %v", err)
 		}
 
 		// Check audit log for denial (new endpoints use 'rbac_check')

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -225,6 +226,8 @@ func TestXrayAdapterIntegration(t *testing.T) {
 
 // isPolicyViolation checks if error is a policy violation.
 func isPolicyViolation(err error) bool {
-	_, ok := err.(*enforcement.ErrPolicyViolation)
-	return ok
+	// errors.As, not a type assertion: the enforcement layer wraps this error,
+	// and an assertion would miss every wrapped instance.
+	var pv *enforcement.ErrPolicyViolation
+	return errors.As(err, &pv)
 }

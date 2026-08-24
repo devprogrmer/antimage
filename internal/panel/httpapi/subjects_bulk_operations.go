@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -48,22 +49,23 @@ func (d Deps) handleBulkEnableSubjects(w http.ResponseWriter, r *http.Request) {
 
 	enabled := 0
 	failed := 0
-	errors := []string{}
+	errMsgs := []string{}
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
-			result, err := tx.ExecContext(r.Context(), `
+			result, err := tx.ExecContext(ctx, `
 				UPDATE subjects SET disabled = 0, updated_at = ? WHERE id = ?
 			`, time.Now().Unix(), subjectID)
 			if err != nil {
-				errors = append(errors, err.Error())
+				errMsgs = append(errMsgs, err.Error())
 				failed++
 				continue
 			}
 
 			rowsAffected, _ := result.RowsAffected()
 			if rowsAffected == 0 {
-				errors = append(errors, "subject not found")
+				errMsgs = append(errMsgs, "subject not found")
 				failed++
 				continue
 			}
@@ -81,7 +83,7 @@ func (d Deps) handleBulkEnableSubjects(w http.ResponseWriter, r *http.Request) {
 	resp := BulkEnableResponse{
 		Enabled: enabled,
 		Failed:  failed,
-		Errors:  errors,
+		Errors:  errMsgs,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -136,20 +138,21 @@ func (d Deps) handleBulkExtendSubjects(w http.ResponseWriter, r *http.Request) {
 
 	extended := 0
 	failed := 0
-	errors := []string{}
+	errMsgs := []string{}
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
 			// Get current expiry
 			var currentExpiry sql.NullInt64
-			err := tx.QueryRowContext(r.Context(), `
+			err := tx.QueryRowContext(ctx, `
 				SELECT expires_at FROM subjects WHERE id = ?
 			`, subjectID).Scan(&currentExpiry)
 			if err != nil {
-				if err == sql.ErrNoRows {
-					errors = append(errors, "subject not found")
+				if errors.Is(err, sql.ErrNoRows) {
+					errMsgs = append(errMsgs, "subject not found")
 				} else {
-					errors = append(errors, err.Error())
+					errMsgs = append(errMsgs, err.Error())
 				}
 				failed++
 				continue
@@ -166,18 +169,18 @@ func (d Deps) handleBulkExtendSubjects(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Update expiry
-			result, err := tx.ExecContext(r.Context(), `
+			result, err := tx.ExecContext(ctx, `
 				UPDATE subjects SET expires_at = ?, updated_at = ? WHERE id = ?
 			`, newExpiry, time.Now().Unix(), subjectID)
 			if err != nil {
-				errors = append(errors, err.Error())
+				errMsgs = append(errMsgs, err.Error())
 				failed++
 				continue
 			}
 
 			rowsAffected, _ := result.RowsAffected()
 			if rowsAffected == 0 {
-				errors = append(errors, "update failed")
+				errMsgs = append(errMsgs, "update failed")
 				failed++
 				continue
 			}
@@ -195,7 +198,7 @@ func (d Deps) handleBulkExtendSubjects(w http.ResponseWriter, r *http.Request) {
 	resp := BulkExtendResponse{
 		Extended: extended,
 		Failed:   failed,
-		Errors:   errors,
+		Errors:   errMsgs,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -244,22 +247,23 @@ func (d Deps) handleBulkResetTraffic(w http.ResponseWriter, r *http.Request) {
 
 	reset := 0
 	failed := 0
-	errors := []string{}
+	errMsgs := []string{}
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
-			result, err := tx.ExecContext(r.Context(), `
+			result, err := tx.ExecContext(ctx, `
 				UPDATE subjects SET quota_used_bytes = 0, updated_at = ? WHERE id = ?
 			`, time.Now().Unix(), subjectID)
 			if err != nil {
-				errors = append(errors, err.Error())
+				errMsgs = append(errMsgs, err.Error())
 				failed++
 				continue
 			}
 
 			rowsAffected, _ := result.RowsAffected()
 			if rowsAffected == 0 {
-				errors = append(errors, "subject not found")
+				errMsgs = append(errMsgs, "subject not found")
 				failed++
 				continue
 			}
@@ -277,7 +281,7 @@ func (d Deps) handleBulkResetTraffic(w http.ResponseWriter, r *http.Request) {
 	resp := BulkResetTrafficResponse{
 		Reset:  reset,
 		Failed: failed,
-		Errors: errors,
+		Errors: errMsgs,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -332,27 +336,28 @@ func (d Deps) handleBulkSetQuota(w http.ResponseWriter, r *http.Request) {
 
 	updated := 0
 	failed := 0
-	errors := []string{}
+	errMsgs := []string{}
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
 			var quotaValue sql.NullInt64
 			if req.QuotaBytes > 0 {
 				quotaValue = sql.NullInt64{Int64: req.QuotaBytes, Valid: true}
 			}
 
-			result, err := tx.ExecContext(r.Context(), `
+			result, err := tx.ExecContext(ctx, `
 				UPDATE subjects SET quota_bytes = ?, updated_at = ? WHERE id = ?
 			`, quotaValue, time.Now().Unix(), subjectID)
 			if err != nil {
-				errors = append(errors, err.Error())
+				errMsgs = append(errMsgs, err.Error())
 				failed++
 				continue
 			}
 
 			rowsAffected, _ := result.RowsAffected()
 			if rowsAffected == 0 {
-				errors = append(errors, "subject not found")
+				errMsgs = append(errMsgs, "subject not found")
 				failed++
 				continue
 			}
@@ -370,7 +375,7 @@ func (d Deps) handleBulkSetQuota(w http.ResponseWriter, r *http.Request) {
 	resp := BulkSetQuotaResponse{
 		Updated: updated,
 		Failed:  failed,
-		Errors:  errors,
+		Errors:  errMsgs,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -50,10 +50,11 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 	errors := []string{}
 	affectedNodes := make(map[int64]struct{})
 
-	err := d.Store.Write(r.Context(), func(tx *sql.Tx) error {
+	ctx := r.Context()
+	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
 			// Check if subject exists and collect affected nodes
-			rows, err := tx.QueryContext(r.Context(), `
+			rows, err := tx.QueryContext(ctx, `
 			SELECT node_id FROM subject_services WHERE subject_id = ?
 		`, subjectID)
 			if err != nil {
@@ -68,10 +69,13 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 					affectedNodes[nodeID] = struct{}{}
 				}
 			}
-			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			_ = rows.Close() //nolint:sqlclosecheck // closed per iteration; defer would hold every result set open for the whole batch
 
 			// Delete subject
-			result, err := tx.ExecContext(r.Context(), `DELETE FROM subjects WHERE id = ?`, subjectID)
+			result, err := tx.ExecContext(ctx, `DELETE FROM subjects WHERE id = ?`, subjectID)
 			if err != nil {
 				errors = append(errors, err.Error())
 				failed++

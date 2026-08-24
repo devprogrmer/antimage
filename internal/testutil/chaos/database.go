@@ -10,13 +10,10 @@ import (
 
 // DatabaseFaultInjector wraps database operations with fault injection
 type DatabaseFaultInjector struct {
-	mu              sync.Mutex
-	db              *sql.DB
-	lockTimeout     time.Duration
-	failNextQuery   bool
-	failNextExec    bool
-	injectDelay     time.Duration
-	injectLockError bool
+	// Only db is used. The fault-state fields this once declared were never
+	// set or read, so the type advertised an injection capability it did not
+	// have; FaultyDB below is the one the reliability tests actually drive.
+	db *sql.DB
 }
 
 // NewDatabaseFaultInjector creates a database fault injector
@@ -137,6 +134,7 @@ func (f *FaultyDB) QueryContext(ctx context.Context, query string, args ...inter
 		}
 	}
 
+	//nolint:sqlclosecheck // the caller owns and closes these rows
 	return f.db.QueryContext(ctx, query, args...)
 }
 

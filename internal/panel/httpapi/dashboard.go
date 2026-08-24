@@ -106,7 +106,7 @@ func (d Deps) handleDashboardTrafficChart(w http.ResponseWriter, r *http.Request
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to query traffic data")
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type DataPoint struct {
 		Timestamp     int64 `json:"timestamp"`
@@ -188,7 +188,7 @@ func (d Deps) handleDashboardTopUsers(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to query top users")
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type TopUser struct {
 		SubjectID      int64    `json:"subject_id"`

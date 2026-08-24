@@ -46,13 +46,11 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	// Build query
 	conditions := []string{"1=1"}
 	args := []interface{}{}
-	argIdx := 1
 
 	if search != "" {
 		conditions = append(conditions, "(name LIKE ? OR note LIKE ?)")
 		searchPattern := "%" + search + "%"
 		args = append(args, searchPattern, searchPattern)
-		argIdx += 2
 	}
 
 	if statusFilter != "" {
@@ -66,7 +64,6 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		case "expired":
 			conditions = append(conditions, "expires_at IS NOT NULL AND expires_at <= ?")
 			args = append(args, time.Now().Unix())
-			argIdx++
 		}
 	}
 
@@ -74,7 +71,6 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		if t, err := time.Parse("2006-01-02", expiresBeforeStr); err == nil {
 			conditions = append(conditions, "expires_at IS NOT NULL AND expires_at <= ?")
 			args = append(args, t.Unix())
-			argIdx++
 		}
 	}
 
@@ -82,7 +78,6 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		if t, err := time.Parse("2006-01-02", expiresAfterStr); err == nil {
 			conditions = append(conditions, "expires_at IS NOT NULL AND expires_at >= ?")
 			args = append(args, t.Unix())
-			argIdx++
 		}
 	}
 
@@ -91,7 +86,6 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		if parsed, err := strconv.ParseInt(trafficMin, 10, 64); err == nil && parsed >= 0 {
 			conditions = append(conditions, "quota_used_bytes >= ?")
 			args = append(args, parsed)
-			argIdx++
 		}
 	}
 
@@ -100,16 +94,16 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		if parsed, err := strconv.ParseInt(trafficMax, 10, 64); err == nil && parsed >= 0 {
 			conditions = append(conditions, "quota_used_bytes <= ?")
 			args = append(args, parsed)
-			argIdx++
 		}
 	}
 
 	quotaStatus := strings.TrimSpace(r.URL.Query().Get("quota_status"))
-	if quotaStatus == "under_limit" {
+	switch quotaStatus {
+	case "under_limit":
 		conditions = append(conditions, "quota_bytes IS NOT NULL AND quota_used_bytes < quota_bytes")
-	} else if quotaStatus == "near_limit" {
+	case "near_limit":
 		conditions = append(conditions, "quota_bytes IS NOT NULL AND quota_used_bytes >= quota_bytes * 0.8 AND quota_used_bytes < quota_bytes")
-	} else if quotaStatus == "over_limit" {
+	case "over_limit":
 		conditions = append(conditions, "quota_bytes IS NOT NULL AND quota_used_bytes >= quota_bytes")
 	}
 
@@ -122,7 +116,6 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	if tag != "" {
 		conditions = append(conditions, "note LIKE ?")
 		args = append(args, "%"+tag+"%")
-		argIdx++
 		whereClause = strings.Join(conditions, " AND ")
 	}
 
@@ -164,7 +157,7 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to query subjects", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	subjects := []subjectDTO{}
 	for rows.Next() {

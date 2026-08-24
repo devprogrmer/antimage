@@ -31,24 +31,77 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-# Enrollment token from first argument
-ENROLLMENT_TOKEN="${1:-}"
+# Argument parsing.
+#
+# Both forms are accepted: the piped one-liner passes the token positionally,
+# while --panel/--token is what an operator types by hand and what the
+# definition-of-done gate asserts. Unknown arguments are rejected rather than
+# ignored: silently dropping a misspelt flag installs a node pointed at the
+# wrong panel, which is discovered much later and by somebody else.
+ENROLLMENT_TOKEN=""
+PANEL_FLAG=""
+EXPLICIT_FLAGS=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --panel)
+            EXPLICIT_FLAGS=1
+            PANEL_FLAG="${2:-}"
+            shift 2 || true
+            ;;
+        --token)
+            EXPLICIT_FLAGS=1
+            ENROLLMENT_TOKEN="${2:-}"
+            shift 2 || true
+            ;;
+        --help|-h)
+            echo "Usage: curl -fsSL ${PANEL_URL}/install.sh | bash -s -- TOKEN"
+            echo "   or: install.sh --panel https://panel.example.com --token TOKEN"
+            exit 0
+            ;;
+        -*)
+            log_error "unknown argument: $1"
+            exit 1
+            ;;
+        *)
+            ENROLLMENT_TOKEN="$1"
+            shift
+            ;;
+    esac
+done
+
+# When flags are used, both are required: a node enrolled against the default
+# panel because --panel was omitted is worse than a refusal.
+if [[ "${EXPLICIT_FLAGS}" -eq 1 ]]; then
+    if [[ -z "${PANEL_FLAG}" ]]; then
+        log_error "--panel is required"
+        exit 1
+    fi
+    if [[ -z "${ENROLLMENT_TOKEN}" ]]; then
+        log_error "--token is required"
+        exit 1
+    fi
+    PANEL_URL="${PANEL_FLAG}"
+    BINARY_URL="${PANEL_URL}/download/antimage-node"
+    CHECKSUM_URL="${PANEL_URL}/download/antimage-node.sha256"
+fi
+
 if [[ -z "${ENROLLMENT_TOKEN}" ]]; then
     log_error "Enrollment token required"
     echo "Usage: curl -fsSL ${PANEL_URL}/install.sh | bash -s -- TOKEN" >&2
     exit 1
 fi
 
+# Check root privileges
+if [[ $EUID -ne 0 ]]; then
+   log_error "This script must run as root"
+   exit 1
+fi
+
 # Validate token format (basic sanity check)
 if [[ ! "${ENROLLMENT_TOKEN}" =~ ^[A-Za-z0-9_-]{16,}$ ]]; then
     log_error "Invalid enrollment token format"
     exit 1
-fi
-
-# Check root privileges
-if [[ $EUID -ne 0 ]]; then
-   log_error "This script must be run as root"
-   exit 1
 fi
 
 # Detect OS and architecture
@@ -134,7 +187,7 @@ chown antimage:antimage "${INSTALL_DIR}"
 
 # Create systemd service
 log_info "Creating systemd service..."
-cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
+cat > /etc/systemd/system/antimage-node.service <<EOF
 [Unit]
 Description=Antimage VPN Node
 After=network-online.target

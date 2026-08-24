@@ -182,7 +182,7 @@ func TestGenerateConfig_Deterministic(t *testing.T) {
 		t.Fatal("users not found in config")
 	}
 
-	if !(aliceIdx < bobIdx && bobIdx < charlieIdx) {
+	if aliceIdx >= bobIdx || bobIdx >= charlieIdx {
 		t.Errorf("users not sorted: alice@%d, bob@%d, charlie@%d", aliceIdx, bobIdx, charlieIdx)
 	}
 }

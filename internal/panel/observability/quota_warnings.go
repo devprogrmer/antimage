@@ -32,7 +32,7 @@ func (s *Sweeper) enforceQuotaWarnings(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("query 80%% quota warnings: %w", err)
 	}
-	defer rows80.Close()
+	defer func() { _ = rows80.Close() }()
 
 	var warned80 int
 	for rows80.Next() {
@@ -71,6 +71,12 @@ func (s *Sweeper) enforceQuotaWarnings(ctx context.Context) error {
 			"quota", quota,
 			"percent", fmt.Sprintf("%.1f%%", pct))
 	}
+	// A mid-iteration failure would silently warn fewer subjects than are
+	// actually over threshold, which is the opposite of what this sweeper is
+	// for.
+	if err := rows80.Err(); err != nil {
+		return fmt.Errorf("iterate 80%%%% quota warnings: %w", err)
+	}
 
 	// Query subjects at 90% quota threshold
 	query90 := `
@@ -93,7 +99,7 @@ func (s *Sweeper) enforceQuotaWarnings(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("query 90%% quota warnings: %w", err)
 	}
-	defer rows90.Close()
+	defer func() { _ = rows90.Close() }()
 
 	var warned90 int
 	for rows90.Next() {
@@ -131,6 +137,9 @@ func (s *Sweeper) enforceQuotaWarnings(ctx context.Context) error {
 			"used", used,
 			"quota", quota,
 			"percent", fmt.Sprintf("%.1f%%", pct))
+	}
+	if err := rows90.Err(); err != nil {
+		return fmt.Errorf("iterate 90%%%% quota warnings: %w", err)
 	}
 
 	if warned80 > 0 || warned90 > 0 {

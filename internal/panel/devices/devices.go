@@ -77,7 +77,7 @@ func (s *Store) RegisterDevice(ctx context.Context, tx *sql.Tx, subjectID int64,
 		return deviceID, err
 	}
 
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("check device: %w", err)
 	}
 
@@ -154,7 +154,7 @@ func (s *Store) ListDevices(ctx context.Context, subjectID int64) ([]Device, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var devices []Device
 	for rows.Next() {
@@ -189,7 +189,7 @@ func (s *Store) ListDevicesPaginated(ctx context.Context, subjectID int64, limit
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var devices []Device
 	for rows.Next() {

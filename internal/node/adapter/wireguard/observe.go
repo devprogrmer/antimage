@@ -53,9 +53,6 @@ func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
 			continue
 		}
 
-		// Recompute actual path now that we have service ID
-		path = a.configPath(serviceID)
-
 		// Extract body (everything after marker line)
 		bodyContent := strings.Join(lines[1:], "\n")
 		actualChecksum := checksumContent([]byte(bodyContent))

@@ -1,6 +1,7 @@
 package enforcement
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -27,7 +28,8 @@ func TestImmediateQuotaEnforcement(t *testing.T) {
 			t.Error("expected connection to be rejected (quota exhausted)")
 		}
 
-		if _, ok := err.(*ErrPolicyViolation); !ok {
+		var pv *ErrPolicyViolation
+		if !errors.As(err, &pv) {
 			t.Errorf("expected ErrPolicyViolation, got %T", err)
 		}
 

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/csv"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -32,7 +33,7 @@ func (d Deps) handleExportSubjects(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to query subjects", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", `attachment; filename="subjects.csv"`)
@@ -74,6 +75,12 @@ func (d Deps) handleExportSubjects(w http.ResponseWriter, r *http.Request) {
 		}
 
 		_ = csvWriter.Write(record)
+	}
+	if err := rows.Err(); err != nil {
+		// A mid-iteration failure would ship a truncated export that looks
+		// complete, which is the worst outcome for a data dump: nobody checks
+		// a CSV row count against a number they do not have.
+		slog.ErrorContext(r.Context(), "subject export truncated", "error", err)
 	}
 }
 

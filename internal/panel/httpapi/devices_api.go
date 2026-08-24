@@ -230,7 +230,7 @@ func (d Deps) handleListActiveConnections(w http.ResponseWriter, r *http.Request
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to list connections")
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var connections []ActiveConnectionResponse
 	for rows.Next() {
@@ -248,6 +248,10 @@ func (d Deps) handleListActiveConnections(w http.ResponseWriter, r *http.Request
 		}
 
 		connections = append(connections, c)
+	}
+	if err := rows.Err(); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not read rows")
+		return
 	}
 
 	if connections == nil {

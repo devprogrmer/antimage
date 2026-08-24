@@ -59,7 +59,7 @@ func (ts *TrafficShaper) checkTC() error {
 // initializeQdisc sets up the root HTB qdisc on the interface
 func (ts *TrafficShaper) initializeQdisc() error {
 	// Delete existing qdisc (ignore errors)
-	exec.Command("tc", "qdisc", "del", "dev", ts.iface, "root").Run()
+	exec.Command("tc", "qdisc", "del", "dev", ts.iface, "root").Run() //nolint:errcheck // best-effort teardown
 
 	// Create HTB root qdisc
 	// handle 1: means root qdisc with handle 1

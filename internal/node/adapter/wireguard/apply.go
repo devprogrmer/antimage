@@ -90,7 +90,7 @@ func (a *Adapter) applyRemove(ctx context.Context, step adapter.Step) (adapter.S
 
 	// Remove applied state file
 	appliedPath := a.appliedPath(step.ServiceID)
-	os.Remove(appliedPath) // Best effort, don't fail if this errors
+	_ = os.Remove(appliedPath) // Best effort, don't fail if this errors
 
 	return adapter.StepResult{
 		OK: true,

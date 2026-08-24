@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -33,7 +34,7 @@ func (d Deps) handleGetNodeHealthLatest(w http.ResponseWriter, r *http.Request) 
 	// Verify node exists and get last_seen_at
 	var lastSeenUnix *int64
 	err = d.Store.Read().QueryRowContext(ctx, `SELECT last_seen_at FROM nodes WHERE id = ?`, nodeID).Scan(&lastSeenUnix)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "not_found", "node not found")
 		return
 	}
@@ -177,5 +178,5 @@ func (d Deps) handleGetNodeHealthHistory(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }

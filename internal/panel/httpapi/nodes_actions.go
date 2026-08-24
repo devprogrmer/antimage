@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -34,7 +35,7 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 	var nodeName, status string
 	err = d.Store.Read().QueryRowContext(ctx,
 		`SELECT name, status FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName, &status)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "not_found", "node not found")
 		return
 	}
@@ -104,7 +105,7 @@ func (d Deps) handleSyncNode(w http.ResponseWriter, r *http.Request) {
 	var nodeName string
 	err = d.Store.Read().QueryRowContext(ctx,
 		`SELECT name FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "not_found", "node not found")
 		return
 	}
@@ -293,7 +294,7 @@ func (d Deps) handleEnableNode(w http.ResponseWriter, r *http.Request) {
 			Result:     "ok",
 		})
 	})
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusConflict, "conflict", "node not found or not disabled")
 		return
 	}

@@ -151,7 +151,7 @@ func (v *Validator) validatePortConflicts(desiredState map[string]interface{}, r
 
 	for nodeIDStr, configIface := range nodeConfigs {
 		var nodeID int64
-		fmt.Sscanf(nodeIDStr, "%d", &nodeID)
+		_, _ = fmt.Sscanf(nodeIDStr, "%d", &nodeID)
 
 		config, ok := configIface.(map[string]interface{})
 		if !ok {
@@ -201,7 +201,7 @@ func (v *Validator) validateProtocolConfigs(desiredState map[string]interface{},
 
 	for nodeIDStr, configIface := range nodeConfigs {
 		var nodeID int64
-		fmt.Sscanf(nodeIDStr, "%d", &nodeID)
+		_, _ = fmt.Sscanf(nodeIDStr, "%d", &nodeID)
 
 		config, ok := configIface.(map[string]interface{})
 		if !ok {
@@ -290,11 +290,12 @@ func (v *Validator) CheckNodeHealth(ctx context.Context, nodeIDs []int64) (map[i
 		}
 
 		// A node is healthy if it's online
-		if node.Status == "online" {
+		switch node.Status {
+		case "online":
 			healthStatus[nodeID] = "healthy"
-		} else if node.Status == "offline" || node.Status == "disabled" {
+		case "offline", "disabled":
 			healthStatus[nodeID] = "unhealthy"
-		} else {
+		default:
 			// pending, enrolling, degraded, integrity
 			healthStatus[nodeID] = "degraded"
 		}

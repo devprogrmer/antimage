@@ -76,10 +76,8 @@ func (i *Injector) InjectNetworkPartition() (*Fault, error) {
 
 // GRPCFaultInjector wraps a gRPC connection with fault injection
 type GRPCFaultInjector struct {
-	mu            sync.Mutex
+	// faultActive and faultType were declared but never set or read.
 	conn          *grpc.ClientConn
-	faultActive   bool
-	faultType     string
 	originalState connectivity.State
 }
 
