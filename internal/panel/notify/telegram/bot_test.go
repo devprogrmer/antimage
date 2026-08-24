@@ -47,8 +47,9 @@ func newBotFixture(t *testing.T) *botFixture {
 	f := newFixture(t)
 	api := &fakeAPI{}
 	// subjects service is nil: these commands do not touch subjects, and
-	// passing nil proves they do not reach for it.
-	bot := NewBot(api, f.db, f.links, func() time.Time { return f.now })
+	// passing nil proves they do not reach for it. The read commands get a
+	// real one in bot_reads_test.go.
+	bot := NewBot(api, f.db, f.links, nil, "", func() time.Time { return f.now })
 	return &botFixture{fixture: f, api: api, bot: bot}
 }
 

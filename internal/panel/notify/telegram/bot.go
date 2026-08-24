@@ -13,6 +13,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/service"
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/panel/subjects"
 )
 
 // pollTimeout is the long-poll window. Telegram holds the request open until
@@ -41,7 +42,14 @@ type Bot struct {
 	api   API
 	db    *store.Store
 	links *Store
+	subj  *service.Subjects
 	now   func() time.Time
+
+	// publicURL is the panel's externally reachable base address, used to
+	// build subscription links. Empty is valid and means the panel does not
+	// know its own public address, in which case /config returns the path and
+	// says so rather than emitting a link that silently does not resolve.
+	publicURL string
 
 	// attempts tracks failed /link tries per telegram id. In memory on
 	// purpose: it protects against online guessing, and a restart clearing it
@@ -50,14 +58,32 @@ type Bot struct {
 }
 
 func NewBot(
-	api API, db *store.Store, links *Store, now func() time.Time,
+	api API, db *store.Store, links *Store, subj *service.Subjects,
+	publicURL string, now func() time.Time,
 ) *Bot {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Bot{
-		api: api, db: db, links: links, now: now,
-		attempts: map[int64][]time.Time{},
+		api: api, db: db, links: links, subj: subj,
+		publicURL: strings.TrimRight(publicURL, "/"),
+		now:       now,
+		attempts:  map[int64][]time.Time{},
+	}
+}
+
+// svcActor turns a resolved panel identity into a service caller.
+//
+// Via is "telegram" so an incident review can separate a change made from a
+// browser from one made through a chat account that may have been hijacked.
+// The request id carries the Telegram message id, which is what an operator
+// has in front of them when they report something.
+func (b *Bot) svcActor(actor *rbac.Actor, msg *Message) service.Actor {
+	return service.Actor{
+		RBAC:      actor,
+		Audit:     audit.AdminActor(actor.AdminID, ""),
+		RequestID: fmt.Sprintf("tg-%d", msg.MessageID),
+		Via:       "telegram",
 	}
 }
 
@@ -147,6 +173,14 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		b.cmdUnlink(ctx, msg)
 	case "/whoami":
 		b.cmdWhoami(ctx, msg)
+	case "/users":
+		b.cmdUsers(ctx, msg)
+	case "/user":
+		b.cmdUser(ctx, msg, arg)
+	case "/balance":
+		b.cmdBalance(ctx, msg)
+	case "/config":
+		b.cmdConfig(ctx, msg, arg)
 	default:
 		b.reply(ctx, msg.Chat.ID, "Unknown command. Send /help for the list.")
 	}
@@ -232,6 +266,11 @@ func (b *Bot) cmdHelp(ctx context.Context, msg *Message) {
 		"/link <code>  bind this Telegram account to your panel user",
 		"/unlink       remove the binding",
 		"/whoami       show which panel user this account is bound to",
+		"",
+		"/users        list your users",
+		"/user <name>  details for one user",
+		"/balance      your credit balance",
+		"/config <name>  subscription link for one user",
 		"/help         this message",
 		"",
 		"Get a link code from the panel: profile, then Link Telegram.",
@@ -316,4 +355,207 @@ func (b *Bot) cmdWhoami(ctx context.Context, msg *Message) {
 	b.reply(ctx, msg.Chat.ID, fmt.Sprintf(
 		"Linked to panel user #%d\nRole: %s\nPermissions: %d",
 		actor.AdminID, actor.RoleName, len(actor.Perms)))
+}
+
+// maxListedUsers bounds /users output.
+//
+// Telegram rejects messages over 4096 characters outright, so an operator with
+// a few hundred customers would get nothing at all rather than a long list.
+// Truncating with a visible count degrades instead of failing.
+const maxListedUsers = 30
+
+// requireActor resolves the chat to a panel identity, replying if it cannot.
+//
+// Every read command starts here, so an unlinked or revoked account gets the
+// same answer from all of them and none of them has to remember to check.
+func (b *Bot) requireActor(ctx context.Context, msg *Message) (*rbac.Actor, bool) {
+	actor, err := b.actorFor(ctx, msg.From.ID)
+	if err != nil {
+		b.reply(ctx, msg.Chat.ID, errNotLinkedReply)
+		return nil, false
+	}
+	b.links.Touch(ctx, msg.From.ID)
+	return actor, true
+}
+
+// replyServiceError maps a service error onto a message.
+//
+// ErrNotFound covers both "no such user" and "not yours", and the reply must
+// not distinguish them: a tenant who could tell the difference could probe
+// another tenant's customer names one guess at a time.
+func (b *Bot) replyServiceError(ctx context.Context, msg *Message, what string, err error) {
+	switch {
+	case errors.Is(err, service.ErrNotFound):
+		b.reply(ctx, msg.Chat.ID, "No such user.")
+	case errors.Is(err, service.ErrNoReseller):
+		b.reply(ctx, msg.Chat.ID,
+			"This account is not a reseller, so it has no credit balance.")
+	case errors.Is(err, rbac.ErrForbidden):
+		b.reply(ctx, msg.Chat.ID, "Your role does not allow that.")
+	default:
+		slog.ErrorContext(ctx, "telegram command failed", "command", what, "error", err)
+		b.reply(ctx, msg.Chat.ID, "Something went wrong. Try again shortly.")
+	}
+}
+
+func (b *Bot) cmdUsers(ctx context.Context, msg *Message) {
+	actor, ok := b.requireActor(ctx, msg)
+	if !ok {
+		return
+	}
+
+	list, err := b.subj.List(ctx, b.svcActor(actor, msg))
+	if err != nil {
+		b.replyServiceError(ctx, msg, "/users", err)
+		return
+	}
+	if len(list) == 0 {
+		b.reply(ctx, msg.Chat.ID, "You have no users yet.")
+		return
+	}
+
+	now := b.now()
+	lines := make([]string, 0, maxListedUsers+2)
+	lines = append(lines, fmt.Sprintf("Users: %d", len(list)), "")
+	for i, s := range list {
+		if i == maxListedUsers {
+			lines = append(lines, "",
+				fmt.Sprintf("... and %d more. Use /user <name> for one.",
+					len(list)-maxListedUsers))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("%s  %s", statusMark(s, now), s.Name))
+	}
+	b.reply(ctx, msg.Chat.ID, strings.Join(lines, "\n"))
+}
+
+// statusMark renders a subject's state as one glyph.
+//
+// Disabled and expired are shown apart because the fix differs: one is a
+// switch the operator controls, the other needs an extension.
+func statusMark(s subjects.Subject, at time.Time) string {
+	switch {
+	case !s.Enabled:
+		return "[off]"
+	case s.Expired(at):
+		return "[exp]"
+	default:
+		return "[ ok]"
+	}
+}
+
+func (b *Bot) cmdUser(ctx context.Context, msg *Message, name string) {
+	if name == "" {
+		b.reply(ctx, msg.Chat.ID, "Usage: /user NAME")
+		return
+	}
+	actor, ok := b.requireActor(ctx, msg)
+	if !ok {
+		return
+	}
+
+	s, err := b.subj.FindByName(ctx, b.svcActor(actor, msg), name)
+	if err != nil {
+		b.replyServiceError(ctx, msg, "/user", err)
+		return
+	}
+
+	now := b.now()
+	lines := []string{
+		fmt.Sprintf("%s  %s", statusMark(*s, now), s.Name),
+		fmt.Sprintf("ID:      %d", s.ID),
+		fmt.Sprintf("Enabled: %t", s.Enabled),
+		fmt.Sprintf("Expires: %s", formatExpiry(s.ExpiresAt)),
+		fmt.Sprintf("Created: %s", s.CreatedAt.Format(time.RFC3339)),
+	}
+	if s.Note != "" {
+		lines = append(lines, "Note:    "+s.Note)
+	}
+	// No credentials here. /config discloses one, deliberately as its own
+	// command, so the disclosure is an explicit act and is audited as one.
+	b.reply(ctx, msg.Chat.ID, strings.Join(lines, "\n"))
+}
+
+func formatExpiry(t *time.Time) string {
+	if t == nil {
+		return "never"
+	}
+	return t.Format(time.RFC3339)
+}
+
+func (b *Bot) cmdBalance(ctx context.Context, msg *Message) {
+	actor, ok := b.requireActor(ctx, msg)
+	if !ok {
+		return
+	}
+
+	bal, err := b.subj.Balance(ctx, b.svcActor(actor, msg))
+	if err != nil {
+		b.replyServiceError(ctx, msg, "/balance", err)
+		return
+	}
+
+	lines := []string{
+		bal.DisplayName,
+		fmt.Sprintf("Balance: %d", bal.Balance),
+		fmt.Sprintf("Floor:   %d", bal.CreditFloor),
+	}
+	if !bal.Enabled {
+		lines = append(lines, "", "This reseller account is disabled.")
+	} else if bal.Balance <= bal.CreditFloor {
+		// The floor is the point where provisioning starts failing, so saying
+		// so here is more useful than making them work it out from two numbers.
+		lines = append(lines, "", "At or below your floor: new users will be refused.")
+	}
+	b.reply(ctx, msg.Chat.ID, strings.Join(lines, "\n"))
+}
+
+func (b *Bot) cmdConfig(ctx context.Context, msg *Message, name string) {
+	if name == "" {
+		b.reply(ctx, msg.Chat.ID, "Usage: /config NAME")
+		return
+	}
+	actor, ok := b.requireActor(ctx, msg)
+	if !ok {
+		return
+	}
+	sa := b.svcActor(actor, msg)
+
+	s, err := b.subj.FindByName(ctx, sa, name)
+	if err != nil {
+		b.replyServiceError(ctx, msg, "/config", err)
+		return
+	}
+
+	// Gated on credential:reveal inside the service and audited there. A
+	// subscription token is a bearer credential: whoever holds it can fetch
+	// this user's full configuration with no session.
+	token, err := b.subj.SubscriptionToken(ctx, sa, s.ID)
+	if err != nil {
+		b.replyServiceError(ctx, msg, "/config", err)
+		return
+	}
+
+	path := "/api/v1/subscribe/" + token
+	link := path
+	if b.publicURL != "" {
+		link = b.publicURL + path
+	}
+
+	lines := []string{
+		s.Name,
+		"",
+		link,
+	}
+	if b.publicURL == "" {
+		// Without a configured public address the panel cannot know its own
+		// externally reachable URL, and guessing one would hand out a link
+		// that silently does not work.
+		lines = append(lines, "",
+			"Prefix that with your panel's public address.",
+			"Set ANTIMAGE_PUBLIC_URL to have it included here.")
+	}
+	lines = append(lines, "",
+		"Anyone with this link can download the config. Treat it as a password.")
+	b.reply(ctx, msg.Chat.ID, strings.Join(lines, "\n"))
 }

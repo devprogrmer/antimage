@@ -31,6 +31,8 @@ import (
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/notify/telegram"
 	"github.com/amyrm/antimage/internal/panel/observability"
+	"github.com/amyrm/antimage/internal/panel/resellers"
+	"github.com/amyrm/antimage/internal/panel/service"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/panel/subjects"
 	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
@@ -281,7 +283,22 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 	// polling an external service on their behalf.
 	if token := os.Getenv("ANTIMAGE_TELEGRAM_TOKEN"); token != "" {
 		links := telegram.NewStore(st, now)
-		bot := telegram.NewBot(telegram.NewHTTPAPI(token), st, links, now)
+
+		// The bot reads through the same service layer the HTTP API uses, so
+		// its commands inherit permission checks, tenant scope and audit
+		// rather than reimplementing them.
+		subjStore := subjects.NewStore(st, box, now)
+		botSvc := service.NewSubjects(
+			st, subjStore, resellers.NewStore(st, subjStore, now),
+			hub, now, nodes.WithUnsealer(box),
+		)
+
+		// Optional. Without it /config returns the subscription path and says
+		// what to prefix it with, rather than emitting a link built from a
+		// guessed hostname that would not resolve.
+		publicURL := os.Getenv("ANTIMAGE_PUBLIC_URL")
+
+		bot := telegram.NewBot(telegram.NewHTTPAPI(token), st, links, botSvc, publicURL, now)
 		go bot.Run(ctx)
 	} else {
 		slog.InfoContext(ctx, "telegram bot disabled",
