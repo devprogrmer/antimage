@@ -189,7 +189,7 @@ func (a *Adapter) saveCursor(cursor accountingCursor) error {
 		return fmt.Errorf("write tmp: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // Best effort cleanup
 		return fmt.Errorf("rename: %w", err)
 	}
 

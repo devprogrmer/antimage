@@ -92,6 +92,9 @@ func (o *Orchestrator) EnforceTimeouts(ctx context.Context, config TimeoutConfig
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate deployments: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close rows: %w", err)
+	}
 
 	if len(timedOutDeployments) == 0 {
 		return nil

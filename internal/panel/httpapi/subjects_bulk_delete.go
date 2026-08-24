@@ -70,9 +70,16 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if err := rows.Err(); err != nil {
-				return err
+				// Record and continue, like every other failure in this loop: one
+				// unreadable subject must not abandon the rest of the batch.
+				_ = rows.Close() //nolint:sqlclosecheck // closed per iteration, see below
+				errors = append(errors, err.Error())
+				failed++
+				continue
 			}
-			_ = rows.Close() //nolint:sqlclosecheck // closed per iteration; defer would hold every result set open for the whole batch
+			// Closed per iteration; a defer would hold every result set open for
+			// the whole batch.
+			_ = rows.Close() //nolint:sqlclosecheck // closed per iteration, see above
 
 			// Delete subject
 			result, err := tx.ExecContext(ctx, `DELETE FROM subjects WHERE id = ?`, subjectID)

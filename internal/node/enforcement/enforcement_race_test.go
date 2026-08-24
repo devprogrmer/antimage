@@ -278,8 +278,8 @@ func TestAtomicAdmission_NegativeLimits(t *testing.T) {
 		t.Error("expected connection to be rejected with negative limit")
 	}
 
-	var pv *ErrPolicyViolation
-	if !errors.As(err, &pv) {
+	var policyErr *ErrPolicyViolation
+	if !errors.As(err, &policyErr) {
 		t.Errorf("expected ErrPolicyViolation, got %T", err)
 	}
 }

@@ -28,8 +28,8 @@ func TestImmediateQuotaEnforcement(t *testing.T) {
 			t.Error("expected connection to be rejected (quota exhausted)")
 		}
 
-		var pv *ErrPolicyViolation
-		if !errors.As(err, &pv) {
+		var policyErr *ErrPolicyViolation
+		if !errors.As(err, &policyErr) {
 			t.Errorf("expected ErrPolicyViolation, got %T", err)
 		}
 

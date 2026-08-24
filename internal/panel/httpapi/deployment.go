@@ -218,8 +218,8 @@ func (d Deps) handleDeploymentGet(w http.ResponseWriter, r *http.Request) {
 		nodeStatuses = append(nodeStatuses, ns)
 	}
 	if err := rows.Err(); err != nil {
-		// A mid-iteration failure would silently return a truncated list as if
-		// it were complete.
+		slog.ErrorContext(r.Context(), "rows error", "error", err)
+		// A mid-iteration failure would return a truncated list as if complete.
 		WriteError(w, http.StatusInternalServerError, "internal", "could not read rows")
 		return
 	}
@@ -269,8 +269,8 @@ func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
 		deployments = append(deployments, d)
 	}
 	if err := rows.Err(); err != nil {
-		// A mid-iteration failure would silently return a truncated list as if
-		// it were complete.
+		slog.ErrorContext(r.Context(), "rows error", "error", err)
+		// A mid-iteration failure would return a truncated list as if complete.
 		WriteError(w, http.StatusInternalServerError, "internal", "could not read rows")
 		return
 	}

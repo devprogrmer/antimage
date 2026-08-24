@@ -174,7 +174,14 @@ func GetMetricsHistory(ctx context.Context, s *store.Store, nodeID int64, from, 
 		metrics = append(metrics, m)
 	}
 
-	return metrics, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	return metrics, nil
 }
 
 // CalculateHealthStatus determines node health from metrics and heartbeat.
