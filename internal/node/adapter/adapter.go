@@ -14,6 +14,7 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -68,6 +69,22 @@ type Caps struct {
 	// form from it, so adding a protocol means adding an adapter rather than
 	// editing panel code.
 	ServiceSchema json.RawMessage `json:"service_schema"`
+
+	// SupportsOutbounds and SupportsRouting declare whether this adapter can
+	// apply the egress half of a v3 document.
+	//
+	// Fail closed. An adapter that declares false must never be sent outbounds
+	// or routing, because the alternative is a panel that shows an operator an
+	// egress policy the node is not enforcing. WireGuard, Hysteria2 and L2TP
+	// have no routing engine at all; only the multiplexing proxies do.
+	//
+	// Declaring true is a promise the contract test enforces.
+	SupportsOutbounds bool `json:"supports_outbounds"`
+	SupportsRouting   bool `json:"supports_routing"`
+
+	// OutboundSchema is to Outbound.Params what ServiceSchema is to
+	// Service.Params. Required when SupportsOutbounds is true.
+	OutboundSchema json.RawMessage `json:"outbound_schema,omitempty"`
 }
 
 type Descriptor struct {
@@ -101,6 +118,45 @@ type Service struct {
 	Params  json.RawMessage `json:"params"`
 }
 
+// MaxSchemaVersion is the highest document version this agent understands.
+//
+// A document above it is REFUSED, never partially applied. The difference
+// matters: the fields a newer version adds are omitempty, so an old agent
+// decoding a new document succeeds and silently drops what it did not know
+// about. For egress that would mean an operator configuring an outbound, the
+// panel reporting convergence, and the node routing traffic somewhere else
+// entirely. Refusing is the only safe reading of "I do not understand this".
+const MaxSchemaVersion = 3
+
+// Outbound mirrors the panel's Outbound. Schema v3+.
+type Outbound struct {
+	ID     int64           `json:"id"`
+	Tag    string          `json:"tag"`
+	Kind   string          `json:"kind"`
+	Params json.RawMessage `json:"params"`
+}
+
+// RoutingRule mirrors the panel's RoutingRule. Schema v3+.
+type RoutingRule struct {
+	ID          int64    `json:"id"`
+	Priority    int      `json:"priority"`
+	Domains     []string `json:"domains,omitempty"`
+	IPCIDRs     []string `json:"ip_cidrs,omitempty"`
+	GeoIP       []string `json:"geoip,omitempty"`
+	GeoSite     []string `json:"geosite,omitempty"`
+	Ports       []string `json:"ports,omitempty"`
+	Network     string   `json:"network,omitempty"`
+	InboundTags []string `json:"inbound_tags,omitempty"`
+	SubjectIDs  []int64  `json:"subject_ids,omitempty"`
+	OutboundTag string   `json:"outbound_tag"`
+}
+
+// Routing mirrors the panel's Routing. Schema v3+.
+type Routing struct {
+	Rules              []RoutingRule `json:"rules"`
+	DefaultOutboundTag string        `json:"default_outbound_tag,omitempty"`
+}
+
 // Desired mirrors the panel's document type field-for-field. It is declared
 // here rather than imported so this package stays free of panel code; the
 // wire contract keeps the two in sync.
@@ -110,6 +166,29 @@ type Desired struct {
 	NodeID        int64     `json:"node_id"`
 	Services      []Service `json:"services"`
 	Subjects      []Subject `json:"subjects"`
+
+	// Egress (schema v3+).
+	Outbounds []Outbound `json:"outbounds,omitempty"`
+	Routing   *Routing   `json:"routing,omitempty"`
+}
+
+// CheckSchemaVersion refuses a document this agent cannot fully apply.
+//
+// Called before convergence, so an unsupported document produces a reported
+// error and no partial apply. A version of zero is treated as unsupported
+// rather than defaulted: it means the field was absent, and guessing which
+// version a document without one intended is exactly the ambiguity this
+// refuses to resolve silently.
+func CheckSchemaVersion(v int) error {
+	if v <= 0 {
+		return fmt.Errorf("desired document carries no schema version")
+	}
+	if v > MaxSchemaVersion {
+		return fmt.Errorf(
+			"desired document is schema v%d; this agent understands up to v%d -- upgrade the agent",
+			v, MaxSchemaVersion)
+	}
+	return nil
 }
 
 // ObservedService is the adapter's reading of one service on the host.

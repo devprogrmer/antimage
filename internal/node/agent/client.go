@@ -304,6 +304,27 @@ func (c *Client) reconcileOnce(ctx context.Context, client pb.ControlClient, str
 		return fmt.Errorf("decode desired document: %w", err)
 	}
 
+	// Refuse a document from the future BEFORE converging on part of it.
+	//
+	// Decoding cannot detect this: fields added by a newer schema are
+	// omitempty, so an old agent parses a new document cleanly and silently
+	// ignores what it did not recognise. Converging on the remainder would
+	// report success for a state the node is not actually in.
+	if err := adapter.CheckSchemaVersion(desired.SchemaVersion); err != nil {
+		report := &pb.ApplyReport{
+			TargetRevision: snap.Revision, Converged: false,
+			Error: err.Error(), DocSha256: snap.Sha256,
+		}
+		if sendErr := stream.Send(&pb.AgentMessage{
+			Payload: &pb.AgentMessage_ApplyReport{ApplyReport: report},
+		}); sendErr != nil {
+			return fmt.Errorf("report unsupported schema: %w", sendErr)
+		}
+		// Not a transport failure, so the stream stays up: the operator sees a
+		// node reporting a clear reason rather than one that keeps dropping.
+		return nil
+	}
+
 	// Sync enforcement policies before convergence
 	c.syncEnforcement(desired)
 
