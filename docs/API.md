@@ -469,6 +469,131 @@ Delete service from node.
 
 ---
 
+### Egress (Outbounds & Routing)
+
+Where a node sends traffic, and the rules selecting between those paths.
+
+Both are **node-scoped**: an outbound is a path off one host, and a routing rule
+selects between the outbounds that host has. Every mutation runs through
+`CommitNodeChange`, so configuring egress bumps the node's `desired_revision`
+like any other desired-state change.
+
+Only adapters with a routing engine can apply these. Xray and sing-box declare
+`supports_outbounds`; WireGuard, Hysteria2 and L2TP do not, and a request
+against such a node is refused with **422** rather than stored. Read the node's
+capabilities from `GET /api/v1/nodes/{id}/capabilities`.
+
+**Outbound kinds:** `direct`, `block`, `socks`, `http`, `wireguard`. Params are
+validated against the adapter's published `OutboundSchema`, so this list comes
+from the adapter rather than from the panel.
+
+#### List Outbounds
+```http
+GET /api/v1/nodes/{nodeID}/outbounds
+```
+**Permissions Required:** `outbound:read`, plus node scope.
+
+#### Create Outbound
+```http
+POST /api/v1/nodes/{nodeID}/outbounds
+```
+```json
+{
+  "tag": "warp-de",
+  "kind": "wireguard",
+  "params": {
+    "private_key": "...",
+    "peer_public_key": "...",
+    "endpoint": "162.159.192.1:2408"
+  },
+  "enabled": true
+}
+```
+**Response:** 201 Created
+
+`tag` is unique per node and is what a routing rule references. A duplicate
+returns **409**: proxies resolve duplicate tags by first match, so a second
+outbound sharing a tag would silently never be used.
+
+Some tags are reserved. Xray's accounting configuration already defines
+`direct` and `api`, so an outbound cannot be *named* either — though a rule may
+still *reference* `direct`, which is how traffic is sent straight out.
+
+**Permissions Required:** `outbound:write`
+
+#### Update / Delete Outbound
+```http
+PUT    /api/v1/nodes/{nodeID}/outbounds/{outboundID}
+DELETE /api/v1/nodes/{nodeID}/outbounds/{outboundID}
+```
+**Permissions Required:** `outbound:write`
+
+#### List Routing Rules
+```http
+GET /api/v1/nodes/{nodeID}/routing
+```
+**Response:** 200 OK — `{"rules": [...]}`, ordered by priority then id.
+
+**Permissions Required:** `outbound:read`, plus node scope.
+
+#### Create Routing Rule
+```http
+POST /api/v1/nodes/{nodeID}/routing
+```
+```json
+{
+  "priority": 10,
+  "domains": ["example.com"],
+  "geosite": ["cn"],
+  "ip_cidrs": ["10.0.0.0/8"],
+  "geoip": ["private"],
+  "ports": ["443"],
+  "inbound_tags": ["antimage-443"],
+  "subject_ids": [42],
+  "network": "tcp",
+  "outbound_tag": "warp-de",
+  "enabled": true
+}
+```
+**Response:** 201 Created
+
+Every matcher is optional, but a rule needs **at least one** — both proxies
+apply a rule with no matchers to *all* traffic, so one is refused with 422.
+
+`ports` are individual numbers. Ranges are not supported: sing-box takes ports
+as numbers and has a separate field for spans, so accepting a range would mean
+the two adapters disagreed about what the panel allows.
+
+`network` is `tcp`, `udp`, or empty for both.
+
+`outbound_tag` must resolve to an enabled outbound on this node, or to a tag the
+adapter provides itself. A rule naming a tag that resolves nowhere is refused
+with 422 — the adapter would otherwise refuse to render, which fails the node's
+entire plan rather than just that rule.
+
+**Permissions Required:** `outbound:write`
+
+#### Update / Delete Routing Rule
+```http
+PUT    /api/v1/nodes/{nodeID}/routing/{ruleID}
+DELETE /api/v1/nodes/{nodeID}/routing/{ruleID}
+```
+**Permissions Required:** `outbound:write`
+
+#### Set Default Outbound
+```http
+PUT /api/v1/nodes/{nodeID}/routing/default
+```
+```json
+{ "outbound_tag": "warp-de" }
+```
+Where traffic goes when no rule matches. An empty string clears it, returning
+the node to the proxy's own default — a meaningful state, not an absent one.
+
+**Permissions Required:** `outbound:write`
+
+---
+
 ### Subjects (Users)
 
 #### List Subjects

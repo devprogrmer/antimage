@@ -175,6 +175,26 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/nodes/bulk/action", d.handleBulkNodeAction)
 
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
+
+			// Egress. Node-scoped, because an outbound is a path off one host
+			// and a routing rule selects between the outbounds that host has.
+			// Every mutation runs through CommitNodeChange, so configuring
+			// egress bumps the node's revision like any other desired-state
+			// change rather than leaving the panel holding a policy the node
+			// was never told about.
+			private.Get("/nodes/{nodeID}/outbounds", d.handleListOutbounds)
+			private.Post("/nodes/{nodeID}/outbounds", d.handleCreateOutbound)
+			private.Put("/nodes/{nodeID}/outbounds/{outboundID}", d.handleUpdateOutbound)
+			private.Delete("/nodes/{nodeID}/outbounds/{outboundID}", d.handleDeleteOutbound)
+
+			private.Get("/nodes/{nodeID}/routing", d.handleListRoutingRules)
+			private.Post("/nodes/{nodeID}/routing", d.handleCreateRoutingRule)
+			private.Put("/nodes/{nodeID}/routing/{ruleID}", d.handleUpdateRoutingRule)
+			private.Delete("/nodes/{nodeID}/routing/{ruleID}", d.handleDeleteRoutingRule)
+			// Where unmatched traffic goes. PUT rather than POST: there is
+			// exactly one per node and setting it twice is the same as setting
+			// it once.
+			private.Put("/nodes/{nodeID}/routing/default", d.handleSetDefaultOutbound)
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)
 

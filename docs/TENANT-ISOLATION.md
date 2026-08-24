@@ -82,6 +82,30 @@ All 21 subject-bearing routes, plus device revoke.
 | `/subjects/bulk/reset-traffic` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/subjects/bulk/set-quota` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/devices/{id}/revoke` | POST | `subject:write` | resolves owning subject, then `requireSubjectInScope` |
+| `/nodes/{id}/outbounds` | GET | `outbound:read` | `rbac.Target{Kind: TargetNode}` |
+| `/nodes/{id}/outbounds` | POST | `outbound:write` | `rbac.Target{Kind: TargetNode}` |
+| `/nodes/{id}/outbounds/{id}` | PUT · DELETE | `outbound:write` | `rbac.Target{Kind: TargetNode}` |
+| `/nodes/{id}/routing` | GET | `outbound:read` | `rbac.Target{Kind: TargetNode}` |
+| `/nodes/{id}/routing` | POST | `outbound:write` | `rbac.Target{Kind: TargetNode}` |
+| `/nodes/{id}/routing/{id}` | PUT · DELETE | `outbound:write` | `rbac.Target{Kind: TargetNode}` |
+| `/nodes/{id}/routing/default` | PUT | `outbound:write` | `rbac.Target{Kind: TargetNode}` |
+
+### Egress is scoped by node, not by subject
+
+The routes above are the first protected surface that does **not** use
+`SubjectScopeSQL`. An outbound belongs to a host, not to a customer, so the
+scope question is "may this actor see this node" — answered by `rbac.Check`
+against `Target{Kind: TargetNode}`, which treats the actor's `NodeIDs` as an
+**exhaustive allow-list**.
+
+The practical consequence is worth stating, because it surprised a test: holding
+`outbound:read` is not sufficient. The `reseller` and `readonly` roles both carry
+it, but an actor with no `admin_scopes` row for the node is refused before the
+permission is consulted. Empty scope means no nodes, never all of them — the
+same inverted-default rule that governs the subject predicate.
+
+`TestEgressReadStillNeedsNodeScope` pins this, so dropping node scoping cannot
+silently hand every tenant visibility of every node's egress policy.
 
 Reseller-side reads are scoped by `resellerScopePredicate`:
 `ListResellersScoped`, `GetResellerScoped`, `BalanceScoped`, `ListLedgerScoped`.
@@ -124,6 +148,7 @@ Reseller-side reads are scoped by `resellerScopePredicate`:
 | `httpapi/subjects_bulk_schema_test.go` | That bulk, export and import actually reach the database: real column writes, the delete republish, CSV round-trip |
 | `httpapi/subjects_import_owner_test.go` | Import ownership: rows land on the named reseller and become visible to them, the ledger is debited, a tenant cannot name an owner, replays are recognised |
 | `httpapi/subjects_search_test.go` | `/api/v2/subjects` returns real rows and stays scoped under every filter, sort and page size |
+| `httpapi/egress_api_test.go` | Egress: outbounds reach the document, capability and tag refusals, and that mutation needs `outbound:write` while reads still need node scope |
 | `rbac/reseller_perm_test.go` | Privilege separation of `credit:grant`; reseller holds no tenancy permissions |
 | `resellers/resellers_test.go` | Ledger invariants, atomic provisioning, idempotency |
 

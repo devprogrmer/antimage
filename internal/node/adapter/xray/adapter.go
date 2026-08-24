@@ -125,6 +125,12 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			SupportsOutbounds: true,
 			SupportsRouting:   true,
 			OutboundSchema:    outboundSchema,
+			// GenerateStatsConfig defines "direct" (freedom), so a rule may
+			// send traffic straight out with no outbound row behind it. "api"
+			// is deliberately absent: it is internal plumbing for the stats
+			// endpoint, and an operator rule pointing at it would blackhole
+			// whatever it matched.
+			BuiltinOutboundTags: []string{tagDirect},
 			// Declared from the runtime's actual capability, not hardcoded.
 			// The panel records this at Hello so the UI can tell an operator
 			// BEFORE they click whether adding a user drops sessions.
