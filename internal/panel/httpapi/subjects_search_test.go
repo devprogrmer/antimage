@@ -15,7 +15,7 @@ import (
 
 func listV2(t *testing.T, env *testEnv, query, token string) (int, []subjectDTO) {
 	t.Helper()
-	res := env.get(t, "/api/v1/v2/subjects"+query, token)
+	res := env.get(t, "/api/v2/subjects"+query, token)
 	if res.Code != http.StatusOK {
 		return res.Code, nil
 	}
@@ -93,9 +93,23 @@ func TestListSubjectsV2RequiresSubjectRead(t *testing.T) {
 	// role name; "readonly" holds subject:read, so the negative case needs a
 	// principal that holds none -- an unauthenticated request is the one the
 	// router itself must reject.
-	res := env.get(t, "/api/v1/v2/subjects", "")
+	res := env.get(t, "/api/v2/subjects", "")
 	if res.Code != http.StatusUnauthorized && res.Code != http.StatusForbidden {
 		t.Errorf("unauthenticated v2 list = %d, want 401 or 403", res.Code)
+	}
+}
+
+// The route was registered inside the /api/v1 group, so it was served from
+// /api/v1/v2/subjects. Nothing called it, so the path was free to fix. This
+// pins the fix: the nested path must not answer as an API endpoint again.
+func TestListSubjectsV2NotServedUnderV1(t *testing.T) {
+	env, adminToken, svcID := newSubjectEnv(t)
+	seedTenant(t, env, "alice", svcID, adminToken)
+
+	res := env.get(t, "/api/v1/v2/subjects", adminToken)
+	body := res.Body.String()
+	if res.Code == http.StatusOK && strings.Contains(body, `"subjects"`) {
+		t.Errorf("the nested path still serves the API: %d %s", res.Code, body)
 	}
 }
 

@@ -501,31 +501,48 @@ List all subjects.
 
 #### List Subjects V2 (Paginated)
 ```http
-GET /api/v1/v2/subjects?page=1&limit=50&search=user&status=active
+GET /api/v2/subjects?page=1&page_size=50&search=user&status=active
 ```
 
-List subjects with pagination, search, and filtering.
+List subjects with pagination, search, and filtering. Results are scoped to
+the caller's tenant, so a reseller sees only their own customers.
 
 **Query Parameters:**
 - `page` (int): Page number (default: 1)
-- `limit` (int): Items per page (default: 50, max: 200)
-- `search` (string): Search by name or email
-- `status` (string): Filter by status (active, expired, frozen, disabled)
-- `sort` (string): Sort field (created_at, name, quota_used)
-- `order` (string): Sort order (asc, desc)
+- `page_size` (int): Items per page (default: 50, max: 1000)
+- `search` (string): Substring match against name or note
+- `status` (string): `active`, `disabled`, `frozen`, or `expired`
+- `expires_before`, `expires_after` (date, `YYYY-MM-DD`)
+- `traffic_min`, `traffic_max` (int): bounds on `quota_used_bytes`
+- `quota_status` (string): `under_limit`, `near_limit` (80%+), or `over_limit`
+- `tag` (string): Substring match against note
+- `sort` (string): `name`, `created`, `expires`, `traffic`, or `quota`
+- `order` (string): `asc` or `desc` (default: desc)
 
 **Response:** 200 OK
 ```json
 {
-  "subjects": [...],
-  "pagination": {
-    "page": 1,
-    "limit": 50,
-    "total": 1523,
-    "pages": 31
-  }
+  "subjects": [
+    {
+      "id": 1,
+      "name": "alice",
+      "enabled": true,
+      "expires_at": null,
+      "expired_at": null,
+      "created_at": 1700000000,
+      "note": ""
+    }
+  ],
+  "total": 1523,
+  "page": 1,
+  "page_size": 50
 }
 ```
+
+Credentials, including `subscription_token`, are never returned by this
+endpoint. Reveal one through its own audited route.
+
+**Permissions Required:** `subject:read`
 
 ---
 

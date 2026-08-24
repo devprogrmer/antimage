@@ -206,7 +206,6 @@ func NewRouter(d Deps) http.Handler {
 			// returned by list or get; revealing one needs its own permission
 			// and is audited by kind, never by value.
 			private.Get("/subjects", d.handleListSubjects)
-			private.Get("/v2/subjects", d.handleListSubjectsV2) // Paginated with search/filter
 			private.Post("/subjects", d.handleCreateSubject)
 			private.Get("/subjects/{subjectID}", d.handleGetSubject)
 			private.Put("/subjects/{subjectID}", d.handleUpdateSubject)
@@ -246,6 +245,22 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/deployments/{id}/rollback", d.handleDeploymentRollback)
 
 			private.Get("/events", d.handleEvents)
+		})
+	})
+
+	// API v2 carries one endpoint so far: the paginated, filterable subject
+	// list. It was written as v2 throughout -- handleListSubjectsV2,
+	// SubjectListV2Response, and a doc comment naming /api/v2/subjects -- but
+	// registered inside the v1 group, so it was actually served from
+	// /api/v1/v2/subjects. Nothing called it, which is why the path survived.
+	//
+	// Same middleware as v1's private group. A newer API version is not a less
+	// protected one, and the handler's own permission and scope checks assume
+	// an authenticated actor is already in the context.
+	r.Route("/api/v2", func(api chi.Router) {
+		api.Group(func(private chi.Router) {
+			private.Use(d.authMiddleware, d.readOnlyMiddleware, d.rateLimitMiddleware(limiter))
+			private.Get("/subjects", d.handleListSubjectsV2)
 		})
 	})
 

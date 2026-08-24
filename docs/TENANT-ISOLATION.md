@@ -75,7 +75,7 @@ All 21 subject-bearing routes, plus device revoke.
 | `/subjects/{id}/enforcement` | GET | `subject:read` | `requireSubjectInScope` |
 | `/subjects/export` | GET | `subject:read` | `SubjectScopeSQL` in the query |
 | `/subjects/import` | POST | `subject:write` (+ `reseller:write` to name an owner) | ownership assigned via `ProvisionSubject` |
-| `/v2/subjects` | GET | `subject:read` | `SubjectScopeSQL` in the query |
+| `/api/v2/subjects` | GET | `subject:read` | `SubjectScopeSQL` in the query |
 | `/subjects/bulk/enable` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/subjects/bulk/delete` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/subjects/bulk/extend` | POST | `subject:write` | `scopeFilterSubjectIDs` |
@@ -123,7 +123,7 @@ Reseller-side reads are scoped by `resellerScopePredicate`:
 | `httpapi/subject_bulk_permission_test.go` | The bulk endpoints' permission gate, independent of scope: an owner without `subject:write` is refused, the check precedes body parsing, and a holder of `subject:write` still passes |
 | `httpapi/subjects_bulk_schema_test.go` | That bulk, export and import actually reach the database: real column writes, the delete republish, CSV round-trip |
 | `httpapi/subjects_import_owner_test.go` | Import ownership: rows land on the named reseller and become visible to them, the ledger is debited, a tenant cannot name an owner, replays are recognised |
-| `httpapi/subjects_search_test.go` | `/v2/subjects` returns real rows and stays scoped under every filter, sort and page size |
+| `httpapi/subjects_search_test.go` | `/api/v2/subjects` returns real rows and stays scoped under every filter, sort and page size |
 | `rbac/reseller_perm_test.go` | Privilege separation of `credit:grant`; reseller holds no tenancy permissions |
 | `resellers/resellers_test.go` | Ledger invariants, atomic provisioning, idempotency |
 
