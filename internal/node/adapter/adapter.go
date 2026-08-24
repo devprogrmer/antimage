@@ -207,6 +207,27 @@ type ObservedService struct {
 
 type Observed struct {
 	Services []ObservedService
+	// Egress is this adapter's reading of the outbound and routing document.
+	//
+	// Nil means the adapter does not manage egress at all -- either it declares
+	// SupportsOutbounds=false, or it has never written one. That is different
+	// from a present-but-empty egress document, which is a deliberate statement
+	// that the node should route nowhere in particular, and which Plan must be
+	// able to tell apart from "never configured" so it does not rewrite a file
+	// on every pass.
+	Egress *ObservedEgress
+}
+
+// ObservedEgress is the adapter's reading of the node's egress configuration.
+//
+// Managed and Checksum carry the same meaning as on ObservedService: Managed
+// separates a file antimage wrote from one a human created, and Checksum is
+// computed from what is on disk right now rather than read from the marker, so
+// comparing the two is what catches a hand edit.
+type ObservedEgress struct {
+	Present  bool
+	Managed  bool
+	Checksum string
 }
 
 type Step struct {
