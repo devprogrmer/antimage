@@ -92,3 +92,39 @@ func TestDescriptorIsWellFormed(t *testing.T) {
 		})
 	}
 }
+
+// An adapter that declares egress support must actually be able to apply it.
+//
+// SupportsOutbounds and SupportsRouting are fail-closed: the panel will not
+// send outbounds or routing to an adapter declaring false, so declaring false
+// is always safe. Declaring TRUE is the dangerous direction -- the panel would
+// build a v3 document, report convergence, and the node would route traffic by
+// its own defaults while the UI showed an egress policy that was never applied.
+//
+// Two things are pinned here. An adapter claiming outbound support must publish
+// an OutboundSchema, because the panel validates Outbound.Params against it
+// exactly as it validates Service.Params against ServiceSchema, and a missing
+// schema means writes are unvalidated rather than rejected. And routing without
+// outbounds is incoherent: a routing rule selects an outbound by tag, so an
+// adapter that cannot hold outbounds has nothing for a rule to name.
+func TestEgressCapabilitiesAreHonest(t *testing.T) {
+	for name, a := range allAdapters(t) {
+		t.Run(name, func(t *testing.T) {
+			caps := a.Descriptor().Caps
+
+			if caps.SupportsOutbounds && len(caps.OutboundSchema) == 0 {
+				t.Error("declares SupportsOutbounds but publishes no OutboundSchema; " +
+					"the panel would accept unvalidated outbound params")
+			}
+			if !caps.SupportsOutbounds && len(caps.OutboundSchema) > 0 {
+				t.Error("publishes an OutboundSchema but declares SupportsOutbounds=false; " +
+					"the schema is unreachable and the pair disagree")
+			}
+			if caps.SupportsRouting && !caps.SupportsOutbounds {
+				t.Error("declares SupportsRouting without SupportsOutbounds; " +
+					"a routing rule selects an outbound by tag, so there would be " +
+					"nothing for a rule to name")
+			}
+		})
+	}
+}
