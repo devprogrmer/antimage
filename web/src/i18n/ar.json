@@ -149,7 +149,7 @@
   "activity.device": "الجهاز",
   "activity.traffic": "الاستهلاك",
   "devices.title": "الأجهزة",
-  "devices.count": "{{count}} جهاز متصل بهذا المستخدم",
+  "devices.count": "الأجهزة المتصلة",
   "devices.online": "متصل",
   "devices.recently_active": "نشط مؤخراً",
   "devices.offline": "غير متصل",

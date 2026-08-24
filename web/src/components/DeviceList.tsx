@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
-import { t } from "../i18n";
+import { formatNumber, t } from "../i18n";
 
 interface Device {
   device_id: string;
@@ -65,8 +65,11 @@ export function DeviceList({ subjectId }: DeviceListProps) {
     <div>
       <div className="mb-4">
         <h3 className="text-sm font-semibold">{t('devices.title')}</h3>
+        {/* Phrased as a label and a count rather than "N devices". t() has no
+            interpolation, and an English "s" suffix cannot stand in for the
+            three plural forms Russian needs or the six Arabic needs. */}
         <p className="text-xs text-zinc-400 mt-1">
-          {devices.length} device{devices.length !== 1 ? "s" : ""} connected to this subject
+          {t('devices.count')}: {formatNumber(devices.length)}
         </p>
       </div>
 

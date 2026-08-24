@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
-import { t } from "../i18n";
+import { formatRelativeTime, t } from "../i18n";
 
 interface Activity {
   id: number;
@@ -73,21 +73,6 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
     return icons[eventType] || "📌";
   }
 
-  function formatTimestamp(ts: number): string {
-    const date = new Date(ts * 1000);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return t('common.just_now');
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString() + " " + date.toLocaleTimeString();
-  }
-
   function formatBytes(bytes: number): string {
     if (bytes === 0) return "0 B";
     const k = 1024;
@@ -134,7 +119,7 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
                       {activity.event_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                     </span>
                     <span className="text-xs text-zinc-500">
-                      {formatTimestamp(activity.timestamp)}
+                      {formatRelativeTime(activity.timestamp)}
                     </span>
                   </div>
 

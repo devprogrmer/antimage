@@ -91,7 +91,7 @@ export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse">
             <thead>
-              <tr className="border-b border-zinc-800 text-left">
+              <tr className="border-b border-zinc-800 text-start">
                 <th className="py-2 px-2">{t('connections.start_time')}</th>
                 <th className="py-2 px-2">{t('connections.duration')}</th>
                 <th className="py-2 px-2">{t('connections.upload')}</th>

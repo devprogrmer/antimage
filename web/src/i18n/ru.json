@@ -149,7 +149,7 @@
   "activity.device": "Устройство",
   "activity.traffic": "Трафик",
   "devices.title": "Устройства",
-  "devices.count": "Устройств у этого пользователя: {{count}}",
+  "devices.count": "Подключено устройств",
   "devices.online": "В сети",
   "devices.recently_active": "Недавно активно",
   "devices.offline": "Не в сети",

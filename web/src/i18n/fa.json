@@ -149,7 +149,7 @@
   "activity.device": "دستگاه",
   "activity.traffic": "ترافیک",
   "devices.title": "دستگاه‌ها",
-  "devices.count": "{{count}} دستگاه به این کاربر متصل است",
+  "devices.count": "دستگاه‌های متصل",
   "devices.online": "آنلاین",
   "devices.recently_active": "فعال اخیر",
   "devices.offline": "آفلاین",

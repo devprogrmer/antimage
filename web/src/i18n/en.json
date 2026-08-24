@@ -132,7 +132,7 @@
   "activity.device": "Device",
   "activity.traffic": "Traffic",
   "devices.title": "Devices",
-  "devices.count": "{{count}} device(s) connected to this subject",
+  "devices.count": "Devices connected",
   "devices.online": "Online",
   "devices.recently_active": "Recently Active",
   "devices.offline": "Offline",

@@ -149,7 +149,7 @@
   "activity.device": "设备",
   "activity.traffic": "流量",
   "devices.title": "设备",
-  "devices.count": "已连接 {{count}} 台设备",
+  "devices.count": "已连接设备",
   "devices.online": "在线",
   "devices.recently_active": "近期活跃",
   "devices.offline": "离线",

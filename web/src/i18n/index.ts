@@ -85,6 +85,22 @@ export function formatNumber(value: number, locale: Locale = current): string {
   return new Intl.NumberFormat(intlTag(locale)).format(value);
 }
 
+/** Relative time ("5 minutes ago") via Intl, which knows that Arabic puts the
+ *  marker before the quantity while Persian, Russian and Chinese put it after.
+ *  Assembling this by hand from a number and an "ago" string produces word
+ *  salad in at least one of our five locales, so it is never done that way.
+ *  Anything older than a week falls back to an absolute timestamp. */
+export function formatRelativeTime(unixSeconds: number, locale: Locale = current): string {
+  const rtf = new Intl.RelativeTimeFormat(intlTag(locale), { numeric: "auto" });
+  const deltaSeconds = Math.round(unixSeconds - Date.now() / 1000);
+  const magnitude = Math.abs(deltaSeconds);
+  if (magnitude < 60) return rtf.format(deltaSeconds, "second");
+  if (magnitude < 3600) return rtf.format(Math.round(deltaSeconds / 60), "minute");
+  if (magnitude < 86400) return rtf.format(Math.round(deltaSeconds / 3600), "hour");
+  if (magnitude < 604800) return rtf.format(Math.round(deltaSeconds / 86400), "day");
+  return formatTimestamp(unixSeconds, locale);
+}
+
 export function formatTimestamp(unixSeconds: number | null, locale: Locale = current): string {
   if (!unixSeconds) return t("common.never");
   return new Intl.DateTimeFormat(intlTag(locale), {
