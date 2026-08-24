@@ -74,6 +74,7 @@ All 21 subject-bearing routes, plus device revoke.
 | `/subjects/{id}/connections` | GET | `subject:read` | `requireSubjectInScope` |
 | `/subjects/{id}/enforcement` | GET | `subject:read` | `requireSubjectInScope` |
 | `/subjects/export` | GET | `subject:read` | `SubjectScopeSQL` in the query |
+| `/subjects/import` | POST | `subject:write` | none — see gap 1, imports are platform-owned |
 | `/subjects/bulk/enable` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/subjects/bulk/delete` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/subjects/bulk/extend` | POST | `subject:write` | `scopeFilterSubjectIDs` |
@@ -119,6 +120,7 @@ Reseller-side reads are scoped by `resellerScopePredicate`:
 | `httpapi/subject_tenant_isolation_test.go` | List, get, reveal, and the three mutation paths, end to end |
 | `httpapi/subject_surface_isolation_test.go` | Every remaining endpoint: devices, connections, enforcement, disable, freeze, bulk, export |
 | `httpapi/subject_bulk_permission_test.go` | The bulk endpoints' permission gate, independent of scope: an owner without `subject:write` is refused, the check precedes body parsing, and a holder of `subject:write` still passes |
+| `httpapi/subjects_bulk_schema_test.go` | That bulk, export and import actually reach the database: real column writes, the delete republish, CSV round-trip |
 | `rbac/reseller_perm_test.go` | Privilege separation of `credit:grant`; reseller holds no tenancy permissions |
 | `resellers/resellers_test.go` | Ledger invariants, atomic provisioning, idempotency |
 
@@ -130,6 +132,11 @@ All mutation-verified: reverting a guard makes a named test fail.
    assign ownership, so imported rows are platform-owned and invisible to every
    tenant. Not a leak, but a reseller cannot use it and an admin import will not
    belong to anyone. Needs an owner parameter before resellers go live.
+
+   Now reachable: gap 4 made import actually work, where before it failed at
+   SQL on every row. It requires `subject:write`, so only an actor who could
+   already create subjects can reach it — but a reseller who imports will not
+   see what they imported.
 2. **CLOSED.** Bulk endpoints had no permission check, only the scope filter.
    All five now call `d.authorize(..., PermSubjectWrite, ...)` before reading
    the request body. The actor that exposed this owns a subject but holds no
@@ -139,16 +146,31 @@ All mutation-verified: reverting a guard makes a named test fail.
 3. **CLOSED.** The three dead handlers in `subjects_activity.go`
    (`handleSubjectActivity`, `handleSubjectConnections`, `handleSubjectDevices`)
    have been deleted; they are no longer defined or routed.
-4. **Pre-existing schema bugs** in the bulk and export handlers, unrelated to
-   isolation: they reference `disabled`, `frozen`, `node_id` and `updated_at`,
-   none of which exist in the `subjects` table. The real columns are `enabled`
-   and `frozen_at`. Every bulk operation therefore fails at SQL and export
-   returns 500. These endpoints are **non-functional**, not merely unscoped.
-   (`subscription_token` was listed here previously but does exist — migration
+4. **CLOSED.** The bulk, export and import handlers referenced `disabled`,
+   `frozen`, `node_id` and `updated_at`, none of which exist. The real columns
+   are `enabled` (inverted sense) and `frozen_at` (a nullable timestamp); there
+   is no `updated_at` at all, and `node_id` lives on `services`, not
+   `subject_services`. Every bulk operation failed at SQL and export returned
+   500. (`subscription_token` was listed here once but does exist — migration
    00012 adds it.)
 
-Gap 4 matters for the security story: several endpoints appeared safe during
-testing only because they were broken. Fixing the schema without adding the
-scope guard would have turned them into live leaks — and, until gap 2 was
-closed, without a permission guard either. Both guards are now in place, so the
-schema fix can proceed on its own.
+   Repairing the columns alone was not enough. `bulk/delete` collected the
+   affected nodes into a map and discarded it, so a working DELETE would have
+   left every node serving a deleted subject until an unrelated change bumped
+   its revision. `enable`, `extend` and `delete` now go through the service
+   layer, which owns the transaction and republishes through `CommitNodeChange`.
+   `reset-traffic` and `set-quota` deliberately do not: quota is not part of the
+   desired document, so there is nothing for a node to observe.
+
+   Import additionally had no permission check and bound NULL into the
+   `NOT NULL` `note` column. Both fixed.
+
+   Proven by `subjects_bulk_schema_test.go`, which asserts on the database and
+   on the `failed` counter rather than the status code — these endpoints
+   returned 200 while doing nothing, so a status-only test passed against the
+   broken version.
+
+Gap 4 mattered for the security story: several endpoints appeared safe during
+testing only because they were broken. Fixing the schema without the scope and
+permission guards would have turned them into live holes, which is why gap 2
+was closed first.

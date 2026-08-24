@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/amyrm/antimage/internal/panel/subjects"
 )
 
 // BulkEnableRequest specifies subjects to enable.
@@ -67,33 +68,22 @@ func (d Deps) handleBulkEnableSubjects(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	errMsgs := []string{}
 
+	// Through the service layer: enabling changes which subjects appear in a
+	// node's desired document (buildSubjects filters on s.enabled = 1), so it
+	// must republish. The UPDATE this replaces wrote a `disabled` column that
+	// does not exist -- the real column is `enabled`, with inverted sense --
+	// and set an `updated_at` that does not exist either, so it failed at SQL
+	// on every row and never republished anything.
+	svc := d.subjectService()
+	sa := d.svcActor(r, actor)
 	ctx := r.Context()
-	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
-		for _, subjectID := range req.SubjectIDs {
-			result, err := tx.ExecContext(ctx, `
-				UPDATE subjects SET disabled = 0, updated_at = ? WHERE id = ?
-			`, time.Now().Unix(), subjectID)
-			if err != nil {
-				errMsgs = append(errMsgs, err.Error())
-				failed++
-				continue
-			}
-
-			rowsAffected, _ := result.RowsAffected()
-			if rowsAffected == 0 {
-				errMsgs = append(errMsgs, "subject not found")
-				failed++
-				continue
-			}
-
-			enabled++
+	for _, subjectID := range req.SubjectIDs {
+		if err := svc.SetEnabled(ctx, sa, subjectID, true); err != nil {
+			errMsgs = append(errMsgs, err.Error())
+			failed++
+			continue
 		}
-		return nil
-	})
-
-	if err != nil {
-		http.Error(w, "transaction failed", http.StatusInternalServerError)
-		return
+		enabled++
 	}
 
 	resp := BulkEnableResponse{
@@ -165,59 +155,46 @@ func (d Deps) handleBulkExtendSubjects(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	errMsgs := []string{}
 
+	// Extending expiry can move a subject back into a node's desired document,
+	// since buildSubjects filters on expires_at > now, so this republishes too
+	// and therefore goes through the service layer. The previous UPDATE also
+	// wrote a nonexistent updated_at column and failed at SQL for every row.
+	svc := d.subjectService()
+	sa := d.svcActor(r, actor)
 	ctx := r.Context()
-	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
-		for _, subjectID := range req.SubjectIDs {
-			// Get current expiry
-			var currentExpiry sql.NullInt64
-			err := tx.QueryRowContext(ctx, `
-				SELECT expires_at FROM subjects WHERE id = ?
-			`, subjectID).Scan(&currentExpiry)
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					errMsgs = append(errMsgs, "subject not found")
-				} else {
-					errMsgs = append(errMsgs, err.Error())
-				}
-				failed++
-				continue
-			}
+	extendBy := time.Duration(req.Days) * 24 * time.Hour
 
-			// Calculate new expiry
-			var newExpiry int64
-			if currentExpiry.Valid {
-				// Extend from current expiry if set
-				newExpiry = currentExpiry.Int64 + int64(req.Days*24*3600)
+	for _, subjectID := range req.SubjectIDs {
+		// Extend from the current expiry when one is set, otherwise from now --
+		// so extending an already-expired subject does not silently backdate the
+		// new expiry into the past and leave it excluded from every node.
+		var current sql.NullInt64
+		err := d.Store.Read().QueryRowContext(ctx,
+			`SELECT expires_at FROM subjects WHERE id = ?`, subjectID).Scan(&current)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				errMsgs = append(errMsgs, "subject not found")
 			} else {
-				// Set expiry from now if not set
-				newExpiry = time.Now().Unix() + int64(req.Days*24*3600)
-			}
-
-			// Update expiry
-			result, err := tx.ExecContext(ctx, `
-				UPDATE subjects SET expires_at = ?, updated_at = ? WHERE id = ?
-			`, newExpiry, time.Now().Unix(), subjectID)
-			if err != nil {
 				errMsgs = append(errMsgs, err.Error())
-				failed++
-				continue
 			}
-
-			rowsAffected, _ := result.RowsAffected()
-			if rowsAffected == 0 {
-				errMsgs = append(errMsgs, "update failed")
-				failed++
-				continue
-			}
-
-			extended++
+			failed++
+			continue
 		}
-		return nil
-	})
 
-	if err != nil {
-		http.Error(w, "transaction failed", http.StatusInternalServerError)
-		return
+		base := d.now()
+		if current.Valid && current.Int64 > base.Unix() {
+			base = time.Unix(current.Int64, 0)
+		}
+		newExpiry := base.Add(extendBy)
+
+		if err := svc.Update(ctx, sa, subjectID, subjects.UpdateInput{
+			ExpiresAt: &newExpiry,
+		}); err != nil {
+			errMsgs = append(errMsgs, err.Error())
+			failed++
+			continue
+		}
+		extended++
 	}
 
 	resp := BulkExtendResponse{
@@ -283,12 +260,21 @@ func (d Deps) handleBulkResetTraffic(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	errMsgs := []string{}
 
+	// Usage counters stay in one transaction and do NOT republish: quota is not
+	// part of the desired document (see nodes/document.go Subject), so zeroing
+	// quota_used_bytes changes nothing a node would observe. Only the dropped
+	// updated_at column was wrong here.
+	//
+	// Freezing is deliberately left alone. A subject frozen for quota is
+	// unfrozen by the quota sweeper when its period rolls over, and that path
+	// does republish because it flips enabled; silently unfreezing here would
+	// duplicate that decision in a second place.
 	ctx := r.Context()
 	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		for _, subjectID := range req.SubjectIDs {
 			result, err := tx.ExecContext(ctx, `
-				UPDATE subjects SET quota_used_bytes = 0, updated_at = ? WHERE id = ?
-			`, time.Now().Unix(), subjectID)
+				UPDATE subjects SET quota_used_bytes = 0 WHERE id = ?
+			`, subjectID)
 			if err != nil {
 				errMsgs = append(errMsgs, err.Error())
 				failed++
@@ -389,9 +375,11 @@ func (d Deps) handleBulkSetQuota(w http.ResponseWriter, r *http.Request) {
 				quotaValue = sql.NullInt64{Int64: req.QuotaBytes, Valid: true}
 			}
 
+			// No republish: quota_bytes is not part of the desired document.
+			// Only the dropped updated_at column was wrong here.
 			result, err := tx.ExecContext(ctx, `
-				UPDATE subjects SET quota_bytes = ?, updated_at = ? WHERE id = ?
-			`, quotaValue, time.Now().Unix(), subjectID)
+				UPDATE subjects SET quota_bytes = ? WHERE id = ?
+			`, quotaValue, subjectID)
 			if err != nil {
 				errMsgs = append(errMsgs, err.Error())
 				failed++

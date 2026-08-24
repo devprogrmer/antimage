@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 
@@ -61,72 +60,38 @@ func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
 
 	deleted := 0
 	failed := 0
-	errors := []string{}
-	affectedNodes := make(map[int64]struct{})
+	errMsgs := []string{}
 
+	// Delegate to the service layer instead of issuing DELETEs here. It owns
+	// the transaction, captures the affected nodes BEFORE the cascade removes
+	// the grants that name them, and republishes each through CommitNodeChange.
+	//
+	// The inline version this replaces did neither correctly: it read node_id
+	// from subject_services, a column that table does not have (node_id lives
+	// on services), so every delete failed at SQL; and it collected the
+	// affected nodes into a map it then dropped on the floor, so had the query
+	// worked, a deleted subject would have stayed in every node's desired
+	// document until something unrelated bumped the revision.
+	//
+	// One transaction per subject rather than one for the batch: this API
+	// already reports per-subject success and failure, and one bad id must not
+	// roll back the subjects that succeeded.
+	svc := d.subjectService()
+	sa := d.svcActor(r, actor)
 	ctx := r.Context()
-	err := d.Store.Write(ctx, func(tx *sql.Tx) error {
-		for _, subjectID := range req.SubjectIDs {
-			// Check if subject exists and collect affected nodes
-			rows, err := tx.QueryContext(ctx, `
-			SELECT node_id FROM subject_services WHERE subject_id = ?
-		`, subjectID)
-			if err != nil {
-				errors = append(errors, err.Error())
-				failed++
-				continue
-			}
-
-			for rows.Next() {
-				var nodeID int64
-				if err := rows.Scan(&nodeID); err == nil {
-					affectedNodes[nodeID] = struct{}{}
-				}
-			}
-			if err := rows.Err(); err != nil {
-				// Record and continue, like every other failure in this loop: one
-				// unreadable subject must not abandon the rest of the batch.
-				_ = rows.Close() //nolint:sqlclosecheck // closed per iteration, see below
-				errors = append(errors, err.Error())
-				failed++
-				continue
-			}
-			// Closed per iteration; a defer would hold every result set open for
-			// the whole batch.
-			_ = rows.Close() //nolint:sqlclosecheck // closed per iteration, see above
-
-			// Delete subject
-			result, err := tx.ExecContext(ctx, `DELETE FROM subjects WHERE id = ?`, subjectID)
-			if err != nil {
-				errors = append(errors, err.Error())
-				failed++
-				continue
-			}
-
-			rowsAffected, _ := result.RowsAffected()
-			if rowsAffected == 0 {
-				errors = append(errors, "subject not found")
-				failed++
-				continue
-			}
-
-			deleted++
+	for _, subjectID := range req.SubjectIDs {
+		if err := svc.Delete(ctx, sa, subjectID); err != nil {
+			errMsgs = append(errMsgs, err.Error())
+			failed++
+			continue
 		}
-		return nil
-	})
-
-	if err != nil {
-		http.Error(w, "transaction failed", http.StatusInternalServerError)
-		return
+		deleted++
 	}
-
-	// Republish affected nodes
-	// Note: Hub doesn't have direct republish method, nodes will reconcile on next poll
 
 	resp := BulkDeleteResponse{
 		Deleted: deleted,
 		Failed:  failed,
-		Errors:  errors,
+		Errors:  errMsgs,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

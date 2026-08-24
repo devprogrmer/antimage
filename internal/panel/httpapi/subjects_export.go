@@ -23,8 +23,13 @@ func (d Deps) handleExportSubjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := append([]any{}, store.ScopeArgs(rbac.ScopeOf(ActorFrom(r.Context())))...)
+	// The Disabled and Frozen CSV columns are derived, not stored. The table
+	// holds `enabled` (inverted sense) and `frozen_at` (a nullable timestamp);
+	// selecting `disabled` and `frozen` made every export fail at SQL and
+	// return 500. There is no updated_at column at all, so that field is gone
+	// from the export rather than invented.
 	rows, err := d.Store.Read().QueryContext(r.Context(), `
-		SELECT id, name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at
+		SELECT id, name, note, enabled, frozen_at, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at
 		FROM subjects
 		WHERE `+store.SubjectScopeSQL+`
 		ORDER BY created_at DESC
@@ -43,35 +48,39 @@ func (d Deps) handleExportSubjects(w http.ResponseWriter, r *http.Request) {
 
 	// Write header
 	_ = csvWriter.Write([]string{
-		"ID", "Name", "Note", "Disabled", "Frozen", "ExpiresAt", "QuotaBytes", "QuotaUsedBytes", "SubscriptionToken", "CreatedAt", "UpdatedAt",
+		"ID", "Name", "Note", "Disabled", "Frozen", "ExpiresAt", "QuotaBytes", "QuotaUsedBytes", "SubscriptionToken", "CreatedAt",
 	})
 
 	for rows.Next() {
 		var id int64
 		var name string
 		var note sql.NullString
-		var disabled, frozen bool
-		var expiresAt, quotaBytes, quotaUsedBytes sql.NullInt64
+		var enabled bool
+		var frozenAt, expiresAt, quotaBytes, quotaUsedBytes sql.NullInt64
 		var subscriptionToken string
-		var createdAt, updatedAt int64
+		var createdAt int64
 
-		err := rows.Scan(&id, &name, &note, &disabled, &frozen, &expiresAt, &quotaBytes, &quotaUsedBytes, &subscriptionToken, &createdAt, &updatedAt)
+		err := rows.Scan(&id, &name, &note, &enabled, &frozenAt, &expiresAt, &quotaBytes, &quotaUsedBytes, &subscriptionToken, &createdAt)
 		if err != nil {
-			continue // Skip bad rows
+			// A skipped row is a silently short export, the same failure mode
+			// the rows.Err() branch below guards against, so it is logged for
+			// the same reason: nobody checks a CSV row count against a number
+			// they do not have.
+			slog.ErrorContext(r.Context(), "subject export skipped a row", "error", err)
+			continue
 		}
 
 		record := []string{
 			strconv.FormatInt(id, 10),
 			name,
 			note.String,
-			strconv.FormatBool(disabled),
-			strconv.FormatBool(frozen),
+			strconv.FormatBool(!enabled),
+			strconv.FormatBool(frozenAt.Valid),
 			formatNullInt64(expiresAt),
 			formatNullInt64(quotaBytes),
 			formatNullInt64(quotaUsedBytes),
 			subscriptionToken,
 			time.Unix(createdAt, 0).Format(time.RFC3339),
-			time.Unix(updatedAt, 0).Format(time.RFC3339),
 		}
 
 		_ = csvWriter.Write(record)

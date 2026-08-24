@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
 )
 
 // ImportSubjectsRequest is the payload for CSV import.
@@ -28,6 +30,18 @@ type ImportSubjectsResponse struct {
 // POST /api/v1/subjects/import
 // Body: {"csv": "Name,Note,Disabled,Frozen,ExpiresAt,..."}
 func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
+	// Import had no permission check at all. That was survivable only because
+	// it also failed at SQL on every row; repairing the columns without this
+	// gate would have handed subject creation to any authenticated caller,
+	// including a readonly one. Same reasoning as the bulk endpoints.
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
 	var req ImportSubjectsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -73,14 +87,22 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		disabled := false
+		// The CSV keeps the Disabled and Frozen columns the export writes, but
+		// the table stores neither: `enabled` carries the inverted sense and
+		// `frozen_at` is a nullable timestamp. Both are translated here rather
+		// than changing a format an operator may already have on disk.
+		enabled := true
 		if idx, ok := colMap["Disabled"]; ok && idx < len(row) {
-			disabled, _ = strconv.ParseBool(row[idx])
+			if disabled, err := strconv.ParseBool(row[idx]); err == nil {
+				enabled = !disabled
+			}
 		}
 
-		frozen := false
+		var frozenAt sql.NullInt64
 		if idx, ok := colMap["Frozen"]; ok && idx < len(row) {
-			frozen, _ = strconv.ParseBool(row[idx])
+			if frozen, err := strconv.ParseBool(row[idx]); err == nil && frozen {
+				frozenAt = sql.NullInt64{Valid: true, Int64: d.now().Unix()}
+			}
 		}
 
 		var expiresAt sql.NullInt64
@@ -97,9 +119,12 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		note := sql.NullString{}
-		if idx, ok := colMap["Note"]; ok && idx < len(row) && row[idx] != "" {
-			note = sql.NullString{Valid: true, String: row[idx]}
+		// note is TEXT NOT NULL DEFAULT '', so an absent column is the empty
+		// string, not NULL. Binding sql.NullString{} here failed the NOT NULL
+		// constraint for every row whose Note was blank.
+		note := ""
+		if idx, ok := colMap["Note"]; ok && idx < len(row) {
+			note = row[idx]
 		}
 
 		// Generate subscription token
@@ -111,14 +136,15 @@ func (d Deps) handleImportSubjects(w http.ResponseWriter, r *http.Request) {
 		}
 		subscriptionToken := base64.URLEncoding.EncodeToString(tokenBytes)
 
-		// Insert subject
-		now := time.Now().Unix()
+		// Insert subject. No updated_at column exists, and frozen_at doubles as
+		// the frozen flag.
+		now := d.now().Unix()
 		ctx := r.Context()
 		err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `
-				INSERT INTO subjects (name, note, disabled, frozen, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-			`, name, note, disabled, frozen, expiresAt, quotaBytes, subscriptionToken, now, now)
+				INSERT INTO subjects (name, note, enabled, frozen_at, expires_at, quota_bytes, quota_used_bytes, subscription_token, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+			`, name, note, enabled, frozenAt, expiresAt, quotaBytes, subscriptionToken, now)
 			return err
 		})
 
