@@ -85,6 +85,18 @@ type Caps struct {
 	// OutboundSchema is to Outbound.Params what ServiceSchema is to
 	// Service.Params. Required when SupportsOutbounds is true.
 	OutboundSchema json.RawMessage `json:"outbound_schema,omitempty"`
+
+	// BuiltinOutboundTags are outbounds the adapter provides on its own, which
+	// a routing rule may reference without a corresponding panel row.
+	//
+	// Xray's accounting configuration defines "direct", so a rule may send
+	// traffic straight out without anybody creating an outbound for it. The
+	// panel needs to know: a rule naming a tag that resolves nowhere makes the
+	// adapter refuse to render, which fails Plan for the WHOLE node -- one bad
+	// rule would stop it converging on anything, including its inbounds.
+	// Publishing the list is what lets the panel refuse that rule at the API
+	// instead.
+	BuiltinOutboundTags []string `json:"builtin_outbound_tags,omitempty"`
 }
 
 type Descriptor struct {

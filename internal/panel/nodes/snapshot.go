@@ -125,11 +125,26 @@ func BuildDesiredSnapshot(
 		return nil, err
 	}
 
+	outbounds, err := buildOutbounds(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	routing, err := buildRouting(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
 	doc := Document{
-		Revision: revision,
-		NodeID:   nodeID,
-		Services: services,
-		Subjects: subjects,
+		Revision:  revision,
+		NodeID:    nodeID,
+		Services:  services,
+		Subjects:  subjects,
+		Outbounds: outbounds,
+		Routing:   routing,
+	}
+	sortOutbounds(doc.Outbounds)
+	if doc.Routing != nil {
+		sortRoutingRules(doc.Routing.Rules)
 	}
 	// Derived from content, not from the panel's maximum: a node given no
 	// egress state keeps declaring v2 and its hash does not move.

@@ -123,6 +123,14 @@ func (e *testEnv) post(t *testing.T, path, body, token string) *httptest.Respons
 	return e.do(t, http.MethodPost, path, body, token)
 }
 
+func (e *testEnv) put(t *testing.T, path, body, token string) *httptest.ResponseRecorder {
+	return e.do(t, http.MethodPut, path, body, token)
+}
+
+func (e *testEnv) delete(t *testing.T, path, token string) *httptest.ResponseRecorder {
+	return e.do(t, http.MethodDelete, path, "", token)
+}
+
 // login returns the session cookie value.
 func (e *testEnv) login(t *testing.T, username, password string) string {
 	t.Helper()

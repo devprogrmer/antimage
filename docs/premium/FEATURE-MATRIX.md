@@ -111,25 +111,31 @@ Every non-gap row cites a path or route. If a row cites nothing, it is a gap.
 | Subscription templates / remarks (§33) | Marzban, 3X-UI | **gap-B** | — |
 | Custom hostname per subscription | Marzban | **gap-B** | no public-URL concept until `ANTIMAGE_PUBLIC_URL` (bot only) |
 
-## 6. Outbounds, providers, routing — the largest gap
+## 6. Outbounds, providers, routing
 
-Every row here is blocked on the same thing: `nodes.Document` carries only
-`Services` and `Subjects`. There is no outbound or routing concept in the
-control plane, so none of this can be expressed as desired state today.
+**The architecture gap is closed.** `nodes.Document` carries `Outbounds` and
+`Routing` at schema v3; Xray and sing-box render both; the panel has tables, an
+API and document builders. Egress is now real desired state — configured through
+the API, carried in the document, applied on the node, and drift-detected like
+anything else.
+
+What remains is no longer *architectural*. Providers, pools, health and failover
+need new panel modelling on top of the outbounds that now exist, which is
+ordinary backend work rather than a change to the control plane's shape.
 
 | Feature | Benchmark | Status |
 |---|---|---|
-| Outbound Studio (§21) | 3X-UI, vpn-ui | **gap-ARCH** |
-| Provider abstraction (§22) | vpn-ui | **gap-ARCH** |
-| Multi-location outbound (§23) | vpn-ui | **gap-ARCH** |
-| Outbound pools + selection (§24) | vpn-ui | **gap-ARCH** |
-| Outbound health (§25) | vpn-ui | **gap-ARCH** |
-| Failover (§26) | vpn-ui | **gap-ARCH** |
-| Outbound accounting (§27) | 3X-UI | **gap-ARCH** |
-| Routing Studio (§28) | 3X-UI | **gap-ARCH** |
-| Routing simulator (§29) | — | **NEW** + gap-ARCH |
-| Outbound chaining (§30) | 3X-UI | **gap-ARCH** |
-| WARP / NordVPN / Tor integrations | 3X-UI, vpn-ui | **gap-ARCH** |
+| Outbound Studio (§21) | 3X-UI, vpn-ui | **UI-** — document v3, both adapters, tables and API done; no UI |
+| Routing Studio (§28) | 3X-UI | **UI-** — rules, matchers and ordering done end to end; no UI |
+| Provider abstraction (§22) | vpn-ui | **gap-B** — models credentials and locations above an outbound |
+| Multi-location outbound (§23) | vpn-ui | **gap-B** |
+| Outbound pools + selection (§24) | vpn-ui | **gap-B** |
+| Outbound health (§25) | vpn-ui | **gap-B** — needs a prober; `Probe` is per-adapter, not per-outbound |
+| Failover (§26) | vpn-ui | **gap-B** — depends on §24 and §25 |
+| Outbound accounting (§27) | 3X-UI | **gap-ARCH** — still blocked on the Phase C coefficient migration |
+| Routing simulator (§29) | — | **NEW** — the rule model now exists to simulate against |
+| Outbound chaining (§30) | 3X-UI | **gap-A** — the document can carry it; neither adapter renders a chain yet |
+| WARP / NordVPN / Tor | 3X-UI, vpn-ui | **gap-B** — each is a provider over the `wireguard` and `socks` kinds that now work |
 
 ## 7. Multi-tenancy, resellers, RBAC
 

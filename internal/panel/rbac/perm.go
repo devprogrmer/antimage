@@ -41,6 +41,15 @@ const (
 	// or every operator who can rename a reseller can also pay themselves.
 	PermResellerRead  Permission = "reseller:read"
 	PermResellerWrite Permission = "reseller:write"
+
+	// PermOutboundRead and PermOutboundWrite govern egress: the outbounds a
+	// node may send traffic through and the rules selecting between them.
+	// Separate from service:* because an inbound decides who may connect and an
+	// outbound decides where their traffic goes -- an operator trusted to add a
+	// listener is not automatically trusted to redirect existing traffic
+	// through a proxy they control.
+	PermOutboundRead  Permission = "outbound:read"
+	PermOutboundWrite Permission = "outbound:write"
 	PermCreditGrant   Permission = "credit:grant"
 )
 
@@ -59,6 +68,7 @@ func AllPermissions() []Permission {
 		PermAuditRead, PermSettingsWrite,
 		PermAlertRead,
 		PermResellerRead, PermResellerWrite, PermCreditGrant,
+		PermOutboundRead, PermOutboundWrite,
 	}
 }
 
@@ -78,6 +88,7 @@ func BuiltinRoles() map[string][]Permission {
 			// operation that creates value from nothing, so it stays with
 			// super_admin until an operator explicitly delegates it.
 			PermResellerRead, PermResellerWrite,
+			PermOutboundRead, PermOutboundWrite,
 		},
 		// A reseller manages their own users, which is the whole point of the
 		// role, and may reveal a credential to hand it to that user.
@@ -90,10 +101,16 @@ func BuiltinRoles() map[string][]Permission {
 			PermNodeRead, PermServiceRead, PermServiceWrite,
 			PermSubjectRead, PermSubjectWrite, PermCredReveal,
 			PermAlertRead,
+			// Read only, and still subject to node scope: egress is addressed
+			// by node, and Check treats a TargetNode as an exhaustive
+			// allow-list, so this grants visibility only of nodes the tenant
+			// is actually scoped to. Redirecting traffic stays a platform
+			// decision either way.
+			PermOutboundRead,
 		},
 		"readonly": {
 			PermNodeRead, PermServiceRead, PermSubjectRead,
-			PermAlertRead,
+			PermAlertRead, PermOutboundRead,
 		},
 	}
 }
