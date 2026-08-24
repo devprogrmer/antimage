@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
 )
 
 // BulkDeleteRequest specifies subjects to delete.
@@ -21,6 +23,18 @@ type BulkDeleteResponse struct {
 // handleBulkDeleteSubjects deletes multiple subjects.
 // POST /api/v1/subjects/bulk/delete
 func (d Deps) handleBulkDeleteSubjects(w http.ResponseWriter, r *http.Request) {
+	// Permission before scope; see handleBulkEnableSubjects. Deletion carries
+	// no permission of its own -- subject:write covers it, matching the
+	// single-subject path, which reaches the same gate through the service
+	// layer's authorize().
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
 	var req BulkDeleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)

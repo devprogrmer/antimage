@@ -18,7 +18,20 @@ import (
 // one tenant must not be able to see another's.
 func seedTenant(t *testing.T, env *testEnv, who string, svcID int64, adminToken string) (string, int64) {
 	t.Helper()
-	env.seedAdmin(t, who, "pw", "reseller")
+	return seedTenantWithRole(t, env, who, "reseller", svcID, adminToken)
+}
+
+// seedTenantWithRole builds a tenant that owns one subject, under any role.
+//
+// The role is a parameter because scope and permission are independent axes and
+// the interesting actor for permission tests sits where they disagree: someone
+// who owns subjects (non-empty scope) but holds no subject:write. Hardcoding
+// "reseller" cannot express that, since the reseller role has write.
+func seedTenantWithRole(
+	t *testing.T, env *testEnv, who, role string, svcID int64, adminToken string,
+) (string, int64) {
+	t.Helper()
+	env.seedAdmin(t, who, "pw", role)
 	token := env.login(t, who, "pw")
 
 	// The subject is created by the super admin so that creation itself is not

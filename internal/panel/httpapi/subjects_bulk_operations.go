@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
 )
 
 // BulkEnableRequest specifies subjects to enable.
@@ -23,6 +25,20 @@ type BulkEnableResponse struct {
 // handleBulkEnableSubjects enables multiple subjects.
 // POST /api/v1/subjects/bulk/enable
 func (d Deps) handleBulkEnableSubjects(w http.ResponseWriter, r *http.Request) {
+	// Permission first, then scope -- the two answer different questions and
+	// neither substitutes for the other. The scope filter decides WHICH
+	// subjects this caller may touch; it silently drops the rest, so a role
+	// carrying no subject:write but a non-empty scope would still mutate its
+	// own subjects unchallenged. Only rbac.Check decides whether the caller may
+	// perform the operation at all. See docs/TENANT-ISOLATION.md.
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
 	var req BulkEnableRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -107,6 +123,15 @@ type BulkExtendResponse struct {
 // handleBulkExtendSubjects extends expiry for multiple subjects.
 // POST /api/v1/subjects/bulk/extend
 func (d Deps) handleBulkExtendSubjects(w http.ResponseWriter, r *http.Request) {
+	// Permission before scope; see handleBulkEnableSubjects.
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
 	var req BulkExtendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -221,6 +246,15 @@ type BulkResetTrafficResponse struct {
 // handleBulkResetTraffic resets traffic counters for multiple subjects.
 // POST /api/v1/subjects/bulk/reset-traffic
 func (d Deps) handleBulkResetTraffic(w http.ResponseWriter, r *http.Request) {
+	// Permission before scope; see handleBulkEnableSubjects.
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
 	var req BulkResetTrafficRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -305,6 +339,15 @@ type BulkSetQuotaResponse struct {
 // handleBulkSetQuota updates quota for multiple subjects.
 // POST /api/v1/subjects/bulk/set-quota
 func (d Deps) handleBulkSetQuota(w http.ResponseWriter, r *http.Request) {
+	// Permission before scope; see handleBulkEnableSubjects.
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
 	var req BulkSetQuotaRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)

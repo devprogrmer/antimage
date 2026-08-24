@@ -74,11 +74,11 @@ All 21 subject-bearing routes, plus device revoke.
 | `/subjects/{id}/connections` | GET | `subject:read` | `requireSubjectInScope` |
 | `/subjects/{id}/enforcement` | GET | `subject:read` | `requireSubjectInScope` |
 | `/subjects/export` | GET | `subject:read` | `SubjectScopeSQL` in the query |
-| `/subjects/bulk/enable` | POST | (see gap 2) | `scopeFilterSubjectIDs` |
-| `/subjects/bulk/delete` | POST | (see gap 2) | `scopeFilterSubjectIDs` |
-| `/subjects/bulk/extend` | POST | (see gap 2) | `scopeFilterSubjectIDs` |
-| `/subjects/bulk/reset-traffic` | POST | (see gap 2) | `scopeFilterSubjectIDs` |
-| `/subjects/bulk/set-quota` | POST | (see gap 2) | `scopeFilterSubjectIDs` |
+| `/subjects/bulk/enable` | POST | `subject:write` | `scopeFilterSubjectIDs` |
+| `/subjects/bulk/delete` | POST | `subject:write` | `scopeFilterSubjectIDs` |
+| `/subjects/bulk/extend` | POST | `subject:write` | `scopeFilterSubjectIDs` |
+| `/subjects/bulk/reset-traffic` | POST | `subject:write` | `scopeFilterSubjectIDs` |
+| `/subjects/bulk/set-quota` | POST | `subject:write` | `scopeFilterSubjectIDs` |
 | `/devices/{id}/revoke` | POST | `subject:write` | resolves owning subject, then `requireSubjectInScope` |
 
 Reseller-side reads are scoped by `resellerScopePredicate`:
@@ -118,6 +118,7 @@ Reseller-side reads are scoped by `resellerScopePredicate`:
 | `store/reseller_scope_test.go` | Predicate correctness: cross-tenant, platform-owned, zero scope, indistinguishability, read/write gate agreement |
 | `httpapi/subject_tenant_isolation_test.go` | List, get, reveal, and the three mutation paths, end to end |
 | `httpapi/subject_surface_isolation_test.go` | Every remaining endpoint: devices, connections, enforcement, disable, freeze, bulk, export |
+| `httpapi/subject_bulk_permission_test.go` | The bulk endpoints' permission gate, independent of scope: an owner without `subject:write` is refused, the check precedes body parsing, and a holder of `subject:write` still passes |
 | `rbac/reseller_perm_test.go` | Privilege separation of `credit:grant`; reseller holds no tenancy permissions |
 | `resellers/resellers_test.go` | Ledger invariants, atomic provisioning, idempotency |
 
@@ -129,19 +130,25 @@ All mutation-verified: reverting a guard makes a named test fail.
    assign ownership, so imported rows are platform-owned and invisible to every
    tenant. Not a leak, but a reseller cannot use it and an admin import will not
    belong to anyone. Needs an owner parameter before resellers go live.
-2. **Bulk endpoints have no permission check**, only the scope filter. A
-   `readonly` actor is stopped by the scope filter (they own nothing) but a
-   `super_admin`-adjacent role without `subject:write` would not be. Add
-   `requirePermission(PermSubjectWrite)` to each.
-3. **Three dead handlers** in `subjects_activity.go`
+2. **CLOSED.** Bulk endpoints had no permission check, only the scope filter.
+   All five now call `d.authorize(..., PermSubjectWrite, ...)` before reading
+   the request body. The actor that exposed this owns a subject but holds no
+   `subject:write`: scope alone waved its own ids straight through. Proven by
+   `TestBulkEndpointsRequireSubjectWrite` — swapping the permission constant to
+   `PermSubjectRead` turns all five 403s back into 200s and fails it by name.
+3. **CLOSED.** The three dead handlers in `subjects_activity.go`
    (`handleSubjectActivity`, `handleSubjectConnections`, `handleSubjectDevices`)
-   are not routed. They now carry guards defensively, but should be deleted.
+   have been deleted; they are no longer defined or routed.
 4. **Pre-existing schema bugs** in the bulk and export handlers, unrelated to
-   isolation: they reference `disabled`, `frozen`, `node_id`, `updated_at` and
-   `subscription_token`, none of which exist in the current `subjects` schema.
-   Every bulk operation therefore fails at SQL and export returns 500. These
-   endpoints are **non-functional**, not merely unscoped.
+   isolation: they reference `disabled`, `frozen`, `node_id` and `updated_at`,
+   none of which exist in the `subjects` table. The real columns are `enabled`
+   and `frozen_at`. Every bulk operation therefore fails at SQL and export
+   returns 500. These endpoints are **non-functional**, not merely unscoped.
+   (`subscription_token` was listed here previously but does exist — migration
+   00012 adds it.)
 
 Gap 4 matters for the security story: several endpoints appeared safe during
 testing only because they were broken. Fixing the schema without adding the
-scope guard would have turned them into live leaks.
+scope guard would have turned them into live leaks — and, until gap 2 was
+closed, without a permission guard either. Both guards are now in place, so the
+schema fix can proceed on its own.
