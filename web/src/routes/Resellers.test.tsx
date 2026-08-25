@@ -299,6 +299,58 @@ describe("tenant self-service", () => {
     expect(screen.getByText("750")).toBeInTheDocument();
   });
 
+  // The ledger tab fetches only when opened: most visits to Profile are not
+  // about billing, and a tenant's history is the more expensive of the two.
+  it("does not fetch the ledger until the tab is opened", async () => {
+    routes["/api/v1/me/reseller"] = {
+      body: {
+        reseller_id: 7,
+        display_name: "vendor-vpn",
+        enabled: true,
+        balance: 750,
+        credit_floor: 0,
+      },
+    };
+    routes["/api/v1/me/reseller/ledger"] = {
+      body: { movements: [{ id: 1, delta: 750, reason: "topup", subject_id: null, note: "", at: 1_700_000_000 }] },
+    };
+
+    renderWithQuery(<MyTenancy />);
+    await screen.findByText("vendor-vpn");
+    expect(calls.some((c) => c.path === "/api/v1/me/reseller/ledger")).toBe(false);
+
+    await userEvent.setup().click(screen.getByRole("tab", { name: "Ledger" }));
+    await screen.findByText("topup");
+    expect(calls.some((c) => c.path === "/api/v1/me/reseller/ledger")).toBe(true);
+  });
+
+  // The self-service route carries no reseller id -- the tenancy is resolved
+  // from the session. A UI that appended one would be asking a question the
+  // route cannot answer, and would suggest the id is the caller's to choose.
+  it("requests the ledger without naming a reseller", async () => {
+    routes["/api/v1/me/reseller"] = {
+      body: {
+        reseller_id: 7,
+        display_name: "vendor-vpn",
+        enabled: true,
+        balance: 0,
+        credit_floor: 0,
+      },
+    };
+    routes["/api/v1/me/reseller/ledger"] = { body: { movements: [] } };
+
+    renderWithQuery(<MyTenancy />);
+    await screen.findByText("vendor-vpn");
+    await userEvent.setup().click(screen.getByRole("tab", { name: "Ledger" }));
+
+    await waitFor(() => {
+      const request = calls.find((c) => c.path.includes("/me/reseller/ledger"));
+      expect(request).toBeDefined();
+      expect(request?.path).toBe("/api/v1/me/reseller/ledger");
+      expect(request?.path).not.toContain("7");
+    });
+  });
+
   // A tenant at their floor cannot provision, and the reason is not obvious
   // from a number alone -- the balance is not zero, it is merely not above the
   // floor -- so it is stated.

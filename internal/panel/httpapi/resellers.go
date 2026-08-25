@@ -271,14 +271,8 @@ func (d Deps) handleListResellerLedger(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid reseller id")
 		return
 	}
-	limit := 0
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		if parsed, perr := strconv.Atoi(raw); perr == nil {
-			limit = parsed
-		}
-	}
-
-	rows, err := d.resellerService().Ledger(r.Context(), d.svcActor(r, actor), id, limit)
+	rows, err := d.resellerService().Ledger(
+		r.Context(), d.svcActor(r, actor), id, ledgerLimit(r))
 	if err != nil {
 		if errors.Is(err, service.ErrResellerNotFound) {
 			d.writeResellerError(w, err)
@@ -287,7 +281,31 @@ func (d Deps) handleListResellerLedger(w http.ResponseWriter, r *http.Request) {
 		d.writeServiceError(w, r, actor, "reseller.ledger", err)
 		return
 	}
+	WriteJSON(w, http.StatusOK, map[string]any{"movements": toLedgerDTOs(rows)})
+}
 
+// ledgerLimit reads ?limit=, leaving the bounds to the store.
+//
+// An unparseable or absent value becomes zero, which ListLedgerScoped clamps to
+// its default along with anything negative or above 500. Rejecting a bad limit
+// with a 400 would be defensible, but the ceiling has to live in the store
+// regardless -- it is what stops an unbounded scan -- and having one place
+// decide is what keeps the two ledger routes from drifting apart.
+func ledgerLimit(r *http.Request) int {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 0
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+// toLedgerDTOs is shared by the platform and self-service ledger routes so the
+// two cannot come to disagree about what a movement looks like.
+func toLedgerDTOs(rows []store.LedgerRow) []ledgerDTO {
 	out := make([]ledgerDTO, 0, len(rows))
 	for _, row := range rows {
 		dto := ledgerDTO{
@@ -300,7 +318,7 @@ func (d Deps) handleListResellerLedger(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, dto)
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"movements": out})
+	return out
 }
 
 type creditRequest struct {
@@ -379,6 +397,42 @@ func (d Deps) handleGetMyReseller(w http.ResponseWriter, r *http.Request) {
 		"balance":      bal.Balance,
 		"credit_floor": bal.CreditFloor,
 	})
+}
+
+// handleGetMyLedger serves the calling tenant's own credit movements.
+//
+// The counterpart to handleGetMyReseller, and gated the same way: by SCOPE
+// rather than by permission. There is no reseller id in the path, so a tenant
+// cannot ask for anybody else's history -- the request has nowhere to put the
+// question. That is a stronger guarantee than refusing one, because it holds
+// without depending on a check being present and correct.
+//
+// It also means the reseller role still needs no reseller:* permission.
+// Granting reseller:read to reach this would hand a tenant the platform list
+// route as well, which is the enumeration this whole design avoids.
+//
+// A balance without its movements is a number an operator has to take on
+// trust. The ledger is append-only and the balance is its sum, so showing the
+// movements is what makes the figure checkable by the person being billed.
+func (d Deps) handleGetMyLedger(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	rows, err := d.subjectService().Ledger(r.Context(), d.svcActor(r, actor), ledgerLimit(r))
+	if err != nil {
+		if errors.Is(err, service.ErrNoReseller) {
+			// 404 rather than 403, matching /me/reseller: "you are not a
+			// tenant" is the same answer whether or not tenancy exists, and it
+			// lets the UI tell "no tenancy" from "a tenancy with nothing in it".
+			WriteError(w, http.StatusNotFound, "not_found",
+				"this account does not operate a reseller")
+			return
+		}
+		d.writeServiceError(w, r, actor, "reseller.me.ledger", err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"movements": toLedgerDTOs(rows)})
 }
 
 func (d Deps) handleDeleteReseller(w http.ResponseWriter, r *http.Request) {

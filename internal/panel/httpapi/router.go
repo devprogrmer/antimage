@@ -154,6 +154,9 @@ func NewRouter(d Deps) http.Handler {
 			// one of them -- minting credit is the only operation that creates
 			// value from nothing.
 			private.Get("/me/reseller", d.handleGetMyReseller)
+			// Self-service, resolved from the session. No reseller id in the
+			// path, so a tenant cannot ask for another tenant's history.
+			private.Get("/me/reseller/ledger", d.handleGetMyLedger)
 			private.Get("/resellers", d.handleListResellers)
 			private.Post("/resellers", d.handleCreateReseller)
 			private.Get("/resellers/{resellerID}", d.handleGetReseller)
