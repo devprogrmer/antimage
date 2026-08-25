@@ -184,6 +184,10 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/nodes/{nodeID}/health/history", d.handleGetNodeHealthHistory)
 			private.Get("/nodes/{nodeID}/reconciliation", d.handleGetNodeReconciliation)
 			private.Get("/nodes/{nodeID}/capabilities", d.handleGetNodeCapabilities)
+			// What this node can actually serve, and what each protocol needs.
+			// Built from the node's own Hello rather than the panel's compiled-in
+			// adapter list, so an editor offers only what the node can execute.
+			private.Get("/nodes/{nodeID}/service-schemas", d.handleListServiceSchemas)
 
 			// Node actions (M6)
 			private.Post("/nodes/{nodeID}/restart", d.handleRestartNode)
