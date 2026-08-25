@@ -32,12 +32,31 @@ func (d Deps) auditRBAC(w http.ResponseWriter, r *http.Request, actor *rbac.Acto
 		targetID = sql.NullInt64{Int64: target.ID, Valid: true}
 	}
 
-	// Build audit metadata
+	// A nil actor is reachable and must not panic here.
+	//
+	// rbac.Check already treats nil as forbidden, so this runs on exactly the
+	// path where a request reached a permission check without an actor. A panic
+	// there is worse than the denial it replaces: recoverMiddleware turns it
+	// into a 500, so a refusal is reported as a server fault and the record of
+	// the denial -- the one event invariant 9 says must not be lost -- is never
+	// written.
+	//
+	// The handling mirrors authorize(), which has resolved this the same way
+	// since it was written: attribute the record to the system rather than to
+	// an admin, because audit's actor_type 'admin' requires an admin id and
+	// there is no admin here. actorAudit keeps its contract of taking a
+	// non-nil actor, which is what its own comment promises callers.
+	role, isSuper := "", false
+	who := audit.Actor{Type: audit.ActorSystem, Label: "authz", IP: clientIP(r)}
+	if actor != nil {
+		role, isSuper = actor.RoleName, actor.IsSuper
+		who = d.actorAudit(actor, r)
+	}
 	metadata := map[string]any{
 		"permission":  string(perm),
 		"target_kind": targetKindString(target.Kind),
-		"actor_role":  actor.RoleName,
-		"is_super":    actor.IsSuper,
+		"actor_role":  role,
+		"is_super":    isSuper,
 		"method":      r.Method,
 		"path":        r.URL.Path,
 	}
@@ -54,7 +73,7 @@ func (d Deps) auditRBAC(w http.ResponseWriter, r *http.Request, actor *rbac.Acto
 		Result:     result,
 	}
 
-	audit.BestEffort(ctx, d.Store, RequestID(ctx), d.actorAudit(actor, r), record)
+	audit.BestEffort(ctx, d.Store, RequestID(ctx), who, record)
 }
 
 // auditRBACDenied logs a failed authorization check.
