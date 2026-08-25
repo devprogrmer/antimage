@@ -284,9 +284,20 @@ func (e *env) createNodeAndEnroll() {
 
 func (e *env) startAgent() {
 	e.t.Helper()
+	e.startAgentWith(agent.MustRegistry(stub.New(e.agentRoot)))
+}
+
+// startAgentWith runs the real agent over a caller-supplied registry.
+//
+// Everything in this file drives the stub adapter, which is right for the
+// control-plane properties it exists to prove. The real-runtime tests need the
+// same panel, the same mTLS and the same reconciler with REAL adapters behind
+// them, and the only difference is this argument.
+func (e *env) startAgentWith(reg *agent.Registry) {
+	e.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	client := agent.NewClient(e.agentCfg, agent.MustRegistry(stub.New(e.agentRoot)), agent.SystemClock{},
+	client := agent.NewClient(e.agentCfg, reg, agent.SystemClock{},
 		e.agentCert, e.agentCADER)
 	go func() {
 		defer close(done)
