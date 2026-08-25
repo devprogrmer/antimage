@@ -286,7 +286,7 @@ func (e *env) startAgent() {
 	e.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	client := agent.NewClient(e.agentCfg, stub.New(e.agentRoot), agent.SystemClock{},
+	client := agent.NewClient(e.agentCfg, agent.MustRegistry(stub.New(e.agentRoot)), agent.SystemClock{},
 		e.agentCert, e.agentCADER)
 	go func() {
 		defer close(done)
