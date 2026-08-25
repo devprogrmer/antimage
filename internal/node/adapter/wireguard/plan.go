@@ -16,9 +16,24 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 
 	var steps []adapter.Step
 
-	// Build maps for efficient lookup
+	// Only this adapter's services, and that filter is load-bearing.
+	//
+	// A node runs several adapters over ONE desired document, each handling the
+	// services of its own kind -- which is why Xray and sing-box have carried
+	// the same check since they were written. Without it this adapter reads
+	// every service in the document, and one belonging to another adapter whose
+	// params happen to satisfy the WireGuard schema is installed as a WireGuard
+	// interface.
+	//
+	// It looked safe only by accident: foreign params usually fail
+	// ServiceParams.Validate, so buildPayload errors and the service is skipped.
+	// That is a coincidence, not a rule. An l2tp service carrying a port, a
+	// subnet and a private key validates cleanly and was planned.
 	desiredMap := make(map[int64]adapter.Service)
 	for _, svc := range desired.Services {
+		if svc.Kind != string(Kind) {
+			continue // another adapter owns it
+		}
 		desiredMap[svc.ID] = svc
 	}
 	observedMap := make(map[int64]adapter.ObservedService)
@@ -28,6 +43,9 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 
 	// 1. Handle services that should exist
 	for _, dsvc := range desired.Services {
+		if dsvc.Kind != string(Kind) {
+			continue // another adapter owns it
+		}
 		obs, exists := observedMap[dsvc.ID]
 
 		// The config is rendered HERE, in Plan, and carried to Apply in the

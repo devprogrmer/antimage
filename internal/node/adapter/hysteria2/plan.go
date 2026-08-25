@@ -13,9 +13,20 @@ import (
 func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed adapter.Observed) (adapter.Plan, error) {
 	var steps []adapter.Step
 
-	// Build lookup maps
+	// Only this adapter's services, and that filter is load-bearing.
+	//
+	// A node runs several adapters over ONE desired document, each handling the
+	// services of its own kind -- which is why Xray and sing-box have carried the
+	// same check since they were written. Without it this adapter reads every
+	// service in the document, and one belonging to another adapter whose params
+	// happen to satisfy the Hysteria2 schema is written out as a Hysteria2
+	// server. Foreign params usually fail ServiceParams.Validate, which hid this,
+	// but that is a coincidence and not a rule.
 	desiredMap := make(map[int64]adapter.Service)
 	for _, svc := range desired.Services {
+		if svc.Kind != string(Kind) {
+			continue // another adapter owns it
+		}
 		desiredMap[svc.ID] = svc
 	}
 	observedMap := make(map[int64]adapter.ObservedService)
@@ -25,6 +36,9 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 
 	// Handle services that should exist
 	for _, dsvc := range desired.Services {
+		if dsvc.Kind != string(Kind) {
+			continue // another adapter owns it
+		}
 		obs, exists := observedMap[dsvc.ID]
 
 		// Rendered HERE and carried to Apply in the step payload. Apply never

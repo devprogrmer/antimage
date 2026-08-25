@@ -517,3 +517,58 @@ func TestWriteConfigReplacesAtomically(t *testing.T) {
 		}
 	}
 }
+
+// A service belonging to another adapter must be left alone.
+//
+// Same defect and same reasoning as the WireGuard adapter: a node runs several
+// adapters over one desired document, each handling only its own kind. Without
+// the filter this adapter reads every service, and one whose params happen to
+// satisfy the Hysteria2 schema is written out as a Hysteria2 server. Foreign
+// params usually fail validation, which hid it -- a coincidence, not a rule.
+func TestForeignServicesAreNotPlanned(t *testing.T) {
+	e := newApplyEnv(t)
+
+	d := desiredWith(t, 1)
+	ours := d.Services[0].ID
+	d.Services = append(d.Services, adapter.Service{
+		ID: 77, Kind: "wireguard", Enabled: true,
+		// Deliberately shaped so Hysteria2's own schema accepts it.
+		Params: json.RawMessage(testParams),
+	})
+
+	plan, err := e.a.Plan(context.Background(), d, adapter.Observed{})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	for _, step := range plan.Steps {
+		if step.ServiceID != ours {
+			t.Errorf("planned %q for service %d, which belongs to another adapter",
+				step.Kind, step.ServiceID)
+		}
+	}
+	if len(plan.Steps) != 1 {
+		t.Errorf("planned %d steps for one Hysteria2 service", len(plan.Steps))
+	}
+}
+
+// A foreign service sharing an id must not keep our service alive through the
+// removal pass.
+func TestForeignServicesDoNotAffectRemoval(t *testing.T) {
+	e := newApplyEnv(t)
+
+	d := desiredWith(t, 1)
+	d.Services = []adapter.Service{{
+		ID: 10, Kind: "wireguard", Enabled: true, Params: json.RawMessage(testParams),
+	}}
+	obs := adapter.Observed{Services: []adapter.ObservedService{
+		{ID: 10, Present: true, Managed: true, Checksum: "whatever"},
+	}}
+
+	plan, err := e.a.Plan(context.Background(), d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Steps) != 1 || plan.Steps[0].Kind != "remove" {
+		t.Fatalf("want a single remove step, got %+v", plan.Steps)
+	}
+}
