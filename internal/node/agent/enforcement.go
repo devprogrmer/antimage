@@ -85,16 +85,9 @@ func (c *Client) startXrayEnforcementIfSupported(ctx context.Context) {
 		StartEnforcement(ctx context.Context, enforcer *enforcement.Enforcer, interval time.Duration)
 	}
 
-	// Whichever adapters implement enforcement, not merely the first. Only
-	// Xray does today, but finding it by position rather than by capability
-	// would break the moment a node lists it second.
-	for _, ad := range c.ads.Adapters() {
-		starter, ok := ad.(xrayEnforcementStarter)
-		if !ok {
-			continue
-		}
+	if starter, ok := c.ad.(xrayEnforcementStarter); ok {
+		// Xray adapter supports enforcement - start the loop
 		go starter.StartEnforcement(ctx, c.enforcer, 5*time.Second)
-		slog.InfoContext(ctx, "started adapter enforcement loop",
-			"kind", string(ad.Descriptor().Kind), "interval", "5s")
+		slog.InfoContext(ctx, "started Xray enforcement loop", "interval", "5s")
 	}
 }

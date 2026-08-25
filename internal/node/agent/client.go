@@ -78,7 +78,7 @@ func jitter(d time.Duration) time.Duration {
 // Client holds the control stream and drives reconciliation.
 type Client struct {
 	cfg      *Config
-	ads      *Registry
+	ad       adapter.Adapter
 	clk      Clock
 	rec      *Reconciler
 	cert     tls.Certificate
@@ -86,16 +86,10 @@ type Client struct {
 	enforcer *enforcement.Enforcer
 }
 
-// NewClient builds an agent driving every adapter in the registry.
-//
-// A node serves several protocols at once, each by its own adapter over the one
-// desired document. What the node reports at Hello is therefore a set, and the
-// panel learns exactly which protocols this node can execute -- which is what
-// lets an editor offer those and only those.
-func NewClient(cfg *Config, ads *Registry, clk Clock, cert tls.Certificate, caDER []byte) *Client {
+func NewClient(cfg *Config, ad adapter.Adapter, clk Clock, cert tls.Certificate, caDER []byte) *Client {
 	return &Client{
-		cfg: cfg, ads: ads, clk: clk, cert: cert, caDER: caDER,
-		rec:      NewReconciler(ads, clk, ReconcileOptions{MaxRetries: 3, RetryBase: 2 * time.Second}),
+		cfg: cfg, ad: ad, clk: clk, cert: cert, caDER: caDER,
+		rec:      NewReconciler(ad, clk, ReconcileOptions{MaxRetries: 3, RetryBase: 2 * time.Second}),
 		enforcer: enforcement.New(),
 	}
 }
@@ -187,25 +181,15 @@ func (c *Client) runSession(
 		return fmt.Errorf("open stream: %w", err)
 	}
 
-	// Every adapter this node runs, not just the first. Hello's Adapters field
-	// has always been repeated; it only ever carried one entry because the node
-	// only ever held one adapter. Each descriptor brings its own ServiceSchema,
-	// so the panel learns what this node can execute AND what each protocol
-	// needs, from the node itself rather than from what the panel was compiled
-	// to know about.
-	descs := c.ads.Descriptors()
-	pbAdapters := make([]*pb.AdapterDescriptor, 0, len(descs))
-	for _, desc := range descs {
-		pbAdapters = append(pbAdapters, &pb.AdapterDescriptor{
-			Kind: string(desc.Kind), Version: desc.Version,
-			HotUserAdd: desc.Caps.HotUserAdd, SelfAccounting: desc.Caps.SelfAccounting,
-			RequiresPki: desc.Caps.RequiresPKI, ServiceSchema: desc.Caps.ServiceSchema,
-		})
-	}
+	desc := c.ad.Descriptor()
 	if err := stream.Send(&pb.AgentMessage{Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{
 		NodeId: c.cfg.NodeID, AgentVersion: version.Version,
 		ProtocolVersion: version.Protocol,
-		Adapters:        pbAdapters,
+		Adapters: []*pb.AdapterDescriptor{{
+			Kind: string(desc.Kind), Version: desc.Version,
+			HotUserAdd: desc.Caps.HotUserAdd, SelfAccounting: desc.Caps.SelfAccounting,
+			RequiresPki: desc.Caps.RequiresPKI, ServiceSchema: desc.Caps.ServiceSchema,
+		}},
 	}}}); err != nil {
 		return fmt.Errorf("send hello: %w", err)
 	}
@@ -246,11 +230,7 @@ func (c *Client) runSession(
 	reconcile := c.clk.After(jitter(ReconcileInterval))
 
 	// Start accounting loop if the adapter supports it (SP3).
-	// Any adapter that accounts for its own traffic starts the loop; the loop
-	// itself polls every such adapter. A node running Xray beside WireGuard has
-	// two of them, and reporting only the first would silently lose the other's
-	// traffic.
-	if len(c.ads.UsageReporters()) > 0 {
+	if _, ok := c.ad.(adapter.UsageReporter); ok {
 		go c.AccountingLoop(sessionCtx, stream, 30*time.Second)
 	}
 
@@ -374,21 +354,17 @@ func (c *Client) reconcileOnce(ctx context.Context, client pb.ControlClient, str
 }
 
 func (c *Client) sendHeartbeat(ctx context.Context, stream pb.Control_StreamClient) error {
-	// Health is per adapter. An operator needs to know WHICH protocol is down,
-	// not merely that something on the node is, and one unwell adapter must not
-	// suppress the report for the healthy ones.
-	probes := c.ads.Probe(ctx)
-	pbHealth := make([]*pb.AdapterHealth, 0, len(probes))
-	for _, p := range probes {
-		pbHealth = append(pbHealth, &pb.AdapterHealth{
-			Kind: string(p.Kind), Ok: p.Health.OK, Detail: p.Health.Detail,
-		})
+	health, err := c.ad.Probe(ctx)
+	if err != nil {
+		health = adapter.Health{OK: false, Detail: err.Error()}
 	}
 	sample := sysinfo.Sample()
 	return stream.Send(&pb.AgentMessage{Payload: &pb.AgentMessage_Heartbeat{
 		Heartbeat: &pb.Heartbeat{
 			Load1: sample.Load1, MemUsedBytes: sample.MemUsed, UptimeSeconds: sample.UptimeS,
-			AdapterHealth: pbHealth,
+			AdapterHealth: []*pb.AdapterHealth{{
+				Kind: string(c.ad.Descriptor().Kind), Ok: health.OK, Detail: health.Detail,
+			}},
 		},
 	}})
 }

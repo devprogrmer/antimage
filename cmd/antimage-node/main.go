@@ -45,15 +45,8 @@ func main() {
 	}
 	cfg.NodeID = nodeID
 
-	// The adapters this node runs. One entry today; the registry is what makes
-	// several possible, each handling the services of its own kind over the one
-	// desired document.
-	ads, err := agent.NewRegistry(stub.New(filepath.Join(cfg.StateDir, "services")))
-	if err != nil {
-		slog.Error("build adapter registry", "error", err)
-		os.Exit(1)
-	}
-	client := agent.NewClient(cfg, ads, agent.SystemClock{}, cert, caDER)
+	ad := stub.New(filepath.Join(cfg.StateDir, "services"))
+	client := agent.NewClient(cfg, ad, agent.SystemClock{}, cert, caDER)
 
 	slog.Info("antimage-node starting", "version", version.Version, "node_id", nodeID)
 	if err := client.Run(ctx); err != nil && ctx.Err() == nil {
