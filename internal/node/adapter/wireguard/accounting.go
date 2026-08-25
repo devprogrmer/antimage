@@ -110,7 +110,7 @@ func (a *Adapter) Usage(ctx context.Context) ([]adapter.UsageSample, error) {
 // readAllTransfers reads per-peer traffic from all managed WireGuard interfaces.
 func (a *Adapter) readAllTransfers(ctx context.Context) (map[string]peerCounters, error) {
 	// Find all managed interfaces (antimage-*.conf files)
-	pattern := filepath.Join(configDir, filePrefix+"*.conf")
+	pattern := filepath.Join(a.dir, filePrefix+"*.conf")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("glob %s: %w", pattern, err)

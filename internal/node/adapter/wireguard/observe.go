@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
@@ -15,8 +16,8 @@ func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
 		return adapter.Observed{}, err
 	}
 
-	// Scan /etc/wireguard for our managed configs
-	entries, err := os.ReadDir(configDir)
+	// Scan the adapter's config directory for our managed configs
+	entries, err := os.ReadDir(a.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No config directory means no services
@@ -35,7 +36,11 @@ func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
 			continue
 		}
 
-		path := a.configPath(0) // placeholder, will extract from file
+		// Read the entry being iterated over. This was configPath(0), which
+		// ignored `name` and re-read antimage-0.conf for every file in the
+		// directory -- so any service whose id was not 0 was never observed,
+		// Plan saw it as missing, and it was reinstalled on every pass.
+		path := filepath.Join(a.dir, name)
 		body, err := os.ReadFile(path)
 		if err != nil {
 			// File disappeared between ReadDir and ReadFile, skip it

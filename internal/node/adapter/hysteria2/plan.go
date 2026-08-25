@@ -3,6 +3,8 @@ package hysteria2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sort"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 )
@@ -25,12 +27,24 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 	for _, dsvc := range desired.Services {
 		obs, exists := observedMap[dsvc.ID]
 
+		// Rendered HERE and carried to Apply in the step payload. Apply never
+		// sees adapter.Desired -- that is what AD-3 is about -- and rendering
+		// the same service twice invites the two copies to disagree.
+		payload, err := a.buildPayload(dsvc, desired.Subjects)
+		if err != nil {
+			// An unrenderable service cannot be installed or repaired. Planning
+			// a step certain to fail buries the reason in an apply-run; the next
+			// pass retries once the params are fixed.
+			continue
+		}
+
 		if !exists {
 			// New service: install
 			steps = append(steps, adapter.Step{
 				Kind:       "install",
 				ServiceID:  dsvc.ID,
 				Disruption: adapter.DisruptRestart,
+				Payload:    payload,
 			})
 			continue
 		}
@@ -42,6 +56,7 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 				Kind:       "restart",
 				ServiceID:  dsvc.ID,
 				Disruption: adapter.DisruptRestart,
+				Payload:    payload,
 			})
 		}
 	}
@@ -58,6 +73,48 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 	}
 
 	return adapter.Plan{Steps: steps}, nil
+}
+
+// stepPayload is what Apply needs to execute a step without re-deriving it.
+//
+// Same role as the Xray adapter's type of the same name: Plan renders, Apply
+// writes.
+type stepPayload struct {
+	// Config is the fully rendered server config, marker included.
+	Config string `json:"config,omitempty"`
+	// Checksum is Config's body checksum, in the domain Observe reports, so the
+	// applied sidecar and the marker can be compared directly.
+	Checksum string `json:"checksum,omitempty"`
+	// Users is the username set this config serves, recorded in the sidecar so
+	// a later Plan can tell whether anybody is being removed.
+	Users []string `json:"users,omitempty"`
+}
+
+// buildPayload renders a service and everything Apply needs to install it.
+func (a *Adapter) buildPayload(svc adapter.Service, subjects []adapter.Subject) (json.RawMessage, error) {
+	var params ServiceParams
+	if err := json.Unmarshal(svc.Params, &params); err != nil {
+		return nil, fmt.Errorf("service %d params: %w", svc.ID, err)
+	}
+	auths := UserAuthFromSubjects(subjects)
+	rendered, err := GenerateConfig(svc.ID, params, auths)
+	if err != nil {
+		return nil, fmt.Errorf("render service %d: %w", svc.ID, err)
+	}
+	users := make([]string, 0, len(auths))
+	for _, u := range auths {
+		users = append(users, u.Username)
+	}
+	sort.Strings(users)
+	body, err := json.Marshal(stepPayload{
+		Config:   rendered,
+		Checksum: renderedChecksum(rendered),
+		Users:    users,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode payload for service %d: %w", svc.ID, err)
+	}
+	return body, nil
 }
 
 // needsUpdate determines if a service needs updating.
@@ -88,7 +145,12 @@ func (a *Adapter) needsUpdate(
 	if err != nil {
 		return true
 	}
-	want := checksumContent([]byte(rendered))
+	// renderedChecksum, not checksumContent: `rendered` still carries its
+	// marker line, and observed.Checksum is read OUT of that marker, so it
+	// covers the body alone. Hashing the whole string produced a value that
+	// could never match, so every converged service asked for a restart on
+	// every pass -- harmless only while Apply refused to perform one.
+	want := renderedChecksum(rendered)
 
 	if observed.Checksum != want {
 		return true

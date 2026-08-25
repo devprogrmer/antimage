@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
@@ -41,8 +42,8 @@ import (
 const Kind adapter.Kind = "hysteria2"
 
 const (
-	// configDir is where Hysteria2 config files live
-	configDir = "/etc/hysteria2"
+	// DefaultConfigDir is where Hysteria2 config files live.
+	DefaultConfigDir = "/etc/hysteria2"
 	// filePrefix namespaces our configs
 	filePrefix = "antimage-"
 	fileSuffix = ".yaml"
@@ -70,13 +71,24 @@ type Runtime interface {
 // Adapter implements the adapter contract for Hysteria2
 type Adapter struct {
 	rt Runtime
+	// dir is where server configs live. Taken at construction rather than read
+	// from the package const so a test can point the adapter at a temp
+	// directory: Apply writes real files, and a test that wrote them to
+	// /etc/hysteria2 would leave live server configs on the developer machine.
+	dir string
 	// stateDir holds applied state tracking
 	stateDir string
 }
 
-// New returns a Hysteria2 adapter
-func New(rt Runtime, stateDir string) *Adapter {
-	return &Adapter{rt: rt, stateDir: stateDir}
+// New returns a Hysteria2 adapter.
+//
+// configDir may be empty, in which case the system location is used. The Xray
+// adapter takes its directory the same way and for the same reason.
+func New(rt Runtime, configDir, stateDir string) *Adapter {
+	if configDir == "" {
+		configDir = DefaultConfigDir
+	}
+	return &Adapter{rt: rt, dir: configDir, stateDir: stateDir}
 }
 
 // serviceSchema is published to the panel for validation
@@ -158,7 +170,7 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 
 // configPath returns filesystem path for service config
 func (a *Adapter) configPath(serviceID int64) string {
-	return filepath.Join(configDir, fmt.Sprintf("%s%d%s", filePrefix, serviceID, fileSuffix))
+	return filepath.Join(a.dir, fmt.Sprintf("%s%d%s", filePrefix, serviceID, fileSuffix))
 }
 
 // appliedPath returns path to applied state sidecar
@@ -172,7 +184,44 @@ type appliedState struct {
 	Users    []string `json:"users"` // sorted usernames
 }
 
-// recordApplied saves applied state after successful server start
+// recordApplied notes what the server is now running. Called only after the
+// process has actually started or restarted on this config.
+//
+// The sidecar answers "did the runtime ever load this?", which the config file
+// on disk cannot: the file says what should be running. Writing it before the
+// server is up would assert a convergence that has not happened, and the next
+// Plan would believe it and stop trying.
+func (a *Adapter) recordApplied(serviceID int64, checksum string, users []string) error {
+	sorted := append([]string(nil), users...)
+	sort.Strings(sorted)
+	body, err := json.Marshal(appliedState{Checksum: checksum, Users: sorted})
+	if err != nil {
+		return fmt.Errorf("encode applied state: %w", err)
+	}
+	path := a.appliedPath(serviceID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+	return os.WriteFile(path, body, 0o600)
+}
+
+// renderedChecksum returns the checksum of a RENDERED config -- one that still
+// carries its marker line -- in the same domain Observe reports.
+//
+// GenerateConfig returns marker+body while the marker holds the checksum of the
+// body alone, so hashing the whole rendered string produced a value that could
+// never equal what Observe read out of the marker. needsUpdate compared exactly
+// those two, so a converged service reported "needs update" on every pass and
+// planned a restart forever -- masked only by Apply refusing to run one.
+//
+// Splitting on the first newline mirrors Observe exactly: marker, then body.
+func renderedChecksum(rendered string) string {
+	_, body, found := strings.Cut(rendered, "\n")
+	if !found {
+		return checksumContent([]byte(rendered))
+	}
+	return checksumContent([]byte(body))
+}
 
 // applied reads last known applied state
 func (a *Adapter) applied(serviceID int64) appliedState {

@@ -37,7 +37,7 @@ func desiredWith(t *testing.T, users int) adapter.Desired {
 // interface and a revoked peer was never removed. The adapter installed once
 // and then ignored the world.
 func TestPlanConvergesAfterInstall(t *testing.T) {
-	a := New(nil, t.TempDir())
+	a := New(nil, t.TempDir(), t.TempDir())
 	obs := adapter.Observed{Services: []adapter.ObservedService{
 		{ID: 10, Present: true, Managed: true, Checksum: "stale-checksum"},
 	}}
@@ -56,7 +56,7 @@ func TestPlanConvergesAfterInstall(t *testing.T) {
 // convergence: the file says what should be running, not what is.
 func TestPlanRestartsWhenTheInterfaceNeverCameUp(t *testing.T) {
 	dir := t.TempDir()
-	a := New(nil, dir)
+	a := New(nil, t.TempDir(), dir)
 	d := desiredWith(t, 1)
 
 	var params ServiceParams
@@ -69,7 +69,7 @@ func TestPlanRestartsWhenTheInterfaceNeverCameUp(t *testing.T) {
 	}
 	// The file matches desired, but nothing was ever applied.
 	obs := adapter.Observed{Services: []adapter.ObservedService{
-		{ID: 10, Present: true, Managed: true, Checksum: checksumConfigBody(rendered)},
+		{ID: 10, Present: true, Managed: true, Checksum: renderedChecksum(rendered)},
 	}}
 
 	plan, err := a.Plan(context.Background(), d, obs)
@@ -89,7 +89,7 @@ func TestPlanRestartsWhenTheInterfaceNeverCameUp(t *testing.T) {
 // revoked user connected.
 func TestRemovingAPeerIsRestartClass(t *testing.T) {
 	dir := t.TempDir()
-	a := New(nil, dir)
+	a := New(nil, t.TempDir(), dir)
 
 	two := desiredWith(t, 2)
 	var params ServiceParams
@@ -102,11 +102,11 @@ func TestRemovingAPeerIsRestartClass(t *testing.T) {
 		t.Fatalf("GenerateConfig: %v", err)
 	}
 	// The interface is up and serving both peers.
-	if err := a.recordApplied(10, checksumConfigBody(rendered), extractPublicKeys(peers)); err != nil {
+	if err := a.recordApplied(10, renderedChecksum(rendered), mustShape(t, params), extractPublicKeys(peers)); err != nil {
 		t.Fatalf("recordApplied: %v", err)
 	}
 	obs := adapter.Observed{Services: []adapter.ObservedService{
-		{ID: 10, Present: true, Managed: true, Checksum: checksumConfigBody(rendered)},
+		{ID: 10, Present: true, Managed: true, Checksum: renderedChecksum(rendered)},
 	}}
 
 	// Now desired drops to one peer.
@@ -126,7 +126,7 @@ func TestRemovingAPeerIsRestartClass(t *testing.T) {
 // A converged interface must plan nothing, or the node reconciles forever.
 func TestConvergedStatePlansNothing(t *testing.T) {
 	dir := t.TempDir()
-	a := New(nil, dir)
+	a := New(nil, t.TempDir(), dir)
 	d := desiredWith(t, 2)
 
 	var params ServiceParams
@@ -138,8 +138,8 @@ func TestConvergedStatePlansNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateConfig: %v", err)
 	}
-	sum := checksumConfigBody(rendered)
-	if err := a.recordApplied(10, sum, extractPublicKeys(peers)); err != nil {
+	sum := renderedChecksum(rendered)
+	if err := a.recordApplied(10, sum, mustShape(t, params), extractPublicKeys(peers)); err != nil {
 		t.Fatalf("recordApplied: %v", err)
 	}
 	obs := adapter.Observed{Services: []adapter.ObservedService{
@@ -153,4 +153,18 @@ func TestConvergedStatePlansNothing(t *testing.T) {
 	if !plan.IsEmpty() {
 		t.Errorf("converged state still plans %+v", plan.Steps)
 	}
+}
+
+// mustShape renders this service's shape -- its checksum with no peers.
+//
+// Tests record it alongside the applied checksum because that is what a real
+// Apply records, and because without it every peer addition is classified as a
+// structural change and restarts instead of hot-syncing.
+func mustShape(t *testing.T, params ServiceParams) string {
+	t.Helper()
+	shape, err := shapeChecksum(10, params)
+	if err != nil {
+		t.Fatalf("shapeChecksum: %v", err)
+	}
+	return shape
 }

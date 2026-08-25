@@ -48,13 +48,19 @@ func (r *ExecRuntime) Available(ctx context.Context) error {
 	return nil
 }
 
-func (r *ExecRuntime) InterfaceUp(ctx context.Context, iface string) error {
-	_, err := r.run(ctx, "wg-quick", "up", iface)
+// InterfaceUp brings the interface up from configPath.
+//
+// wg-quick is given the PATH rather than the interface name: a bare name is
+// resolved against /etc/wireguard, which is not necessarily where the adapter
+// wrote the file. wg-quick derives the interface name from the basename, which
+// is why the config filename and the interface name have to agree.
+func (r *ExecRuntime) InterfaceUp(ctx context.Context, _, configPath string) error {
+	_, err := r.run(ctx, "wg-quick", "up", configPath)
 	return err
 }
 
-func (r *ExecRuntime) InterfaceDown(ctx context.Context, iface string) error {
-	_, err := r.run(ctx, "wg-quick", "down", iface)
+func (r *ExecRuntime) InterfaceDown(ctx context.Context, _, configPath string) error {
+	_, err := r.run(ctx, "wg-quick", "down", configPath)
 	return err
 }
 

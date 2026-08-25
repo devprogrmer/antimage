@@ -140,6 +140,47 @@ func checksumConfigBody(body string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// renderedChecksum returns the checksum of a RENDERED config -- one that still
+// carries its marker line -- in the same domain Observe reports.
+//
+// This exists because the two were previously mixed. GenerateConfig returns
+// marker+body while the marker holds the checksum of the body alone, so passing
+// the whole rendered string to checksumConfigBody produced a value that could
+// never equal what Observe read out of the marker. needsUpdate compared exactly
+// those two, so a fully converged service reported "configuration changed" on
+// every pass and planned a restart forever.
+//
+// It was invisible because the only thing standing between that plan and a real
+// restart storm was Apply returning "not yet implemented", and because no test
+// ever built a genuinely converged state -- they used literals like
+// "stale-checksum", which differ from the right answer either way.
+//
+// Splitting on the first newline mirrors Observe exactly: marker, then body.
+func renderedChecksum(rendered string) string {
+	_, body, found := strings.Cut(rendered, "\n")
+	if !found {
+		// No marker line at all. Checksum what we were given rather than
+		// silently returning the hash of the empty string, which would compare
+		// equal to another malformed config.
+		return checksumConfigBody(rendered)
+	}
+	return checksumConfigBody(body)
+}
+
+// shapeChecksum is the checksum of this service's config with NO peers.
+//
+// It is what lets a membership change be told apart from a structural one:
+// two configs sharing a shape differ only in their peer list, so the change can
+// be applied with `wg syncconf` instead of tearing the interface down. Xray
+// carries the same idea under the same name in its step payload.
+func shapeChecksum(serviceID int64, params ServiceParams) (string, error) {
+	rendered, err := GenerateConfig(serviceID, params, nil)
+	if err != nil {
+		return "", err
+	}
+	return renderedChecksum(rendered), nil
+}
+
 // AllocatePeerIP allocates a unique IP within the service subnet for a peer.
 // Uses subject ID as the offset to ensure deterministic allocation.
 func AllocatePeerIP(subnet string, subjectID int64) (string, error) {
