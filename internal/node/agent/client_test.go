@@ -77,7 +77,7 @@ func TestApplyReportPreservesStepKindAndDisruption(t *testing.T) {
 		PanelURL: "panel.example:8443", CAFingerprint: "dead",
 		StateDir: dir, NodeID: 7,
 	}
-	c := NewClient(cfg, stub.New(filepath.Join(dir, "services")), SystemClock{}, tls.Certificate{}, nil)
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
 
 	doc, err := json.Marshal(adapter.Desired{
 		SchemaVersion: 1, Revision: 3, NodeID: 7,
@@ -139,7 +139,7 @@ func TestSessionReleasesReceiveGoroutineOnSendFailure(t *testing.T) {
 		StateDir: t.TempDir(), NodeID: 1,
 	}
 	clk := NewFakeClock(time.Unix(1_700_000_000, 0).UTC())
-	c := NewClient(cfg, stub.New(t.TempDir()), clk, tls.Certificate{}, nil)
+	c := NewClient(cfg, MustRegistry(stub.New(t.TempDir())), clk, tls.Certificate{}, nil)
 
 	before := runtime.NumGoroutine()
 
@@ -315,7 +315,7 @@ func TestSessionReportsTheRealStreamFailure(t *testing.T) {
 			PanelURL: "panel.example:8443", CAFingerprint: "dead",
 			StateDir: t.TempDir(), NodeID: 1,
 		}
-		c := NewClient(cfg, stub.New(t.TempDir()),
+		c := NewClient(cfg, MustRegistry(stub.New(t.TempDir())),
 			NewFakeClock(time.Unix(1_700_000_000, 0).UTC()), tls.Certificate{}, nil)
 
 		err := c.runSession(context.Background(), &fakeControlClient{},
