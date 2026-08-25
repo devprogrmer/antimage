@@ -48,7 +48,8 @@ func TestHandleListAdapters(t *testing.T) {
 	}
 
 	for _, a := range adapters {
-		err = nodes.UpsertAdapter(ctx, env.store, nodeID, a.kind, a.ver, a.caps, now)
+		err = nodes.UpsertAdapter(ctx, env.store, nodeID,
+			nodes.AdapterInfo{Kind: a.kind, Version: a.ver, Capabilities: a.caps}, now)
 		if err != nil {
 			t.Fatalf("upsert adapter %s: %v", a.kind, err)
 		}

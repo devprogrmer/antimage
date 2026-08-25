@@ -173,6 +173,17 @@ type AdapterInfo struct {
 	Kind         string
 	Version      string
 	Capabilities []string // SP5: adapter capabilities
+	// ServiceSchema is the JSON Schema this adapter publishes for its service
+	// params, as THIS node reports it. Empty means the agent did not send one --
+	// an older build, or an adapter without a schema -- which is different from
+	// an empty schema and is why it is not defaulted.
+	ServiceSchema []byte
+	// Capability flags, per node rather than per adapter type: whether Xray can
+	// add a user without a restart depends on this host having configured the
+	// management API.
+	HotUserAdd     bool
+	SelfAccounting bool
+	RequiresPKI    bool
 }
 
 // RecordHello caches the adapter kinds the agent reports.
@@ -207,7 +218,7 @@ func RecordHello(
 
 	// SP5: Update adapter registry with version and capabilities
 	for _, a := range adapters {
-		if err := UpsertAdapter(ctx, s, nodeID, a.Kind, a.Version, a.Capabilities, now); err != nil {
+		if err := UpsertAdapter(ctx, s, nodeID, a, now); err != nil {
 			return fmt.Errorf("upsert adapter %s: %w", a.Kind, err)
 		}
 	}

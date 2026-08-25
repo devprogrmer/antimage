@@ -44,7 +44,7 @@ func TestUpsertAdapter_Insert(t *testing.T) {
 	// Upsert adapter
 	now := time.Unix(1_700_000_000, 0).UTC()
 	caps := []string{"tls", "ws", "grpc"}
-	err = UpsertAdapter(ctx, s, nodeID, "xray", "1.8.0", caps, now)
+	err = UpsertAdapter(ctx, s, nodeID, AdapterInfo{Kind: "xray", Version: "1.8.0", Capabilities: caps}, now)
 	if err != nil {
 		t.Fatalf("UpsertAdapter: %v", err)
 	}
@@ -95,14 +95,14 @@ func TestUpsertAdapter_Update(t *testing.T) {
 
 	// Insert initial version
 	now1 := time.Unix(1_700_000_000, 0).UTC()
-	err = UpsertAdapter(ctx, s, nodeID, "xray", "1.8.0", []string{"tls"}, now1)
+	err = UpsertAdapter(ctx, s, nodeID, AdapterInfo{Kind: "xray", Version: "1.8.0", Capabilities: []string{"tls"}}, now1)
 	if err != nil {
 		t.Fatalf("UpsertAdapter (insert): %v", err)
 	}
 
 	// Update version and capabilities
 	now2 := time.Unix(1_700_000_100, 0).UTC()
-	err = UpsertAdapter(ctx, s, nodeID, "xray", "1.8.1", []string{"tls", "ws"}, now2)
+	err = UpsertAdapter(ctx, s, nodeID, AdapterInfo{Kind: "xray", Version: "1.8.1", Capabilities: []string{"tls", "ws"}}, now2)
 	if err != nil {
 		t.Fatalf("UpsertAdapter (update): %v", err)
 	}
@@ -161,7 +161,7 @@ func TestListAdapters_MultipleAdapters(t *testing.T) {
 	}
 
 	for _, a := range adapters {
-		err = UpsertAdapter(ctx, s, nodeID, a.kind, a.ver, a.caps, now)
+		err = UpsertAdapter(ctx, s, nodeID, AdapterInfo{Kind: a.kind, Version: a.ver, Capabilities: a.caps}, now)
 		if err != nil {
 			t.Fatalf("UpsertAdapter(%s): %v", a.kind, err)
 		}
@@ -238,7 +238,7 @@ func TestUpsertAdapter_InvalidJSON(t *testing.T) {
 
 	// Capabilities are marshaled internally, so this should always succeed
 	now := time.Unix(1_700_000_000, 0).UTC()
-	err = UpsertAdapter(ctx, s, nodeID, "test", "1.0.0", []string{"valid"}, now)
+	err = UpsertAdapter(ctx, s, nodeID, AdapterInfo{Kind: "test", Version: "1.0.0", Capabilities: []string{"valid"}}, now)
 	if err != nil {
 		t.Errorf("UpsertAdapter should handle any valid []string: %v", err)
 	}

@@ -163,6 +163,14 @@ func (s *ControlService) onHello(ctx context.Context, nodeID int64, h *pb.Hello,
 			Kind:         a.Kind,
 			Version:      a.Version,
 			Capabilities: a.Capabilities, // SP5: capture capabilities
+			// The schema and capability flags were already on the wire and
+			// discarded here. They are what lets the panel validate against what
+			// THIS node runs rather than what this build of the panel knows, and
+			// what lets an editor offer only protocols the node can execute.
+			ServiceSchema:  a.ServiceSchema,
+			HotUserAdd:     a.HotUserAdd,
+			SelfAccounting: a.SelfAccounting,
+			RequiresPKI:    a.RequiresPki,
 		})
 	}
 	if err := nodes.RecordHello(ctx, s.deps.Store, nodeID, adapters,
