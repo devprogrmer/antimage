@@ -47,16 +47,6 @@ func main() {
 	grpcHosts := flag.String("grpc-hosts", "localhost,127.0.0.1",
 		"comma-separated DNS names and IPs agents dial this panel on; they become the SANs of the panel's TLS certificate")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	// Accounting maintenance, for use either side of a migration. Read-only
-	// unless --repair is given, and --repair reports what it would do rather
-	// than doing it unless --apply is given too: recomputing a billing figure
-	// is not something to trigger by typo.
-	verifyAccounting := flag.Bool("accounting-verify", false,
-		"print an accounting checksum and exit")
-	repairAccounting := flag.Bool("accounting-repair", false,
-		"recompute hourly rollups inflated by the pre-00026 sweeper; reports without writing unless --accounting-apply is given")
-	applyRepair := flag.Bool("accounting-apply", false,
-		"with --accounting-repair, write the repair instead of reporting it")
 	flag.Parse()
 
 	if *showVersion {
@@ -64,67 +54,10 @@ func main() {
 		return
 	}
 
-	if *verifyAccounting || *repairAccounting {
-		if err := accountingMaintenance(*dataDir, *repairAccounting, *applyRepair); err != nil {
-			slog.Error("accounting maintenance failed", "error", err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	if err := run(*dataDir, *httpAddr, *grpcAddr, *grpcHosts); err != nil {
 		slog.Error("panel stopped", "error", err)
 		os.Exit(1)
 	}
-}
-
-// accountingMaintenance runs the checksum, and optionally the rollup repair,
-// against the database without starting the panel.
-//
-// Taking the checksum either side of a migration is how "this migration changes
-// no bill" stops being a claim and becomes a check. The repair is separate and
-// opt-in because it rewrites billing figures: it recomputes the hourly rollups
-// that the pre-00026 sweeper inflated, and only for the buckets whose raw
-// deltas survive the retention window. Buckets whose deltas have been pruned
-// are reported and left exactly as they are, because the true figure is not
-// recoverable and a confident wrong number is worse than a known-wrong one.
-func accountingMaintenance(dataDir string, repair, apply bool) error {
-	st, err := store.Open(filepath.Join(dataDir, "antimage.db"))
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer func() { _ = st.Close() }()
-
-	ctx := context.Background()
-	before, err := nodes.TakeChecksum(ctx, st)
-	if err != nil {
-		return err
-	}
-	_, _ = os.Stdout.WriteString(before.String())
-
-	if !repair {
-		return nil
-	}
-
-	report, err := nodes.RepairHourlyRollups(ctx, st, !apply)
-	if err != nil {
-		return err
-	}
-	_, _ = os.Stdout.WriteString(report.String() + "\n")
-	if !apply {
-		_, _ = os.Stdout.WriteString(
-			"nothing was written; re-run with --accounting-apply to apply this\n")
-		return nil
-	}
-
-	after, err := nodes.TakeChecksum(ctx, st)
-	if err != nil {
-		return err
-	}
-	for _, line := range before.Divergence(after) {
-		_, _ = os.Stdout.WriteString("changed " + line + "\n")
-	}
-	return nil
 }
 
 func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
