@@ -54,7 +54,7 @@ func TestComputeStats_EmptyDB(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	stats, err := dashboard.ComputeStats(ctx, s, nil)
+	stats, err := dashboard.ComputeStats(ctx, s, rbac.Scope{IsSuper: true})
 	if err != nil {
 		t.Fatalf("ComputeStats: %v", err)
 	}
@@ -81,12 +81,13 @@ func TestComputeStats_EmptyDB(t *testing.T) {
 	}
 }
 
+// The cache partition follows the scope: a non-super caller gets their own
+// row rather than sharing the global one.
 func TestComputeStats_AdminIDPassedThrough(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	id := int64(99)
-	stats, err := dashboard.ComputeStats(ctx, s, &id)
+	stats, err := dashboard.ComputeStats(ctx, s, rbac.Scope{AdminID: 99})
 	if err != nil {
 		t.Fatalf("ComputeStats: %v", err)
 	}

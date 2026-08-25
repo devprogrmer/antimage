@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
 )
 
@@ -37,9 +38,14 @@ func StartSweeper(ctx context.Context, db *store.Store) error {
 	return nil
 }
 
-// RefreshStats computes fresh global stats and persists them to the cache.
+// RefreshStats computes fresh GLOBAL stats and persists them to the cache.
+//
+// The background sweeper warms the super-admin partition only. A per-admin row
+// is computed on that admin's own first read, because the sweeper has no actor
+// and inventing a scope here would be inventing an authorization decision in a
+// background job.
 func RefreshStats(ctx context.Context, db *store.Store) error {
-	s, err := ComputeStats(ctx, db, nil)
+	s, err := ComputeStats(ctx, db, rbac.Scope{IsSuper: true})
 	if err != nil {
 		return fmt.Errorf("compute stats: %w", err)
 	}
