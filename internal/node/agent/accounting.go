@@ -50,20 +50,25 @@ func (c *Client) AccountingLoop(ctx context.Context, stream antimagev1.Control_S
 }
 
 func (c *Client) pollAndReport(ctx context.Context, stream antimagev1.Control_StreamClient) error {
-	// Check if the adapter supports accounting.
-	reporter, ok := c.ad.(adapter.UsageReporter)
-	if !ok {
-		// Adapter doesn't support self-accounting.
-		return nil
-	}
-
-	samples, err := reporter.Usage(ctx)
-	if err != nil {
-		return fmt.Errorf("adapter usage query failed: %w", err)
+	// Poll EVERY adapter that accounts for its own traffic.
+	//
+	// A node runs several protocols at once and more than one of them may
+	// report usage -- Xray and WireGuard both do. Taking only the first would
+	// silently drop the rest of the node's traffic, and silently is the worst
+	// way to lose accounting data: the totals still look plausible.
+	var samples []adapter.UsageSample
+	for _, reporter := range c.ads.UsageReporters() {
+		got, err := reporter.Usage(ctx)
+		if err != nil {
+			// One adapter's failure must not discard the samples already
+			// collected from the others; those are real traffic that happened.
+			return fmt.Errorf("adapter usage query failed: %w", err)
+		}
+		samples = append(samples, got...)
 	}
 
 	if len(samples) == 0 {
-		// No traffic since last poll.
+		// No traffic since last poll, or no adapter accounts for itself.
 		return nil
 	}
 
