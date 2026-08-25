@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/control"
-	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func TestHealthEndpoint(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestReadyEndpoint(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}

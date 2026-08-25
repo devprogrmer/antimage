@@ -10,11 +10,12 @@ import (
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/shared/secrets"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func newFixture(t *testing.T) (*store.Store, *secrets.Box, int64, int64) {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

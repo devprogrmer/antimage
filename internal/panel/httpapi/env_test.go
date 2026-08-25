@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 type testEnv struct {
@@ -31,11 +31,11 @@ func itoa64(i int64) string { return strconv.FormatInt(i, 10) }
 // tuned — the SSE snapshot interval, so far.
 func newTestEnv(t *testing.T, opts ...func(*Deps)) *testEnv {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
+	// storetest.New rather than store.Open: opening runs every migration, which
+	// is 185ms of a 187ms cold open, and this package does it 212 times. The
+	// schema is built once per test binary and copied per test, so each store
+	// is still an independent database -- only its construction is shared.
+	s := storetest.New(t)
 
 	now := func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 	deps := Deps{

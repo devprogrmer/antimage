@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 // TestExecuteDeploymentAllAtOnce verifies successful all_at_once execution
@@ -449,7 +450,7 @@ func TestExecuteDeploymentRollingNodeFailure(t *testing.T) {
 
 func setupExecutionTest(t *testing.T) (*store.Store, func()) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

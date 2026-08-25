@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func TestRecordAndGetLatestMetrics(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRecordAndGetLatestMetrics(t *testing.T) {
 
 func TestGetMetricsHistory(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestCalculateHealthStatus_Offline_TimeoutExceeded(t *testing.T) {
 
 func TestRecordNodeEvent(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestRecordNodeEvent(t *testing.T) {
 
 func TestPruneOldMetrics(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

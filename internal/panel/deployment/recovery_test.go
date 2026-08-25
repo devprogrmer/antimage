@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func TestRecoverStaleDeployments(t *testing.T) {
@@ -427,7 +428,7 @@ func TestRecoverStaleDeploymentsPartiallyComplete(t *testing.T) {
 
 func setupRecoveryTest(t *testing.T) (*store.Store, func()) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

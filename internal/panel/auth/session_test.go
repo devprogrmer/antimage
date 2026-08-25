@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func newSessions(t *testing.T) (*Sessions, *store.Store, int64, *fakeClock) {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
