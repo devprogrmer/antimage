@@ -89,6 +89,11 @@ All 21 subject-bearing routes, plus device revoke.
 | `/nodes/{id}/routing` | POST | `outbound:write` | `rbac.Target{Kind: TargetNode}` |
 | `/nodes/{id}/routing/{id}` | PUT · DELETE | `outbound:write` | `rbac.Target{Kind: TargetNode}` |
 | `/nodes/{id}/routing/default` | PUT | `outbound:write` | `rbac.Target{Kind: TargetNode}` |
+| `/resellers` | GET · POST | `reseller:read` / `reseller:write` | platform-wide; see below |
+| `/resellers/{id}` | GET · PUT | `reseller:read` / `reseller:write` | platform-wide; see below |
+| `/resellers/{id}/balance` · `/ledger` | GET | `reseller:read` | platform-wide; see below |
+| `/resellers/{id}/credit` | POST | **`credit:grant`** | platform-wide; see below |
+| `/me/reseller` | GET | none — self-service | `ListResellersScoped`, own row only |
 
 ### Egress is scoped by node, not by subject
 
@@ -126,6 +131,27 @@ Reseller-side reads are scoped by `resellerScopePredicate`:
   *scope* through `/me`, not by permission. Granting `reseller:read` would let
   one tenant enumerate the others.
 
+### The tenancy management API is permission-gated, not scope-gated
+
+That last sentence is the whole model, and it cuts both ways: because granting
+`reseller:read` to a tenant *would* let them enumerate the others, holding it
+already means platform staff. It is a platform-wide grant.
+
+So `/resellers/*` is gated by permission and queries with a platform scope.
+Applying the tenant predicate on top made the permission unusable for the role
+that is meant to have it: `admin` holds `reseller:write` but operates no tenant,
+so `(is_super OR resellers.admin_id = ?)` matched nothing and every management
+call returned 404. `service.Resellers.platformScope` carries that reasoning, and
+it is reached only after `rbac.Check` has passed.
+
+Tenant self-service stays scoped and is a different route: `GET /me/reseller`
+resolves the caller through `ListResellersScoped`, which for a tenant reduces to
+their own row.
+
+`credit:grant` remains separate from `reseller:write` throughout.
+`TestCreditGrantIsSeparateFromResellerWrite` proves an `admin` can rename a
+tenant and cannot fund one.
+
 ## Adding a new subject endpoint
 
 1. Add the permission check (`d.authorize` or `rbac.Check`).
@@ -149,6 +175,7 @@ Reseller-side reads are scoped by `resellerScopePredicate`:
 | `httpapi/subjects_import_owner_test.go` | Import ownership: rows land on the named reseller and become visible to them, the ledger is debited, a tenant cannot name an owner, replays are recognised |
 | `httpapi/subjects_search_test.go` | `/api/v2/subjects` returns real rows and stays scoped under every filter, sort and page size |
 | `httpapi/egress_api_test.go` | Egress: outbounds reach the document, capability and tag refusals, and that mutation needs `outbound:write` while reads still need node scope |
+| `httpapi/resellers_api_test.go` | Tenancy over HTTP: credit:grant held separate from reseller:write, tenants refused the management API but served by /me, idempotent grants, limits clearable to unlimited |
 | `rbac/reseller_perm_test.go` | Privilege separation of `credit:grant`; reseller holds no tenancy permissions |
 | `resellers/resellers_test.go` | Ledger invariants, atomic provisioning, idempotency |
 
