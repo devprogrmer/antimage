@@ -86,6 +86,15 @@ type Caps struct {
 	// Service.Params. Required when SupportsOutbounds is true.
 	OutboundSchema json.RawMessage `json:"outbound_schema,omitempty"`
 
+	// OutboundKinds are the Outbound.Kind values this adapter can render.
+	//
+	// Published so the UI can offer exactly these and no more. A frontend with
+	// its own hardcoded list is the fake feature layer this design exists to
+	// prevent: it would let an operator pick a kind the adapter refuses, and a
+	// refused outbound is not a validation error on the node -- it is a proxy
+	// that will not start, taking every working inbound with it.
+	OutboundKinds []string `json:"outbound_kinds,omitempty"`
+
 	// BuiltinOutboundTags are outbounds the adapter provides on its own, which
 	// a routing rule may reference without a corresponding panel row.
 	//

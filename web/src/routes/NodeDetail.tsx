@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { formatNumber, formatTimestamp, t } from "../i18n";
 import { StatusBadge, type NodeStatus } from "../components/StatusBadge";
+import { EgressPanel } from "../components/EgressPanel";
 
 interface NodeDetailData {
   id: number;
@@ -76,6 +77,8 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
         </span>
         {drift && <span className="text-amber-400">{t("node.drift")}</span>}
       </section>
+
+      <EgressPanel nodeId={nodeId} />
 
       <section>
         <h3 className="mb-1 text-xs uppercase tracking-wide text-zinc-500">

@@ -346,3 +346,73 @@ func (d Deps) handleDeleteOutbound(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// egressCapabilitiesDTO tells the UI what this node can actually do.
+//
+// Exists so the frontend holds no protocol knowledge. Without it the UI would
+// need its own list of outbound kinds, which drifts from the adapters the
+// moment one gains or loses support -- and the failure mode is an operator
+// picking a kind the adapter refuses, which is not a validation error on the
+// node but a proxy that will not start.
+type egressCapabilitiesDTO struct {
+	Supported     bool     `json:"supported"`
+	AdapterKind   string   `json:"adapter_kind,omitempty"`
+	OutboundKinds []string `json:"outbound_kinds"`
+	// BuiltinTags are outbounds the adapter provides itself, which a rule may
+	// reference although no row exists for them. The UI lists them alongside
+	// the configured outbounds when choosing a rule's target.
+	BuiltinTags []string `json:"builtin_tags"`
+	// Reason explains an unsupported node, so the UI can say why rather than
+	// simply hiding the feature with no account of itself.
+	Reason string `json:"reason,omitempty"`
+}
+
+func (d Deps) handleGetEgressCapabilities(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	nodeID, err := pathInt64(r, "nodeID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermOutboundRead,
+		rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
+		return
+	}
+
+	adapterKind, err := d.egressCapableAdapter(r.Context(), nodeID)
+	if errors.Is(err, errNodeNotFound) {
+		WriteError(w, http.StatusNotFound, "not_found", "node not found")
+		return
+	}
+	if err != nil {
+		// Not an error to the caller: "this node cannot route" is a fact about
+		// the node, and the UI needs it to decide what to show.
+		WriteJSON(w, http.StatusOK, egressCapabilitiesDTO{
+			Supported:     false,
+			OutboundKinds: []string{},
+			BuiltinTags:   []string{},
+			Reason:        err.Error(),
+		})
+		return
+	}
+
+	caps := nodes.KnownAdapters()[adapterKind].Caps
+	out := egressCapabilitiesDTO{
+		Supported:     true,
+		AdapterKind:   adapterKind,
+		OutboundKinds: caps.OutboundKinds,
+		BuiltinTags:   caps.BuiltinOutboundTags,
+	}
+	// Never nil: the UI iterates these, and a null would need a guard at every
+	// call site.
+	if out.OutboundKinds == nil {
+		out.OutboundKinds = []string{}
+	}
+	if out.BuiltinTags == nil {
+		out.BuiltinTags = []string{}
+	}
+	WriteJSON(w, http.StatusOK, out)
+}

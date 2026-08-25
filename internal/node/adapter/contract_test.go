@@ -112,6 +112,11 @@ func TestEgressCapabilitiesAreHonest(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			caps := a.Descriptor().Caps
 
+			if caps.SupportsOutbounds && len(caps.OutboundKinds) == 0 {
+				t.Error("declares SupportsOutbounds but publishes no OutboundKinds; " +
+					"the UI would have to hardcode the list, which is how it starts " +
+					"offering kinds the adapter refuses to render")
+			}
 			if caps.SupportsOutbounds && len(caps.OutboundSchema) == 0 {
 				t.Error("declares SupportsOutbounds but publishes no OutboundSchema; " +
 					"the panel would accept unvalidated outbound params")
