@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -48,13 +50,19 @@ func (r *ExecRuntime) Available(ctx context.Context) error {
 	return nil
 }
 
-func (r *ExecRuntime) InterfaceUp(ctx context.Context, iface string) error {
-	_, err := r.run(ctx, "wg-quick", "up", iface)
+// InterfaceUp brings the interface up from configPath.
+//
+// wg-quick is given the PATH rather than the interface name: a bare name is
+// resolved against /etc/wireguard, which is not necessarily where the adapter
+// wrote the file. wg-quick derives the interface name from the basename, which
+// is why the config filename and the interface name have to agree.
+func (r *ExecRuntime) InterfaceUp(ctx context.Context, _, configPath string) error {
+	_, err := r.run(ctx, "wg-quick", "up", configPath)
 	return err
 }
 
-func (r *ExecRuntime) InterfaceDown(ctx context.Context, iface string) error {
-	_, err := r.run(ctx, "wg-quick", "down", iface)
+func (r *ExecRuntime) InterfaceDown(ctx context.Context, _, configPath string) error {
+	_, err := r.run(ctx, "wg-quick", "down", configPath)
 	return err
 }
 
@@ -124,12 +132,56 @@ func (r *ExecRuntime) ShowTransfer(ctx context.Context, iface string) (map[strin
 	return transfers, scanner.Err()
 }
 
+// SyncPeers applies a peer change to a running interface, without restarting.
+//
+// The config is passed through `wg-quick strip` first, and that is not optional.
+// `wg syncconf` speaks the BARE wg format; the file antimage writes is a
+// wg-quick config, which additionally carries Address, DNS and MTU in
+// [Interface]. wg does not know those keys and refuses the whole file:
+//
+//	Line unrecognized: `Address=10.99.0.1/24'
+//	Configuration parsing error
+//
+// So every hot peer add failed with a parse error, and fell back to a restart
+// that disconnected everyone. Nothing caught it because nothing had ever
+// executed this method -- Apply returned "not yet implemented", which is the
+// whole of AD-3. The real-runtime job found it on its first pass.
+//
+// `wg-quick strip` is wg-quick's own filter for exactly this, so the two views
+// of the config cannot drift: one file on disk, stripped by the tool that
+// wrote its format.
 func (r *ExecRuntime) SyncPeers(ctx context.Context, iface, configPath string) (bool, error) {
-	// WireGuard supports hot peer updates via `wg syncconf`
-	// This reads the config file and applies peer changes without restarting
-	_, err := r.run(ctx, "wg", "syncconf", iface, configPath)
+	stripped, err := r.run(ctx, "wg-quick", "strip", configPath)
 	if err != nil {
-		// syncconf failed, caller should fall back to restart
+		return false, fmt.Errorf("strip %s for syncconf: %w", configPath, err)
+	}
+
+	// syncconf takes a path, not stdin, so the stripped form has to land in a
+	// file. It carries the interface private key, so it is created 0600 in the
+	// same directory as the config -- not in a shared temp dir -- and removed
+	// as soon as wg has read it.
+	tmp, err := os.CreateTemp(filepath.Dir(configPath), ".antimage-sync-*.conf")
+	if err != nil {
+		return false, fmt.Errorf("create stripped config: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return false, fmt.Errorf("chmod stripped config: %w", err)
+	}
+	if _, err := tmp.WriteString(stripped); err != nil {
+		_ = tmp.Close()
+		return false, fmt.Errorf("write stripped config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return false, fmt.Errorf("close stripped config: %w", err)
+	}
+
+	if _, err := r.run(ctx, "wg", "syncconf", iface, tmpName); err != nil {
+		// The caller turns this into a failed step; the reconciler plans a
+		// restart on the next pass, which is disruptive but correct.
 		return false, err
 	}
 	return true, nil

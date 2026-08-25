@@ -27,8 +27,8 @@ func allAdapters(t *testing.T) map[string]adapter.Adapter {
 	return map[string]adapter.Adapter{
 		"xray":      xray.New(dir, nil, true),
 		"singbox":   singbox.New(dir, nil),
-		"wireguard": wireguard.New(nil, dir),
-		"hysteria2": hysteria2.New(nil, dir),
+		"wireguard": wireguard.New(nil, dir, dir),
+		"hysteria2": hysteria2.New(nil, dir, dir),
 		"l2tp":      l2tp.New(dir, dir),
 		"stub":      stub.New(dir),
 	}

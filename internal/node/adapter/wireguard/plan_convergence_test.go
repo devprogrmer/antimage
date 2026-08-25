@@ -2,13 +2,17 @@ package wireguard
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 )
 
-const testParams = `{"port":51820,"subnet":"10.8.0.1/24","private_key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA="}`
+// The service key uses a seed no subject uses, so the interface own private
+// key -- which legitimately appears in the config -- cannot be mistaken for a
+// subscriber key leaking into it.
+const testParams = `{"port":51820,"subnet":"10.8.0.1/24","private_key":"WGBnbnV8g4qRmJ+mrbS7wsnQ197l7PP6Bg0UGyIpMHc="}`
 
 func desiredWith(t *testing.T, users int) adapter.Desired {
 	t.Helper()
@@ -22,12 +26,34 @@ func desiredWith(t *testing.T, users int) adapter.Desired {
 		d.Subjects = append(d.Subjects, adapter.Subject{
 			ID: int64(i),
 			Credentials: []adapter.Credential{{
-				Kind:  "keypair",
-				Value: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + string(rune('A'+i)) + "A=",
+				Kind: "keypair",
+				// A REAL 32-byte key. The previous fixture was a 43-character
+				// string that base64 cannot decode at all; it passed only
+				// because the adapter copied the credential straight into the
+				// peer's PublicKey field instead of deriving from it. Once the
+				// derivation was fixed the fixture stopped being usable, which
+				// is the fixture telling the truth for the first time.
+				Value: testPrivateKey(i),
 			}},
 		})
 	}
 	return d
+}
+
+// testPrivateKey returns a deterministic, valid curve25519 private key.
+//
+// Deterministic so a failure reproduces; valid so the adapter's derivation
+// succeeds and the test exercises the real path rather than the error branch.
+func testPrivateKey(seed int) string {
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte((i*7 + seed*31 + 1) % 251)
+	}
+	// Clamp as curve25519 expects, so wg would accept it too.
+	raw[0] &= 248
+	raw[31] &= 127
+	raw[31] |= 64
+	return base64.StdEncoding.EncodeToString(raw)
 }
 
 // WireGuard must actually converge after the initial install.
@@ -37,7 +63,7 @@ func desiredWith(t *testing.T, users int) adapter.Desired {
 // interface and a revoked peer was never removed. The adapter installed once
 // and then ignored the world.
 func TestPlanConvergesAfterInstall(t *testing.T) {
-	a := New(nil, t.TempDir())
+	a := New(nil, t.TempDir(), t.TempDir())
 	obs := adapter.Observed{Services: []adapter.ObservedService{
 		{ID: 10, Present: true, Managed: true, Checksum: "stale-checksum"},
 	}}
@@ -56,7 +82,7 @@ func TestPlanConvergesAfterInstall(t *testing.T) {
 // convergence: the file says what should be running, not what is.
 func TestPlanRestartsWhenTheInterfaceNeverCameUp(t *testing.T) {
 	dir := t.TempDir()
-	a := New(nil, dir)
+	a := New(nil, t.TempDir(), dir)
 	d := desiredWith(t, 1)
 
 	var params ServiceParams
@@ -69,7 +95,7 @@ func TestPlanRestartsWhenTheInterfaceNeverCameUp(t *testing.T) {
 	}
 	// The file matches desired, but nothing was ever applied.
 	obs := adapter.Observed{Services: []adapter.ObservedService{
-		{ID: 10, Present: true, Managed: true, Checksum: checksumConfigBody(rendered)},
+		{ID: 10, Present: true, Managed: true, Checksum: renderedChecksum(rendered)},
 	}}
 
 	plan, err := a.Plan(context.Background(), d, obs)
@@ -89,7 +115,7 @@ func TestPlanRestartsWhenTheInterfaceNeverCameUp(t *testing.T) {
 // revoked user connected.
 func TestRemovingAPeerIsRestartClass(t *testing.T) {
 	dir := t.TempDir()
-	a := New(nil, dir)
+	a := New(nil, t.TempDir(), dir)
 
 	two := desiredWith(t, 2)
 	var params ServiceParams
@@ -102,11 +128,11 @@ func TestRemovingAPeerIsRestartClass(t *testing.T) {
 		t.Fatalf("GenerateConfig: %v", err)
 	}
 	// The interface is up and serving both peers.
-	if err := a.recordApplied(10, checksumConfigBody(rendered), extractPublicKeys(peers)); err != nil {
+	if err := a.recordApplied(10, renderedChecksum(rendered), mustShape(t, params), extractPublicKeys(peers)); err != nil {
 		t.Fatalf("recordApplied: %v", err)
 	}
 	obs := adapter.Observed{Services: []adapter.ObservedService{
-		{ID: 10, Present: true, Managed: true, Checksum: checksumConfigBody(rendered)},
+		{ID: 10, Present: true, Managed: true, Checksum: renderedChecksum(rendered)},
 	}}
 
 	// Now desired drops to one peer.
@@ -126,7 +152,7 @@ func TestRemovingAPeerIsRestartClass(t *testing.T) {
 // A converged interface must plan nothing, or the node reconciles forever.
 func TestConvergedStatePlansNothing(t *testing.T) {
 	dir := t.TempDir()
-	a := New(nil, dir)
+	a := New(nil, t.TempDir(), dir)
 	d := desiredWith(t, 2)
 
 	var params ServiceParams
@@ -138,8 +164,8 @@ func TestConvergedStatePlansNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateConfig: %v", err)
 	}
-	sum := checksumConfigBody(rendered)
-	if err := a.recordApplied(10, sum, extractPublicKeys(peers)); err != nil {
+	sum := renderedChecksum(rendered)
+	if err := a.recordApplied(10, sum, mustShape(t, params), extractPublicKeys(peers)); err != nil {
 		t.Fatalf("recordApplied: %v", err)
 	}
 	obs := adapter.Observed{Services: []adapter.ObservedService{
@@ -153,4 +179,18 @@ func TestConvergedStatePlansNothing(t *testing.T) {
 	if !plan.IsEmpty() {
 		t.Errorf("converged state still plans %+v", plan.Steps)
 	}
+}
+
+// mustShape renders this service's shape -- its checksum with no peers.
+//
+// Tests record it alongside the applied checksum because that is what a real
+// Apply records, and because without it every peer addition is classified as a
+// structural change and restarts instead of hot-syncing.
+func mustShape(t *testing.T, params ServiceParams) string {
+	t.Helper()
+	shape, err := shapeChecksum(10, params)
+	if err != nil {
+		t.Fatalf("shapeChecksum: %v", err)
+	}
+	return shape
 }

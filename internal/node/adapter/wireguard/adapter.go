@@ -32,8 +32,8 @@ import (
 const Kind adapter.Kind = "wireguard"
 
 const (
-	// configDir is where WireGuard expects configuration files.
-	configDir = "/etc/wireguard"
+	// DefaultConfigDir is where WireGuard expects configuration files.
+	DefaultConfigDir = "/etc/wireguard"
 	// filePrefix namespaces our configs to avoid conflicts with manually
 	// managed interfaces.
 	filePrefix = "antimage-"
@@ -50,10 +50,19 @@ var ErrRuntimeUnavailable = errors.New("wireguard runtime unavailable")
 type Runtime interface {
 	// Available checks if wg-quick and wg are in PATH.
 	Available(ctx context.Context) error
-	// InterfaceUp brings up an interface via wg-quick.
-	InterfaceUp(ctx context.Context, iface string) error
+	// InterfaceUp brings up an interface via wg-quick, from the config at
+	// configPath.
+	//
+	// The PATH is passed, not just the name. wg-quick resolves a bare interface
+	// name against /etc/wireguard, so passing the name alone would send it
+	// looking somewhere other than where the adapter actually wrote the file
+	// whenever the two differ -- which is exactly what a test, or a node with a
+	// non-default layout, does. wg-quick takes a path and derives the interface
+	// name from its basename, so this is its own supported form and not a
+	// workaround.
+	InterfaceUp(ctx context.Context, iface, configPath string) error
 	// InterfaceDown tears down an interface via wg-quick.
-	InterfaceDown(ctx context.Context, iface string) error
+	InterfaceDown(ctx context.Context, iface, configPath string) error
 	// InterfaceStatus checks if an interface exists and is up.
 	InterfaceStatus(ctx context.Context, iface string) (exists, up bool, err error)
 	// ShowTransfer returns per-peer RX/TX bytes for an interface.
@@ -73,6 +82,12 @@ type PeerTransfer struct {
 // Adapter implements the adapter contract for WireGuard.
 type Adapter struct {
 	rt Runtime
+	// dir is where interface configs live. Taken at construction rather than
+	// read from the package const so a test can point the adapter at a temp
+	// directory: Apply writes real files, and a test that wrote them to
+	// /etc/wireguard would leave a live interface config on the developer's
+	// machine and poison the next run through the accounting glob.
+	dir string
 	// stateDir is where we persist accounting cursors and applied state.
 	stateDir string
 	// registry maps WireGuard public keys to subject IDs
@@ -80,9 +95,16 @@ type Adapter struct {
 }
 
 // New returns an adapter managing WireGuard interfaces through rt.
-func New(rt Runtime, stateDir string) *Adapter {
+//
+// configDir may be empty, in which case the system location is used. The Xray
+// adapter takes its directory the same way and for the same reason.
+func New(rt Runtime, configDir, stateDir string) *Adapter {
+	if configDir == "" {
+		configDir = DefaultConfigDir
+	}
 	return &Adapter{
 		rt:       rt,
+		dir:      configDir,
 		stateDir: stateDir,
 		registry: newPeerRegistry(),
 	}
@@ -160,7 +182,7 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 
 // configPath returns the filesystem path for a service's WireGuard config.
 func (a *Adapter) configPath(serviceID int64) string {
-	return filepath.Join(configDir, fmt.Sprintf("%s%d%s", filePrefix, serviceID, fileSuffix))
+	return filepath.Join(a.dir, fmt.Sprintf("%s%d%s", filePrefix, serviceID, fileSuffix))
 }
 
 // appliedPath returns the path to the sidecar tracking what the interface is
@@ -179,14 +201,19 @@ func interfaceName(serviceID int64) string {
 type appliedState struct {
 	Checksum string   `json:"checksum"`
 	Peers    []string `json:"peers"` // sorted public keys
+	// Shape is the checksum of this config rendered with no peers. Recorded so
+	// a later Plan can tell a membership change from a structural one without
+	// having to keep the old params: two configs sharing a shape differ only in
+	// their peer list, which is the condition for a hot syncconf.
+	Shape string `json:"shape,omitempty"`
 }
 
 // recordApplied notes what the interface is now serving. Called only after
-// wg-quick up or wg syncpeers succeeds.
-func (a *Adapter) recordApplied(serviceID int64, checksum string, peers []string) error {
+// wg-quick up or wg syncconf succeeds.
+func (a *Adapter) recordApplied(serviceID int64, checksum, shape string, peers []string) error {
 	sorted := append([]string(nil), peers...)
 	sort.Strings(sorted)
-	body, err := json.Marshal(appliedState{Checksum: checksum, Peers: sorted})
+	body, err := json.Marshal(appliedState{Checksum: checksum, Peers: sorted, Shape: shape})
 	if err != nil {
 		return fmt.Errorf("encode applied state: %w", err)
 	}

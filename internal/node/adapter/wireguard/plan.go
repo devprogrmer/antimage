@@ -3,7 +3,8 @@ package wireguard
 import (
 	"context"
 	"encoding/json"
-	"strings"
+	"fmt"
+	"sort"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 )
@@ -29,12 +30,27 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 	for _, dsvc := range desired.Services {
 		obs, exists := observedMap[dsvc.ID]
 
+		// The config is rendered HERE, in Plan, and carried to Apply in the
+		// step payload. Apply has no access to desired state -- that is the
+		// whole of AD-3 -- and re-deriving it there would mean two renders of
+		// the same service that could disagree. Xray and sing-box already work
+		// this way; this follows them rather than inventing a third route.
+		payload, err := a.buildPayload(dsvc, desired.Subjects)
+		if err != nil {
+			// An unrenderable service cannot be installed or repaired, and
+			// planning a step that is certain to fail buries the real reason in
+			// an apply-run. Skipping leaves the node as it is and the next pass
+			// tries again once the params are fixed.
+			continue
+		}
+
 		if !exists {
 			// New service: install
 			steps = append(steps, adapter.Step{
 				Kind:       "install",
 				ServiceID:  dsvc.ID,
 				Disruption: adapter.DisruptRestart,
+				Payload:    payload,
 			})
 			continue
 		}
@@ -47,15 +63,16 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 				Kind:       "restart",
 				ServiceID:  dsvc.ID,
 				Disruption: adapter.DisruptRestart,
+				Payload:    withReason(payload, reason),
 			})
 		} else if needsReload {
 			steps = append(steps, adapter.Step{
 				Kind:       "reload",
 				ServiceID:  dsvc.ID,
 				Disruption: adapter.DisruptNone,
+				Payload:    withReason(payload, reason),
 			})
 		}
-		_ = reason // surfaced in step payloads by a later change
 	}
 
 	// 2. Handle services that should be removed
@@ -70,6 +87,76 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 	}
 
 	return adapter.Plan{Steps: steps}, nil
+}
+
+// stepPayload is what Apply needs to execute a step without re-deriving it.
+//
+// Same role as the Xray adapter's type of the same name: Plan renders, Apply
+// writes. Apply never sees adapter.Desired, so everything it needs travels
+// here.
+type stepPayload struct {
+	// Config is the fully rendered interface config, marker included.
+	Config string `json:"config,omitempty"`
+	// Checksum is Config's body checksum, in the domain Observe reports, so
+	// the applied sidecar and the marker can be compared directly.
+	Checksum string `json:"checksum,omitempty"`
+	// Shape is the checksum of this config with no peers, recorded in the
+	// sidecar so a later Plan can tell membership from structure.
+	Shape string `json:"shape,omitempty"`
+	// Peers is the public-key set this config serves, carried through so the
+	// sidecar records who the interface is actually serving.
+	Peers []string `json:"peers,omitempty"`
+	// Reason is why the step was planned. It reaches the operator through the
+	// apply-run record and is the only explanation of WHY a session dropped.
+	Reason string `json:"reason,omitempty"`
+}
+
+// buildPayload renders a service and everything Apply needs to install it.
+func (a *Adapter) buildPayload(svc adapter.Service, subjects []adapter.Subject) (json.RawMessage, error) {
+	var params ServiceParams
+	if err := json.Unmarshal(svc.Params, &params); err != nil {
+		return nil, fmt.Errorf("service %d params: %w", svc.ID, err)
+	}
+	peers := a.buildPeerList(svc, subjects)
+	rendered, err := GenerateConfig(svc.ID, params, peers)
+	if err != nil {
+		return nil, fmt.Errorf("render service %d: %w", svc.ID, err)
+	}
+	shape, err := shapeChecksum(svc.ID, params)
+	if err != nil {
+		return nil, fmt.Errorf("shape for service %d: %w", svc.ID, err)
+	}
+	keys := extractPublicKeys(peers)
+	sort.Strings(keys)
+	body, err := json.Marshal(stepPayload{
+		Config:   rendered,
+		Checksum: renderedChecksum(rendered),
+		Shape:    shape,
+		Peers:    keys,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode payload for service %d: %w", svc.ID, err)
+	}
+	return body, nil
+}
+
+// withReason returns the payload with Reason set. Planning decides why; Apply
+// only reports it, so it is attached after the fact rather than threaded
+// through buildPayload's signature.
+func withReason(payload json.RawMessage, reason string) json.RawMessage {
+	if reason == "" {
+		return payload
+	}
+	var p stepPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return payload
+	}
+	p.Reason = reason
+	body, err := json.Marshal(p)
+	if err != nil {
+		return payload
+	}
+	return body
 }
 
 // needsUpdate decides whether an existing interface has to change, and how
@@ -110,7 +197,11 @@ func (a *Adapter) needsUpdate(
 	if err != nil {
 		return true, false, "config could not be rendered"
 	}
-	want := checksumConfigBody(rendered)
+	// renderedChecksum, not checksumConfigBody: `rendered` still carries its
+	// marker line, and observed.Checksum is read OUT of that marker, so it
+	// covers the body alone. Hashing the whole string produced a value that
+	// could never match, and every converged service planned a restart forever.
+	want := renderedChecksum(rendered)
 	applied := a.applied(desired.ID)
 
 	if observed.Checksum == want {
@@ -129,7 +220,7 @@ func (a *Adapter) needsUpdate(
 
 	// Purely additive, and only when we know what the interface is serving. An
 	// unknown applied state forces a restart, which is the safe direction.
-	if applied.Checksum != "" && onlyMembershipChanged(params, applied.Checksum, want) {
+	if applied.Checksum != "" && a.onlyMembershipChanged(desired.ID, params, applied) {
 		return false, true, "peers added"
 	}
 	return true, false, "configuration changed"
@@ -146,16 +237,35 @@ func (a *Adapter) buildPeerList(desired adapter.Service, subjects []adapter.Subj
 	}
 
 	for _, subj := range subjects {
-		// Extract peer public key from credentials
-		// WireGuard credential is stored as "keypair" credential kind
-		var pubKey string
+		// The keypair credential holds the subject's PRIVATE key -- the panel
+		// stores it sealed, and both the Descriptor and the peer registry say
+		// so. The public key has to be derived from it.
+		//
+		// This used to write cred.Value straight into the peer's PublicKey
+		// field, which was wrong twice over. The peer entry then named a key
+		// no client possesses, so nobody could connect; and it wrote every
+		// subscriber's PRIVATE key into a config file on the node, which is a
+		// credential the node has no business holding. Accounting could not
+		// match either, because the registry keys on the derived public key.
+		//
+		// PublicKeyFromPrivate is the pure-Go derivation, already tested
+		// against the RFC 7748 vector. It is used rather than `wg pubkey` so
+		// planning does not shell out once per peer.
+		var privKey string
 		for _, cred := range subj.Credentials {
 			if cred.Kind == string(adapter.CredKeypair) {
-				pubKey = cred.Value
+				privKey = cred.Value
 				break
 			}
 		}
-		if pubKey == "" {
+		if privKey == "" {
+			continue
+		}
+		pubKey, err := PublicKeyFromPrivate(privKey)
+		if err != nil {
+			// An unusable key means this subject cannot be served. Skipping
+			// leaves the rest of the peer list intact, which is better than
+			// failing the whole service over one bad credential.
 			continue
 		}
 
@@ -189,29 +299,32 @@ func extractPublicKeys(peers []PeerConfig) []string {
 	return keys
 }
 
-// onlyMembershipChanged checks if the difference between two configs is purely
-// in the peer list, with no structural changes.
-func onlyMembershipChanged(params ServiceParams, oldChecksum, newChecksum string) bool {
-	// Generate config with NO peers to get the structural checksum
-	emptyPeers := []PeerConfig{}
-	structuralConfig, err := GenerateConfig(0, params, emptyPeers)
+// onlyMembershipChanged reports whether the desired config differs from the
+// applied one in its peer list alone.
+//
+// It compares SHAPES -- each config's checksum rendered with no peers. If the
+// interface came up with the same structure it is being asked for now, then
+// whatever changed is in the peer list, and `wg syncconf` can apply it without
+// dropping the sessions of everyone already connected.
+//
+// The previous version compared the desired shape against the applied config's
+// FULL checksum, which are different things: they matched only when the applied
+// config happened to have no peers at all. So the hot path fired once in a
+// service's life, on the very first peer, and every subsequent user was added by
+// tearing the interface down -- disconnecting every existing user to admit one
+// new one. That is the failure the shape field exists to prevent, and it is why
+// the sidecar now records it.
+//
+// An applied state with no recorded shape predates this and is treated as
+// unknown, which restarts. Safe direction, and self-correcting: the restart
+// records a shape.
+func (a *Adapter) onlyMembershipChanged(serviceID int64, params ServiceParams, applied appliedState) bool {
+	if applied.Shape == "" {
+		return false
+	}
+	shape, err := shapeChecksum(serviceID, params)
 	if err != nil {
 		return false
 	}
-
-	// If the structural part matches, then the difference is only membership
-	lines := strings.Split(structuralConfig, "\n")
-	if len(lines) < 2 {
-		return false
-	}
-	_, structChecksum, ok := parseMarker(lines[0])
-	if !ok {
-		return false
-	}
-
-	// This is a simplified heuristic. A proper implementation would parse
-	// both configs and compare the [Interface] section.
-	// For now, if checksums differ, assume structural change unless we
-	// can prove otherwise through more detailed parsing.
-	return structChecksum == oldChecksum
+	return shape == applied.Shape
 }

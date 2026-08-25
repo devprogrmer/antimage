@@ -17,7 +17,7 @@ func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
 	}
 
 	// Scan config directory for managed configs
-	entries, err := os.ReadDir(configDir)
+	entries, err := os.ReadDir(a.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return adapter.Observed{Services: []adapter.ObservedService{}}, nil
@@ -36,7 +36,7 @@ func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
 		}
 
 		// Read config file
-		configPath := filepath.Join(configDir, name)
+		configPath := filepath.Join(a.dir, name)
 		body, err := os.ReadFile(configPath)
 		if err != nil {
 			continue
