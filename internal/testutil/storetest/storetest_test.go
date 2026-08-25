@@ -1,8 +1,11 @@
 package storetest
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/amyrm/antimage/internal/panel/store"
 )
 
 // The copy must carry the full schema, or tests would fail in ways that look
@@ -57,18 +60,47 @@ func TestCopyStartsEmpty(t *testing.T) {
 	}
 }
 
-// The point of the exercise.
-func TestCopyIsFasterThanMigrating(t *testing.T) {
-	New(t) // warm the template so it is not counted
+// The point of the exercise: copying must beat migrating.
+//
+// Both sides are measured HERE, in this process, on this machine. An earlier
+// version asserted an absolute threshold -- "mean under 60ms" -- and that is a
+// measurement of the hardware, not of the optimisation. It passed locally at
+// 3.5ms and failed CI at 73.7ms under -race on a shared runner, where a cold
+// open is correspondingly slower too. The ratio is the claim; the milliseconds
+// are not.
+//
+// The margin is deliberately loose. This exists to catch the template being
+// removed or silently stopping working, which would put the cost back to a full
+// migration run -- a change of more than an order of magnitude. It is not a
+// benchmark, and tightening it would only buy flakes.
+func TestCopyIsCheaperThanMigrating(t *testing.T) {
+	New(t) // build the template first, so its cost lands on neither side
 
-	const n = 20
+	const n = 5
+
+	// Cold: what every test used to pay. store.Open runs goose.Up.
 	start := time.Now()
+	for i := 0; i < n; i++ {
+		s, err := store.Open(filepath.Join(t.TempDir(), "cold.db"))
+		if err != nil {
+			t.Fatalf("cold open: %v", err)
+		}
+		_ = s.Close()
+	}
+	cold := time.Since(start) / n
+
+	// Warm: the copy path.
+	start = time.Now()
 	for i := 0; i < n; i++ {
 		New(t)
 	}
-	mean := time.Since(start) / n
-	t.Logf("storetest.New mean = %v (a cold store.Open is ~187ms)", mean)
-	if mean > 60*time.Millisecond {
-		t.Errorf("mean %v is not meaningfully cheaper than running the migrations", mean)
+	warm := time.Since(start) / n
+
+	t.Logf("cold store.Open = %v, storetest.New = %v (%.1fx cheaper)",
+		cold, warm, float64(cold)/float64(warm))
+
+	if warm*3 > cold {
+		t.Errorf("storetest.New (%v) is not meaningfully cheaper than a cold "+
+			"store.Open (%v); the schema template is not doing its job", warm, cold)
 	}
 }
