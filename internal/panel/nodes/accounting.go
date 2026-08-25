@@ -3,6 +3,7 @@ package nodes
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/amyrm/antimage/internal/panel/store"
@@ -92,10 +93,25 @@ func PruneUsageDeltas(ctx context.Context, st *store.Store, retentionSeconds int
 // happened once.
 //
 // The watermark is on id rather than created_at because id is assigned by the
-// database and is strictly monotonic, while created_at is supplied by the
-// caller. A cutoff on created_at can step over a row permanently: if a delta
-// carries a timestamp at or after the cutoff while a later-inserted row carries
-// an earlier one, advancing past the second strands the first forever.
+// database, while created_at is supplied by the caller. A cutoff on created_at
+// can step over a row permanently: if a delta carries a timestamp at or after
+// the cutoff while a later-inserted row carries an earlier one, advancing past
+// the second strands the first forever.
+//
+// That id is monotonic is a property the schema has to GUARANTEE, not one it
+// gets for free, and migration 00026 declares AUTOINCREMENT to provide it.
+// Without it, id is a bare rowid and SQLite assigns MAX(rowid)+1 -- which
+// restarts at 1 once PruneUsageDeltas empties the table, as retention does
+// whenever a node has been silent for longer than the window. The stored
+// watermark would then sit above every future id and strand all subsequent
+// traffic, permanently and silently. AUTOINCREMENT makes ids continue past the
+// high-water mark of everything ever inserted, so a pruned table resumes above
+// the watermark rather than beneath it.
+//
+// Clamping the watermark to the table's current maximum is NOT an adequate
+// substitute, which is worth recording because it is the obvious fix and it is
+// wrong: after a reset the surviving row IS the maximum, so a clamp to it still
+// excludes that row from `id > watermark` and strands it.
 //
 // `now` is retained for call compatibility and is deliberately unused. A
 // deadline is no longer needed for correctness: folding a partially elapsed hour
@@ -108,7 +124,7 @@ func RollupHourly(ctx context.Context, st *store.Store, _ int64) error {
 		err := tx.QueryRowContext(ctx,
 			`SELECT last_delta_id FROM usage_rollup_state WHERE name = 'hourly'`,
 		).Scan(&watermark)
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("read rollup watermark: %w", err)
 		}
 

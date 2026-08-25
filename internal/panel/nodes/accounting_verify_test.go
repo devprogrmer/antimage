@@ -251,6 +251,64 @@ func TestRepairAppliesTheProjectedChange(t *testing.T) {
 	}
 }
 
+// The projection must match the closed form, not merely "look negative".
+//
+//	true      = sum of the raw deltas
+//	inflated  = true x folds
+//	projected = true - inflated = -true x (folds - 1)
+//
+// Checking against the model rather than against a recorded number is what
+// makes the dry run something an operator can reason about before approving it:
+// if the reported delta is not -true x (folds-1), either the repair is wrong or
+// the damage is not what we think it is, and both are worth stopping for.
+func TestRepairProjectionMatchesTheModel(t *testing.T) {
+	for _, folds := range []int{2, 7, 12, 168} {
+		st := mustOpen(t)
+		ctx := context.Background()
+		nodeID, alice, bob := twoSubjects(t, st)
+
+		const reports = 4
+		seedTraffic(t, st, nodeID, alice, bob, reports) // 2 subjects x 20 bytes
+		trueBytes := int64(reports * 2 * 20)
+
+		// The fixed rollup folds once; the old one folded `folds` times in
+		// total, so `folds-1` further folds reproduce the historical damage.
+		if err := RollupHourly(ctx, st, 100000); err != nil {
+			t.Fatalf("fold: %v", err)
+		}
+		inflate(t, st, folds-1)
+
+		inflated := trueBytes * int64(folds)
+		if got := rollupTotal(t, st); got != inflated {
+			t.Fatalf("folds=%d: rollup = %d, want %d", folds, got, inflated)
+		}
+
+		report, err := RepairHourlyRollups(ctx, st, true)
+		if err != nil {
+			t.Fatalf("folds=%d: dry run: %v", folds, err)
+		}
+
+		wantDelta := -trueBytes * int64(folds-1)
+		if report.ProjectedDelta() != wantDelta {
+			t.Errorf("folds=%d: projected %+d, model says %+d",
+				folds, report.ProjectedDelta(), wantDelta)
+		}
+		if report.BytesAfter != trueBytes {
+			t.Errorf("folds=%d: repair would leave %d, want the true %d",
+				folds, report.BytesAfter, trueBytes)
+		}
+
+		// And applying it lands exactly there.
+		if _, err := RepairHourlyRollups(ctx, st, false); err != nil {
+			t.Fatalf("folds=%d: apply: %v", folds, err)
+		}
+		if got := rollupTotal(t, st); got != trueBytes {
+			t.Errorf("folds=%d: after repair = %d, want %d", folds, got, trueBytes)
+		}
+		_ = st.Close()
+	}
+}
+
 // Idempotent: a second repair over the same data changes nothing.
 func TestRepairIsIdempotent(t *testing.T) {
 	st := mustOpen(t)

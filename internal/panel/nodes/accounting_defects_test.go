@@ -250,6 +250,109 @@ func TestHourlyRollupFoldsDeltasArrivingBetweenRuns(t *testing.T) {
 	}
 }
 
+// DEFECT 3: retention pruning silently stranded all future traffic.
+//
+// This one was introduced by the fix for defect 2 and found by sweeping the
+// watermark against the other writers of usage_deltas. PruneUsageDeltas is the
+// only other one, and it is enough.
+//
+// usage_deltas.id is INTEGER PRIMARY KEY without AUTOINCREMENT, so it IS the
+// rowid and SQLite assigns MAX(rowid)+1. When retention empties the table --
+// which happens whenever a node has been silent longer than the seven-day
+// window -- the next insert starts again at 1, below a watermark that has
+// advanced. Every subsequent delta then failed `id > watermark` and was never
+// folded, forever.
+//
+// So the original bug over-billed and its fix under-billed, which is worse:
+// inflation is visible in the figures, while this is silent. The watermark is
+// clamped to the table's current maximum to make the two consistent.
+func TestPruningDoesNotStrandFutureTraffic(t *testing.T) {
+	st := mustOpen(t)
+	defer st.Close()
+	ctx := context.Background()
+	nodeID, alice, bob := twoSubjects(t, st)
+
+	if err := IngestUsageReport(ctx, st, nodeID, 1, []UsageDelta{
+		{SubjectID: alice, UplinkBytes: 10, DownlinkBytes: 10},
+		{SubjectID: bob, UplinkBytes: 10, DownlinkBytes: 10},
+	}, 1000); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if err := RollupHourly(ctx, st, 100000); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	folded := rollupTotal(t, st)
+	if folded != 40 {
+		t.Fatalf("first fold = %d, want 40", folded)
+	}
+
+	// Retention empties the table. Rowids will now be reused from 1.
+	if _, err := PruneUsageDeltas(ctx, st, 0, 1_000_000); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+
+	// The node comes back.
+	if err := IngestUsageReport(ctx, st, nodeID, 99,
+		[]UsageDelta{{SubjectID: alice, UplinkBytes: 500, DownlinkBytes: 500}},
+		200000); err != nil {
+		t.Fatalf("ingest after prune: %v", err)
+	}
+	if err := RollupHourly(ctx, st, 300000); err != nil {
+		t.Fatalf("rollup after prune: %v", err)
+	}
+
+	if got := rollupTotal(t, st); got != folded+1000 {
+		t.Errorf("rollup = %d, want %d: traffic reported after retention emptied "+
+			"the table was never folded, because SQLite reused rowids below the "+
+			"watermark", got, folded+1000)
+	}
+}
+
+// Pruning only PART of the table must not reset anything: the surviving rows
+// were already folded and re-folding them would restore the inflation bug.
+func TestPartialPruningDoesNotRefoldSurvivors(t *testing.T) {
+	st := mustOpen(t)
+	defer st.Close()
+	ctx := context.Background()
+	nodeID, alice, bob := twoSubjects(t, st)
+
+	// Two reports at different times, so a cutoff can separate them.
+	if err := IngestUsageReport(ctx, st, nodeID, 1,
+		[]UsageDelta{{SubjectID: alice, UplinkBytes: 10, DownlinkBytes: 10}}, 1000); err != nil {
+		t.Fatalf("ingest 1: %v", err)
+	}
+	if err := IngestUsageReport(ctx, st, nodeID, 2,
+		[]UsageDelta{{SubjectID: bob, UplinkBytes: 30, DownlinkBytes: 30}}, 500000); err != nil {
+		t.Fatalf("ingest 2: %v", err)
+	}
+	if err := RollupHourly(ctx, st, 600000); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+	if got := rollupTotal(t, st); got != 80 {
+		t.Fatalf("fold = %d, want 80", got)
+	}
+
+	// Prune the older report only; the newer row survives with its high id.
+	if _, err := PruneUsageDeltas(ctx, st, 1, 2000); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	var remaining int64
+	if err := st.Read().QueryRow(`SELECT COUNT(*) FROM usage_deltas`).Scan(&remaining); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if remaining != 1 {
+		t.Fatalf("remaining = %d, want 1: the prune did not split the table", remaining)
+	}
+
+	if err := RollupHourly(ctx, st, 600000); err != nil {
+		t.Fatalf("second rollup: %v", err)
+	}
+	if got := rollupTotal(t, st); got != 80 {
+		t.Errorf("rollup = %d, want 80: a surviving already-folded delta was "+
+			"folded again", got)
+	}
+}
+
 // The daily rollup had the same accumulating merge, reading from a table that
 // is a complete aggregate rather than a log. Recomputing it must be safe.
 func TestRepeatedDailyRollupsDoNotInflate(t *testing.T) {

@@ -24,7 +24,20 @@
 -- the rename below is what keeps referencing indexes consistent.
 
 CREATE TABLE usage_deltas_new (
-    id          INTEGER PRIMARY KEY,
+    -- AUTOINCREMENT is load-bearing, not decoration.
+    --
+    -- The rollup watermark below is an id, so ids must never go backwards. A
+    -- bare INTEGER PRIMARY KEY is the rowid and SQLite assigns MAX(rowid)+1,
+    -- which RESTARTS AT 1 once PruneUsageDeltas empties the table -- and it
+    -- does, whenever a node has been silent for longer than the seven-day
+    -- retention window. The watermark would then sit above every future id and
+    -- strand all subsequent traffic, permanently and silently.
+    --
+    -- AUTOINCREMENT keeps a high-water mark in sqlite_sequence and allocates
+    -- above it forever, so a pruned table resumes above the watermark rather
+    -- than beneath it. The cost is one extra row read per insert and a counter
+    -- that would exhaust after 2^63 deltas.
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     node_id     INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
     subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
     -- Monotonic per node. One report carries many subjects, so the idempotency
