@@ -359,6 +359,24 @@ func (s *Store) ProvisionSubject(
 		return ProvisionResult{}, fmt.Errorf("record ownership: %w", err)
 	}
 
+	// Record the quota that checkLimits just measured this request against.
+	//
+	// Without this the ceiling is decorative: checkLimits sums
+	// subjects.quota_bytes across the reseller's customers, and if provisioning
+	// never writes it that sum stays zero forever. Every request would then be
+	// checked against an empty allocation and max_quota_bytes could never trip,
+	// however many customers a tenant provisioned. The value was already
+	// recorded in the audit entry, which is what made the gap easy to miss --
+	// the number appeared in the record of the decision without ever reaching
+	// the state the decision is made from.
+	if in.QuotaBytes > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET quota_bytes = ? WHERE id = ?`,
+			in.QuotaBytes, subjectID); err != nil {
+			return ProvisionResult{}, fmt.Errorf("record allocated quota: %w", err)
+		}
+	}
+
 	ledgerID := int64(0)
 	if in.Cost > 0 {
 		ledgerID, err = s.Credit(ctx, tx, CreditInput{
@@ -461,4 +479,163 @@ func (s *Store) OwnerOf(ctx context.Context, tx *sql.Tx, subjectID int64) (int64
 		return 0, fmt.Errorf("read owner of subject %d: %w", subjectID, err)
 	}
 	return resellerID, nil
+}
+
+// CreateInput describes a new tenant.
+type CreateInput struct {
+	// AdminID is the panel user who operates this tenant. UNIQUE in the
+	// schema: one admin is one reseller, which is what makes "my reseller"
+	// resolvable from a session without a second identifier.
+	AdminID     int64
+	DisplayName string
+	// Limits. Nil means unlimited, which is why they are pointers rather than
+	// zero values -- zero is a real limit meaning "may create nothing".
+	MaxSubjects   *int64
+	MaxQuotaBytes *int64
+	// CreditFloor is how far below zero the balance may go. Usually zero;
+	// a negative floor extends credit on trust.
+	CreditFloor int64
+}
+
+// Create inserts a reseller.
+//
+// Deliberately does NOT grant opening credit. A balance is the sum of its
+// ledger, so opening credit is a ledger movement like any other and must carry
+// its own reason, actor and idempotency key. Folding it in here would create
+// value with no audit trail behind it.
+func (s *Store) Create(ctx context.Context, tx *sql.Tx, in CreateInput) (int64, error) {
+	name := strings.TrimSpace(in.DisplayName)
+	if name == "" {
+		return 0, errors.New("display name is required")
+	}
+	if in.AdminID <= 0 {
+		return 0, errors.New("admin id is required; a tenant is operated by a panel user")
+	}
+	now := s.now().UTC().Unix()
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO resellers
+		   (admin_id, display_name, enabled, max_subjects, max_quota_bytes,
+		    credit_floor, created_at, updated_at)
+		 VALUES (?,?,1,?,?,?,?,?)`,
+		in.AdminID, name, in.MaxSubjects, in.MaxQuotaBytes, in.CreditFloor, now, now)
+	if err != nil {
+		return 0, fmt.Errorf("insert reseller: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// UpdateInput is a partial change. Nil fields are left alone.
+//
+// MaxSubjects and MaxQuotaBytes are double pointers so "set to unlimited" is
+// expressible: the outer nil means "do not touch", the inner nil means "no
+// limit". A single pointer could not tell those apart.
+type UpdateInput struct {
+	DisplayName   *string
+	Enabled       *bool
+	MaxSubjects   **int64
+	MaxQuotaBytes **int64
+	CreditFloor   *int64
+}
+
+// Update applies a partial change to a reseller.
+func (s *Store) Update(ctx context.Context, tx *sql.Tx, id int64, in UpdateInput) error {
+	var exists int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM resellers WHERE id = ?`, id).Scan(&exists); err != nil {
+		return err // sql.ErrNoRows reaches the handler as a 404
+	}
+
+	if in.DisplayName != nil {
+		name := strings.TrimSpace(*in.DisplayName)
+		if name == "" {
+			return errors.New("display name must not be empty")
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE resellers SET display_name = ? WHERE id = ?`, name, id); err != nil {
+			return fmt.Errorf("update display name: %w", err)
+		}
+	}
+	if in.Enabled != nil {
+		// Disabling stops provisioning -- ProvisionSubject checks it -- but
+		// does not touch existing customers. Cutting them off is a separate
+		// decision an operator makes deliberately.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE resellers SET enabled = ? WHERE id = ?`, boolToInt(*in.Enabled), id); err != nil {
+			return fmt.Errorf("update enabled: %w", err)
+		}
+	}
+	if in.MaxSubjects != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE resellers SET max_subjects = ? WHERE id = ?`, *in.MaxSubjects, id); err != nil {
+			return fmt.Errorf("update max subjects: %w", err)
+		}
+	}
+	if in.MaxQuotaBytes != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE resellers SET max_quota_bytes = ? WHERE id = ?`, *in.MaxQuotaBytes, id); err != nil {
+			return fmt.Errorf("update max quota: %w", err)
+		}
+	}
+	if in.CreditFloor != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE resellers SET credit_floor = ? WHERE id = ?`, *in.CreditFloor, id); err != nil {
+			return fmt.Errorf("update credit floor: %w", err)
+		}
+	}
+
+	_, err := tx.ExecContext(ctx,
+		`UPDATE resellers SET updated_at = ? WHERE id = ?`, s.now().UTC().Unix(), id)
+	return err
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ErrHasCustomers means the reseller still owns subjects and so may not be
+// deleted.
+//
+// The schema enforces this: reseller_subjects.reseller_id is ON DELETE
+// RESTRICT, deliberately, because cascading would silently delete a tenant's
+// live customers along with the tenant. This is the typed form of that refusal
+// so a caller can report it as a conflict rather than a constraint failure the
+// operator has to decode.
+var ErrHasCustomers = errors.New("reseller still owns customers")
+
+// Delete removes a reseller.
+//
+// Refused while they own customers. Deactivating (enabled = false) is the
+// reversible option and is what an operator usually wants: it stops
+// provisioning immediately without touching anybody already connected.
+//
+// The credit ledger cascades. That is correct rather than a loss: a ledger
+// belongs to a tenant that no longer exists, and the audit log retains the
+// movements independently.
+func (s *Store) Delete(ctx context.Context, tx *sql.Tx, id int64) error {
+	var owned int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM reseller_subjects WHERE reseller_id = ?`, id).Scan(&owned); err != nil {
+		return fmt.Errorf("count owned subjects: %w", err)
+	}
+	if owned > 0 {
+		// Checked before the DELETE so the message can say how many, which the
+		// bare foreign-key error cannot.
+		return fmt.Errorf("%w: %d still provisioned", ErrHasCustomers, owned)
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM resellers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete reseller: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

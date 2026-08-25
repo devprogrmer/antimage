@@ -148,6 +148,24 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/me/telegram/link", d.handleCreateTelegramLinkCode)
 			private.Delete("/me/telegram", d.handleDeleteMyTelegram)
 
+			// Tenancy. The engine behind these has existed since the reseller
+			// engine landed; it simply had no routes, so none of it was
+			// reachable. credit:grant is separate from reseller:write on every
+			// one of them -- minting credit is the only operation that creates
+			// value from nothing.
+			private.Get("/me/reseller", d.handleGetMyReseller)
+			private.Get("/resellers", d.handleListResellers)
+			private.Post("/resellers", d.handleCreateReseller)
+			private.Get("/resellers/{resellerID}", d.handleGetReseller)
+			private.Put("/resellers/{resellerID}", d.handleUpdateReseller)
+			private.Get("/resellers/{resellerID}/balance", d.handleGetResellerBalance)
+			private.Get("/resellers/{resellerID}/ledger", d.handleListResellerLedger)
+			private.Delete("/resellers/{resellerID}", d.handleDeleteReseller)
+			private.Post("/resellers/{resellerID}/credit", d.handleGrantCredit)
+			// Provisioning: the operation the engine exists for. Until now it
+			// was reachable only through CSV import.
+			private.Post("/resellers/{resellerID}/subjects", d.handleProvisionSubject)
+
 			private.Get("/nodes", d.handleListNodes)
 			private.Post("/nodes", d.handleCreateNode)
 			private.Get("/nodes/{nodeID}", d.handleGetNode)
