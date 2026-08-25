@@ -237,16 +237,35 @@ func (a *Adapter) buildPeerList(desired adapter.Service, subjects []adapter.Subj
 	}
 
 	for _, subj := range subjects {
-		// Extract peer public key from credentials
-		// WireGuard credential is stored as "keypair" credential kind
-		var pubKey string
+		// The keypair credential holds the subject's PRIVATE key -- the panel
+		// stores it sealed, and both the Descriptor and the peer registry say
+		// so. The public key has to be derived from it.
+		//
+		// This used to write cred.Value straight into the peer's PublicKey
+		// field, which was wrong twice over. The peer entry then named a key
+		// no client possesses, so nobody could connect; and it wrote every
+		// subscriber's PRIVATE key into a config file on the node, which is a
+		// credential the node has no business holding. Accounting could not
+		// match either, because the registry keys on the derived public key.
+		//
+		// PublicKeyFromPrivate is the pure-Go derivation, already tested
+		// against the RFC 7748 vector. It is used rather than `wg pubkey` so
+		// planning does not shell out once per peer.
+		var privKey string
 		for _, cred := range subj.Credentials {
 			if cred.Kind == string(adapter.CredKeypair) {
-				pubKey = cred.Value
+				privKey = cred.Value
 				break
 			}
 		}
-		if pubKey == "" {
+		if privKey == "" {
+			continue
+		}
+		pubKey, err := PublicKeyFromPrivate(privKey)
+		if err != nil {
+			// An unusable key means this subject cannot be served. Skipping
+			// leaves the rest of the peer list intact, which is better than
+			// failing the whole service over one bad credential.
 			continue
 		}
 

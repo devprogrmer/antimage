@@ -15,7 +15,7 @@
 //
 // State lives under $SHIM_STATE:
 //
-//	<unit>.json  {"path":"...","args":[...],"port":N}
+//	<unit>.json  {"path":"...","args":[...],"port":N,"network":"tcp|udp"}
 //	<unit>.pid   the managed process
 //	<unit>.log   its combined output, surfaced on failure
 package main
@@ -40,6 +40,10 @@ type unitSpec struct {
 	// than "a pid exists" and is portable across the platforms these tests run
 	// on.
 	Port int `json:"port"`
+	// Network is "tcp" (default) or "udp". Hysteria2 is QUIC and listens on
+	// UDP only, so a TCP dial against it never connects and the process looks
+	// dead however healthy it is.
+	Network string `json:"network,omitempty"`
 }
 
 func stateDir() string {
@@ -64,8 +68,22 @@ func readSpec(unit string) (unitSpec, error) {
 	return s, json.Unmarshal(body, &s)
 }
 
-func listening(port int) bool {
+func listening(port int, network string) bool {
 	if port == 0 {
+		return false
+	}
+	if network == "udp" {
+		// UDP has no connection to accept, so a dial proves nothing -- it
+		// succeeds whether or not anything is there. Occupancy is the signal
+		// instead: if the port cannot be bound, the managed process holds it.
+		// The wildcard address is probed rather than 127.0.0.1 because that is
+		// what the managed process binds; a wildcard holder is what makes this
+		// bind fail.
+		pc, err := net.ListenPacket("udp", ":"+strconv.Itoa(port))
+		if err != nil {
+			return true // in use, so the server has it
+		}
+		_ = pc.Close()
 		return false
 	}
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
@@ -94,7 +112,7 @@ func stop(unit string) {
 	// Wait for the port to be released so an immediate restart does not race
 	// the old process out of the way.
 	if spec, err := readSpec(unit); err == nil {
-		for i := 0; i < 40 && listening(spec.Port); i++ {
+		for i := 0; i < 40 && listening(spec.Port, spec.Network); i++ {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
@@ -144,7 +162,7 @@ func start(unit string) int {
 			return 1
 		default:
 		}
-		if listening(spec.Port) {
+		if listening(spec.Port, spec.Network) {
 			fmt.Printf("started %s\n", unit)
 			return 0
 		}
@@ -168,7 +186,7 @@ func main() {
 	switch verb {
 	case "is-active":
 		spec, err := readSpec(unit)
-		if err != nil || !listening(spec.Port) {
+		if err != nil || !listening(spec.Port, spec.Network) {
 			// systemd prints the state and exits non-zero when a unit is down.
 			fmt.Println("inactive")
 			os.Exit(3)

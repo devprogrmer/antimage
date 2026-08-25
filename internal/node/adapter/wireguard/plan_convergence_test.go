@@ -2,13 +2,17 @@ package wireguard
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 )
 
-const testParams = `{"port":51820,"subnet":"10.8.0.1/24","private_key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA="}`
+// The service key uses a seed no subject uses, so the interface own private
+// key -- which legitimately appears in the config -- cannot be mistaken for a
+// subscriber key leaking into it.
+const testParams = `{"port":51820,"subnet":"10.8.0.1/24","private_key":"WGBnbnV8g4qRmJ+mrbS7wsnQ197l7PP6Bg0UGyIpMHc="}`
 
 func desiredWith(t *testing.T, users int) adapter.Desired {
 	t.Helper()
@@ -22,12 +26,34 @@ func desiredWith(t *testing.T, users int) adapter.Desired {
 		d.Subjects = append(d.Subjects, adapter.Subject{
 			ID: int64(i),
 			Credentials: []adapter.Credential{{
-				Kind:  "keypair",
-				Value: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + string(rune('A'+i)) + "A=",
+				Kind: "keypair",
+				// A REAL 32-byte key. The previous fixture was a 43-character
+				// string that base64 cannot decode at all; it passed only
+				// because the adapter copied the credential straight into the
+				// peer's PublicKey field instead of deriving from it. Once the
+				// derivation was fixed the fixture stopped being usable, which
+				// is the fixture telling the truth for the first time.
+				Value: testPrivateKey(i),
 			}},
 		})
 	}
 	return d
+}
+
+// testPrivateKey returns a deterministic, valid curve25519 private key.
+//
+// Deterministic so a failure reproduces; valid so the adapter's derivation
+// succeeds and the test exercises the real path rather than the error branch.
+func testPrivateKey(seed int) string {
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte((i*7 + seed*31 + 1) % 251)
+	}
+	// Clamp as curve25519 expects, so wg would accept it too.
+	raw[0] &= 248
+	raw[31] &= 127
+	raw[31] |= 64
+	return base64.StdEncoding.EncodeToString(raw)
 }
 
 // WireGuard must actually converge after the initial install.

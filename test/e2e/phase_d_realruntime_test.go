@@ -312,7 +312,7 @@ func TestRealRuntimeHysteria2Lifecycle(t *testing.T) {
 	// SP2 real-runtime harness uses.
 	unit := fmt.Sprintf("hysteria-server@antimage-%d", svcID)
 	cfgPath := filepath.Join(dir, fmt.Sprintf("antimage-%d.yaml", svcID))
-	writeUnitSpec(t, stateDir, unit, binary, []string{"server", "--config", cfgPath}, port)
+	writeUnitSpec(t, stateDir, unit, binary, []string{"server", "--config", cfgPath}, port, "udp")
 
 	plan, err := a.Plan(ctx, desired, adapter.Observed{})
 	if err != nil {
@@ -575,10 +575,10 @@ func hysteria2Desired(t *testing.T, users, port int, certFile, keyFile string) a
 
 // writeUnitSpec registers a unit with the systemctl shim, in the same JSON
 // form the SP2 real-runtime harness uses.
-func writeUnitSpec(t *testing.T, stateDir, unit, binary string, args []string, port int) {
+func writeUnitSpec(t *testing.T, stateDir, unit, binary string, args []string, port int, network string) {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
-		"path": binary, "args": args, "port": port,
+		"path": binary, "args": args, "port": port, "network": network,
 	})
 	if err != nil {
 		t.Fatalf("encode unit: %v", err)

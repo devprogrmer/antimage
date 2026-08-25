@@ -84,7 +84,10 @@ jobs:
           hysteria version
 
       - name: real-runtime lifecycle for both adapters
-        run: go test ./test/e2e/... -tags "e2e realruntime" -run TestRealRuntime -v -count=1 -timeout 15m
+        # Excludes the WireGuard interface lifecycle: it needs root and runs in
+        # its own sudo step below. Without the exclusion it runs here too and
+        # fails by design, which is what it is built to do without privileges.
+        run: go test ./test/e2e/... -tags "e2e realruntime" -run "TestRealRuntime" -skip "TestRealRuntimeWireGuardLifecycle" -v -count=1 -timeout 15m
 
       # The WireGuard lifecycle brings up a real interface, which needs root and
       # the kernel module. It is a separate step because it needs sudo, and it

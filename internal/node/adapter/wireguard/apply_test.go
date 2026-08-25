@@ -488,3 +488,82 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// The peer entry must carry the DERIVED public key, never the credential.
+//
+// buildPeerList used to write cred.Value straight into PublicKey. The keypair
+// credential holds the subject's PRIVATE key -- the Descriptor says so and the
+// peer registry derives from it -- so that was wrong twice over:
+//
+//   - the peer entry named a key no client possesses, so nobody could connect;
+//   - every subscriber's private key was written into a config file on the
+//     node, which is a credential the node has no business holding.
+//
+// Accounting could not match either: the registry keys on the derived public
+// key, so `wg show transfer` output would never resolve to a subject.
+//
+// No test caught it because the fixtures used strings that were not valid keys
+// at all, so copying them through looked the same as deriving from them.
+func TestPeerCarriesTheDerivedPublicKeyNotThePrivateKey(t *testing.T) {
+	a := New(newFakeRuntime(), t.TempDir(), t.TempDir())
+	d := desiredWith(t, 2)
+	p := payloadFor(t, a, d)
+
+	for _, subj := range d.Subjects {
+		priv := ""
+		for _, c := range subj.Credentials {
+			if c.Kind == "keypair" {
+				priv = c.Value
+			}
+		}
+		pub, err := PublicKeyFromPrivate(priv)
+		if err != nil {
+			t.Fatalf("subject %d has an underivable key: %v", subj.ID, err)
+		}
+		if pub == priv {
+			t.Fatalf("test fixture is degenerate: subject %d derives to itself", subj.ID)
+		}
+		if !strings.Contains(p.Config, pub) {
+			t.Errorf("subject %d: derived public key %s is missing from the config:\n%s",
+				subj.ID, pub, p.Config)
+		}
+		// THE security assertion. A node must never hold a subscriber's
+		// private key on disk.
+		if strings.Contains(p.Config, priv) {
+			t.Errorf("subject %d: the PRIVATE key was written into the config; "+
+				"the node must never hold a subscriber's private key", subj.ID)
+		}
+		// And the recorded peer set must be the derived keys too, or the
+		// removal check compares different alphabets.
+		if !contains(p.Peers, pub) {
+			t.Errorf("subject %d: derived key missing from the recorded peer set %v",
+				subj.ID, p.Peers)
+		}
+	}
+}
+
+// A subject whose credential cannot be derived is skipped, not fatal: one bad
+// credential must not take the whole service down with it.
+func TestUnusableCredentialSkipsOnlyThatPeer(t *testing.T) {
+	a := New(newFakeRuntime(), t.TempDir(), t.TempDir())
+	d := desiredWith(t, 2)
+	d.Subjects = append(d.Subjects, adapter.Subject{
+		ID:          99,
+		Credentials: []adapter.Credential{{Kind: "keypair", Value: "not-a-valid-key"}},
+	})
+
+	p := payloadFor(t, a, d)
+	if len(p.Peers) != 2 {
+		t.Errorf("peers = %d, want 2: a single unusable credential should skip "+
+			"that subject and leave the rest served", len(p.Peers))
+	}
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
