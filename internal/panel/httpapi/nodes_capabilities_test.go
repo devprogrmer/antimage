@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/nodes"
-	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -97,13 +96,36 @@ func TestHandleGetNodeCapabilities_Success(t *testing.T) {
 	}
 }
 
+// A node that does not exist is 404 -- for a caller entitled to ask.
+//
+// This test used to construct Deps directly and call the handler with no actor
+// in the context at all, which passed only because the handler had no
+// authorization. It now supplies one, because "missing node" and "not allowed
+// to look" are different answers and this test is about the first.
 func TestHandleGetNodeCapabilities_NodeNotFound(t *testing.T) {
-	s, err := store.Open(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	deps, _, actor := setupTestDeps(t)
 
-	d := Deps{Store: s}
+	req := httptest.NewRequest("GET", "/api/v1/nodes/999/capabilities", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("nodeID", "999")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withActor(req.Context(), actor))
+	w := httptest.NewRecorder()
+
+	deps.handleGetNodeCapabilities(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status code = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// And an unauthenticated caller is refused rather than crashing the process.
+//
+// requirePermission reads the actor out of the request context, and a handler
+// reached without one used to panic in the audit path -- recoverMiddleware
+// would then report a refusal as a 500 and no denial record would be written.
+func TestHandleGetNodeCapabilities_NoActorIsForbiddenNotAPanic(t *testing.T) {
+	deps, _, _ := setupTestDeps(t)
 
 	req := httptest.NewRequest("GET", "/api/v1/nodes/999/capabilities", nil)
 	rctx := chi.NewRouteContext()
@@ -111,10 +133,11 @@ func TestHandleGetNodeCapabilities_NodeNotFound(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	w := httptest.NewRecorder()
 
-	d.handleGetNodeCapabilities(w, req)
+	deps.handleGetNodeCapabilities(w, req)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status code = %d, want %d", w.Code, http.StatusNotFound)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status code = %d, want %d for a request carrying no actor",
+			w.Code, http.StatusForbidden)
 	}
 }
 

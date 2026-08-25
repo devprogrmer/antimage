@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/amyrm/antimage/internal/panel/nodes"
@@ -25,7 +26,15 @@ func (d Deps) handleNodeMetrics(w http.ResponseWriter, r *http.Request) {
 
 	var id int64
 	if _, err := fmt.Sscanf(nodeID, "%d", &id); err != nil {
-		http.Error(w, "invalid node id", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
+		return
+	}
+
+	// Authorization was absent entirely: any authenticated caller, including a
+	// reseller scoped to no node, could read this. TargetNode binds the scope --
+	// a non-super actor's NodeIDs are an exhaustive allow-list.
+	if !d.requirePermission(w, r, rbac.PermNodeRead,
+		rbac.Target{Kind: rbac.TargetNode, ID: id}) {
 		return
 	}
 

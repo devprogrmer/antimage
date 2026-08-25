@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -17,7 +18,15 @@ func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request
 	nodeIDStr := chi.URLParam(r, "nodeID")
 	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid node ID", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
+		return
+	}
+
+	// Authorization was absent entirely: any authenticated caller, including a
+	// reseller scoped to no node, could read this node's reconciliation state.
+	// TargetNode binds the scope -- a non-super actor's NodeIDs are exhaustive.
+	if !d.requirePermission(w, r, rbac.PermNodeRead,
+		rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 
