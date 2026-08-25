@@ -222,7 +222,7 @@ func BenchmarkDashboardStatsCompute(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := dashboard.ComputeStats(ctx, st, nil)
+		_, err := dashboard.ComputeStats(ctx, st, rbac.Scope{IsSuper: true})
 		if err != nil {
 			b.Fatalf("compute stats: %v", err)
 		}

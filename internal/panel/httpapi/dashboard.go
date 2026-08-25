@@ -3,6 +3,9 @@ package httpapi
 import (
 	"database/sql"
 	"net/http"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/amyrm/antimage/internal/panel/store"
 	"strconv"
 	"time"
 
@@ -51,10 +54,14 @@ func (d Deps) handleDashboardOverview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleDashboardTrafficChart(w http.ResponseWriter, r *http.Request) {
-	_, ok := requireActor(w, r)
+	actor, ok := requireActor(w, r)
 	if !ok {
 		return
 	}
+	// Rollups carry a subject_id, so the caller's subject scope is what decides
+	// whose traffic this is. Unscoped, this charted every tenant's traffic for
+	// anyone who asked.
+	scopeArgs := store.ScopeArgs(rbac.ScopeOf(actor))
 
 	period := r.URL.Query().Get("period")
 	if period == "" {
@@ -72,7 +79,8 @@ func (d Deps) handleDashboardTrafficChart(w http.ResponseWriter, r *http.Request
 		query = `
 			SELECT hour_start, COALESCE(SUM(uplink_bytes),0), COALESCE(SUM(downlink_bytes),0)
 			FROM usage_rollups_hourly
-			WHERE hour_start >= ?
+			JOIN subjects ON subjects.id = usage_rollups_hourly.subject_id
+			WHERE hour_start >= ? AND ` + store.SubjectScopeSQL + `
 			GROUP BY hour_start
 			ORDER BY hour_start ASC
 			LIMIT 24`
@@ -82,7 +90,8 @@ func (d Deps) handleDashboardTrafficChart(w http.ResponseWriter, r *http.Request
 		query = `
 			SELECT hour_start, COALESCE(SUM(uplink_bytes),0), COALESCE(SUM(downlink_bytes),0)
 			FROM usage_rollups_hourly
-			WHERE hour_start >= ?
+			JOIN subjects ON subjects.id = usage_rollups_hourly.subject_id
+			WHERE hour_start >= ? AND ` + store.SubjectScopeSQL + `
 			GROUP BY hour_start
 			ORDER BY hour_start ASC
 			LIMIT 168`
@@ -92,7 +101,8 @@ func (d Deps) handleDashboardTrafficChart(w http.ResponseWriter, r *http.Request
 		query = `
 			SELECT day_start, COALESCE(SUM(uplink_bytes),0), COALESCE(SUM(downlink_bytes),0)
 			FROM usage_rollups_daily
-			WHERE day_start >= ?
+			JOIN subjects ON subjects.id = usage_rollups_daily.subject_id
+			WHERE day_start >= ? AND ` + store.SubjectScopeSQL + `
 			GROUP BY day_start
 			ORDER BY day_start ASC
 			LIMIT 30`
@@ -101,7 +111,8 @@ func (d Deps) handleDashboardTrafficChart(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	rows, err := d.Store.Read().QueryContext(r.Context(), query, cutoff)
+	rows, err := d.Store.Read().QueryContext(r.Context(), query,
+		append([]any{cutoff}, scopeArgs...)...)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to query traffic data")
 		return
@@ -136,7 +147,7 @@ func (d Deps) handleDashboardTrafficChart(w http.ResponseWriter, r *http.Request
 }
 
 func (d Deps) handleDashboardTopUsers(w http.ResponseWriter, r *http.Request) {
-	_, ok := requireActor(w, r)
+	actor, ok := requireActor(w, r)
 	if !ok {
 		return
 	}
@@ -161,29 +172,34 @@ func (d Deps) handleDashboardTopUsers(w http.ResponseWriter, r *http.Request) {
 	// Aggregate total bytes per subject from usage rollups, join with subject info.
 	query := `
 		SELECT
-			s.id,
-			s.name,
+			subjects.id,
+			subjects.name,
 			COALESCE(u.uplink_bytes, 0) + COALESCE(u.downlink_bytes, 0) AS total_bytes,
-			s.quota_bytes,
+			subjects.quota_bytes,
 			CASE
-				WHEN s.frozen_at IS NOT NULL THEN 'frozen'
-				WHEN s.expired_at IS NOT NULL THEN 'expired'
-				WHEN s.expires_at IS NOT NULL AND s.expires_at <= ? THEN 'expired'
-				WHEN s.enabled = 0 THEN 'disabled'
+				WHEN subjects.frozen_at IS NOT NULL THEN 'frozen'
+				WHEN subjects.expired_at IS NOT NULL THEN 'expired'
+				WHEN subjects.expires_at IS NOT NULL AND subjects.expires_at <= ? THEN 'expired'
+				WHEN subjects.enabled = 0 THEN 'disabled'
 				ELSE 'active'
 			END AS status
-		FROM subjects s
+		FROM subjects
 		LEFT JOIN (
 			SELECT subject_id,
 			       SUM(uplink_bytes)   AS uplink_bytes,
 			       SUM(downlink_bytes) AS downlink_bytes
 			FROM usage_rollups_daily
 			GROUP BY subject_id
-		) u ON u.subject_id = s.id
+		) u ON u.subject_id = subjects.id
+		-- Without this, the busiest subjects ACROSS EVERY TENANT were listed by
+		-- name to anyone who asked. Of the four dashboard routes this was the
+		-- most direct disclosure: not an aggregate but the customers themselves.
+		WHERE ` + store.SubjectScopeSQL + `
 		ORDER BY total_bytes DESC
 		LIMIT ?`
 
-	rows, err := d.Store.Read().QueryContext(r.Context(), query, now, limit)
+	rows, err := d.Store.Read().QueryContext(r.Context(), query,
+		append(append([]any{now}, store.ScopeArgs(rbac.ScopeOf(actor))...), limit)...)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to query top users")
 		return

@@ -28,6 +28,12 @@ const scopePredicate = `
       SELECT scope_id FROM admin_scopes
        WHERE admin_id = ? AND scope_type = 'node'))`
 
+// NodeScopeSQL exposes the predicate to other packages that count or read
+// nodes, so there is exactly ONE definition of "which nodes may this caller
+// see" -- the same reasoning as SubjectScopeSQL. Callers bind ScopeArgs in the
+// same order.
+const NodeScopeSQL = scopePredicate
+
 func boolToInt(b bool) int {
 	if b {
 		return 1

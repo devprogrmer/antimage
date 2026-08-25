@@ -36,21 +36,40 @@ type DashboardStats struct {
 	QuotaUtilizationPct *float64
 }
 
-// ComputeStats queries the live tables and returns freshly computed stats.
-// adminID may be nil for global (super-admin) stats; a non-nil value scopes
-// nothing differently today but is stored so per-admin caches are possible.
-func ComputeStats(ctx context.Context, db *store.Store, adminID *int64) (DashboardStats, error) {
+// ComputeStats queries the live tables and returns stats for ONE caller.
+//
+// Every query is scoped. It did not used to be: this function took an adminID,
+// stored it, and filtered nothing -- its own comment said so ("a non-nil value
+// scopes nothing differently today"), while GetStats above it told callers the
+// opposite. The handler believed the caller-facing claim, so any authenticated
+// user could read fleet-wide node counts, quota totals, traffic and the busiest
+// subjects across every tenant.
+//
+// The adminID was doing real damage as a CACHE KEY while filtering nothing:
+// dashboard_stats grew a row per admin, each holding identical global figures,
+// which is exactly what a working per-admin cache would look like from the
+// outside.
+//
+// Both predicates come from the store package rather than being written here.
+// There is one definition of "which nodes may this caller see" and one of
+// "which subjects", and a second copy in this package would drift the first
+// time an ownership rule changed.
+func ComputeStats(ctx context.Context, db *store.Store, sc rbac.Scope) (DashboardStats, error) {
 	now := time.Now()
 	nowUnix := now.Unix()
 	cutoff24h := now.Add(-24 * time.Hour).Unix()
 
 	var s DashboardStats
-	s.AdminID = adminID
+	s.AdminID = cacheKeyFor(sc)
 	s.ComputedAt = nowUnix
 
 	// Node counts — status column holds the canonical node state.
 	// 'online' maps to healthy, 'degraded' maps to degraded, everything else
 	// (pending, enrolling, integrity, offline, disabled) is treated as offline.
+	//
+	// A caller with no node scope counts zero, which is the honest answer: a
+	// tenant operates no nodes, and showing them the fleet's size tells them
+	// how many other tenants there might be.
 	err := db.Read().QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -58,7 +77,9 @@ func ComputeStats(ctx context.Context, db *store.Store, adminID *int64) (Dashboa
 			COUNT(CASE WHEN status = 'degraded' THEN 1 END),
 			COUNT(CASE WHEN status NOT IN ('online','degraded') THEN 1 END)
 		FROM nodes
-	`).Scan(&s.NodesTotal, &s.NodesOnline, &s.NodesDegraded, &s.NodesOffline)
+		WHERE `+store.NodeScopeSQL,
+		store.ScopeArgs(sc)...,
+	).Scan(&s.NodesTotal, &s.NodesOnline, &s.NodesDegraded, &s.NodesOffline)
 	if err != nil {
 		return DashboardStats{}, fmt.Errorf("query node counts: %w", err)
 	}
@@ -79,7 +100,9 @@ func ComputeStats(ctx context.Context, db *store.Store, adminID *int64) (Dashboa
 			       THEN 1 END),
 			COUNT(CASE WHEN frozen_at IS NOT NULL THEN 1 END)
 		FROM subjects
-	`, nowUnix, nowUnix).Scan(
+		WHERE `+store.SubjectScopeSQL,
+		append([]any{nowUnix, nowUnix}, store.ScopeArgs(sc)...)...,
+	).Scan(
 		&s.SubjectsTotal, &s.SubjectsActive, &s.SubjectsExpired, &s.SubjectsFrozen,
 	)
 	if err != nil {
@@ -92,8 +115,10 @@ func ComputeStats(ctx context.Context, db *store.Store, adminID *int64) (Dashboa
 			COALESCE(SUM(uplink_bytes),   0),
 			COALESCE(SUM(downlink_bytes), 0)
 		FROM usage_rollups_hourly
-		WHERE hour_start >= ?
-	`, cutoff24h).Scan(&s.Traffic24hUplink, &s.Traffic24hDownlink)
+		JOIN subjects ON subjects.id = usage_rollups_hourly.subject_id
+		WHERE hour_start >= ? AND `+store.SubjectScopeSQL,
+		append([]any{cutoff24h}, store.ScopeArgs(sc)...)...,
+	).Scan(&s.Traffic24hUplink, &s.Traffic24hDownlink)
 	if err != nil {
 		return DashboardStats{}, fmt.Errorf("query 24h traffic: %w", err)
 	}
@@ -107,7 +132,9 @@ func ComputeStats(ctx context.Context, db *store.Store, adminID *int64) (Dashboa
 			SUM(quota_bytes),
 			SUM(quota_used_bytes)
 		FROM subjects
-	`).Scan(&quotaTotal, &quotaUsed)
+		WHERE `+store.SubjectScopeSQL,
+		store.ScopeArgs(sc)...,
+	).Scan(&quotaTotal, &quotaUsed)
 	if err != nil {
 		return DashboardStats{}, fmt.Errorf("query quota: %w", err)
 	}
@@ -123,18 +150,31 @@ func ComputeStats(ctx context.Context, db *store.Store, adminID *int64) (Dashboa
 	return s, nil
 }
 
+// cacheKeyFor is the dashboard_stats partition for a scope.
+//
+// NULL for a super admin, whose stats really are global; the admin id
+// otherwise. Now that the queries filter, the partition finally means what it
+// always looked like it meant -- two admins with different scopes hold
+// genuinely different rows.
+func cacheKeyFor(sc rbac.Scope) *int64 {
+	if sc.IsSuper {
+		return nil
+	}
+	id := sc.AdminID
+	return &id
+}
+
 // GetStats returns dashboard stats for the actor. It reads from the
 // dashboard_stats cache and recomputes if the cached value is missing or older
 // than StaleAfter (60 seconds).
 //
 // Super admins receive global stats (admin_id IS NULL in the cache row).
-// Non-super admins receive stats scoped to their admin_id.
+// Non-super admins receive stats over the nodes and subjects their scope
+// covers -- which this now actually does, rather than merely recording the
+// admin id beside global figures.
 func GetStats(ctx context.Context, db *store.Store, actor rbac.Actor) (DashboardStats, error) {
-	var adminID *int64
-	if !actor.IsSuper {
-		id := actor.AdminID
-		adminID = &id
-	}
+	sc := rbac.ScopeOf(&actor)
+	adminID := cacheKeyFor(sc)
 
 	cached, err := readCachedStats(ctx, db, adminID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -146,7 +186,7 @@ func GetStats(ctx context.Context, db *store.Store, actor rbac.Actor) (Dashboard
 	}
 
 	// Cache miss or stale — recompute.
-	fresh, err := ComputeStats(ctx, db, adminID)
+	fresh, err := ComputeStats(ctx, db, sc)
 	if err != nil {
 		return DashboardStats{}, err
 	}
