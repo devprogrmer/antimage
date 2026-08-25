@@ -1,5 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { ApiError, api } from "../lib/api";
+import { MovementsTable } from "../routes/ResellerDetail";
+import type { Movement } from "../routes/ResellerDetail";
 import { formatNumber, t } from "../i18n";
 
 interface MyTenancy {
@@ -9,6 +12,8 @@ interface MyTenancy {
   balance: number;
   credit_floor: number;
 }
+
+type Tab = "overview" | "ledger";
 
 /**
  * A tenant's own account, served by scope rather than by permission.
@@ -24,6 +29,7 @@ interface MyTenancy {
  * a normal state for most accounts, not a failure.
  */
 export function MyTenancy() {
+  const [tab, setTab] = useState<Tab>("overview");
   const tenancy = useQuery({
     queryKey: ["my-tenancy"],
     queryFn: () => api.get<MyTenancy>("/api/v1/me/reseller"),
@@ -42,6 +48,34 @@ export function MyTenancy() {
   return (
     <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
       <h2 className="mb-3 text-sm font-semibold">{t("tenancy.title")}</h2>
+
+      <div className="mb-3 flex gap-3 border-b border-zinc-800 text-xs" role="tablist">
+        {(["overview", "ledger"] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            role="tab"
+            aria-selected={tab === name}
+            onClick={() => setTab(name)}
+            className={
+              tab === name
+                ? "border-b border-zinc-100 pb-1 text-zinc-100"
+                : "pb-1 text-zinc-400 hover:text-zinc-100"
+            }
+          >
+            {name === "overview" ? t("tenancy.overview") : t("reseller.ledger")}
+          </button>
+        ))}
+      </div>
+
+      {tab === "ledger" ? <MyLedger /> : <Overview record={record} atFloor={atFloor} />}
+    </section>
+  );
+}
+
+function Overview({ record, atFloor }: { record: MyTenancy; atFloor: boolean }) {
+  return (
+    <>
       <dl className="grid grid-cols-2 gap-2 text-sm">
         <dt className="text-xs text-zinc-400">{t("reseller.displayName")}</dt>
         <dd className="font-mono">{record.display_name}</dd>
@@ -70,6 +104,36 @@ export function MyTenancy() {
           {t("tenancy.deactivated")}
         </p>
       )}
-    </section>
+    </>
   );
+}
+
+/**
+ * A tenant's own movements, from /me/reseller/ledger.
+ *
+ * The route takes no reseller id -- it resolves the tenancy from the session --
+ * so there is nothing to pass and nothing a tenant could substitute to reach
+ * another's history. The platform route stays 403 for them.
+ *
+ * Fetched only when the tab is opened, which is why it is a separate component:
+ * most visits to Profile are not about billing.
+ */
+function MyLedger() {
+  const ledger = useQuery({
+    queryKey: ["my-tenancy", "ledger"],
+    queryFn: () => api.get<{ movements: Movement[] }>("/api/v1/me/reseller/ledger"),
+    retry: false,
+  });
+
+  if (ledger.isError) {
+    const message =
+      ledger.error instanceof ApiError ? ledger.error.message : String(ledger.error);
+    return (
+      <p className="text-xs text-red-400" role="alert">
+        {message}
+      </p>
+    );
+  }
+  if (!ledger.data) return <p className="text-sm text-zinc-500">{t("common.loading")}</p>;
+  return <MovementsTable movements={ledger.data.movements} />;
 }

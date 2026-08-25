@@ -9,6 +9,7 @@ import (
 
 	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/panel/subjects"
 )
 
@@ -69,6 +70,49 @@ func (s *Subjects) Balance(ctx context.Context, a Actor) (Balance, error) {
 		Balance:     bal,
 		CreditFloor: r.CreditFloor,
 	}, nil
+}
+
+// Ledger returns the calling tenant's own credit movements, most recent first.
+//
+// Self-service, on the same terms as Balance: the tenant is resolved from the
+// session and never from the request, so there is no id to substitute and no
+// way to name somebody else's history. A tenant asking for another tenant's
+// ledger is not refused -- it cannot be expressed.
+//
+// The scope is applied TWICE, and deliberately. ListResellersScoped resolves
+// which tenancy this actor operates, and ListLedgerScoped is then handed the
+// same actor scope rather than a platform one, so the reseller id that came out
+// of the first query still has to satisfy the predicate in the second. Passing
+// platformScope() here would work identically today and would silently become a
+// cross-tenant read the moment the resolution step above it changed.
+//
+// limit is the caller's, bounded by the store: ListLedgerScoped clamps anything
+// outside 1..500 to a default of 100, so an absent, negative or absurd limit
+// cannot turn into an unbounded scan of a tenant's billing history.
+func (s *Subjects) Ledger(ctx context.Context, a Actor, limit int) ([]store.LedgerRow, error) {
+	if a.RBAC == nil {
+		return nil, rbac.ErrForbidden
+	}
+	// A super admin's scope matches every reseller, so the resolution below
+	// would return an arbitrary one and hand back its billing history. They
+	// have no ledger of their own; they mint credit rather than hold it.
+	if a.RBAC.IsSuper {
+		return nil, ErrNoReseller
+	}
+
+	rows, err := s.db.ListResellersScoped(ctx, a.scope())
+	if err != nil {
+		return nil, fmt.Errorf("resolve reseller: %w", err)
+	}
+	if len(rows) != 1 {
+		return nil, ErrNoReseller
+	}
+
+	movements, err := s.db.ListLedgerScoped(ctx, a.scope(), rows[0].ID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("read ledger: %w", err)
+	}
+	return movements, nil
 }
 
 // FindByName resolves a subject by name within the caller's scope.

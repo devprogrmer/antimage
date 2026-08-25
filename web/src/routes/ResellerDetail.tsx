@@ -6,13 +6,56 @@ import { Limit, MutationError } from "./Resellers";
 import type { Reseller } from "./Resellers";
 import { formatNumber, formatRelativeTime, formatTimestamp, t } from "../i18n";
 
-interface Movement {
+export interface Movement {
   id: number;
   delta: number;
   reason: string;
   subject_id: number | null;
   note: string;
   at: number;
+}
+
+/**
+ * The movements table, shared by the platform ledger and a tenant's own.
+ *
+ * Both routes return the same DTO from the same mapper server-side, so they
+ * render through one component here for the same reason: two tables that agree
+ * today are two tables that can come to disagree.
+ */
+export function MovementsTable({ movements }: { movements: Movement[] }) {
+  if (movements.length === 0) {
+    return <p className="text-sm text-zinc-500">{t("reseller.ledgerEmpty")}</p>;
+  }
+  return (
+    <table className="w-full border-collapse text-sm text-zinc-200">
+      <thead>
+        <tr className="border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
+          <th className="py-2 pe-3 text-start">{t("reseller.amount")}</th>
+          <th className="pe-3 text-start">{t("reseller.reason")}</th>
+          <th className="pe-3 text-start">{t("reseller.note")}</th>
+          <th className="text-start">{t("reseller.when")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {movements.map((movement) => (
+          <tr key={movement.id} className="border-b border-zinc-900">
+            <td
+              className={
+                movement.delta < 0
+                  ? "py-1.5 pe-3 font-mono text-amber-400"
+                  : "py-1.5 pe-3 font-mono text-green-400"
+              }
+            >
+              {formatNumber(movement.delta)}
+            </td>
+            <td className="pe-3 font-mono text-xs">{movement.reason}</td>
+            <td className="pe-3 text-xs text-zinc-400">{movement.note}</td>
+            <td className="text-xs text-zinc-500">{formatRelativeTime(movement.at)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 /** A key unique to one attempt, so a retry after a timeout cannot mint or
@@ -454,39 +497,7 @@ function Ledger({ resellerID }: { resellerID: number }) {
     <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
       <h3 className="mb-3 text-sm font-semibold">{t("reseller.ledger")}</h3>
       {ledger.isError && <MutationError error={ledger.error} />}
-      {ledger.data?.movements.length === 0 && (
-        <p className="text-sm text-zinc-500">{t("reseller.ledgerEmpty")}</p>
-      )}
-      {ledger.data !== undefined && ledger.data.movements.length > 0 && (
-        <table className="w-full border-collapse text-sm text-zinc-200">
-          <thead>
-            <tr className="border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
-              <th className="py-2 pe-3 text-start">{t("reseller.amount")}</th>
-              <th className="pe-3 text-start">{t("reseller.reason")}</th>
-              <th className="pe-3 text-start">{t("reseller.note")}</th>
-              <th className="text-start">{t("reseller.when")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ledger.data.movements.map((movement) => (
-              <tr key={movement.id} className="border-b border-zinc-900">
-                <td
-                  className={
-                    movement.delta < 0
-                      ? "py-1.5 pe-3 font-mono text-amber-400"
-                      : "py-1.5 pe-3 font-mono text-green-400"
-                  }
-                >
-                  {formatNumber(movement.delta)}
-                </td>
-                <td className="pe-3 font-mono text-xs">{movement.reason}</td>
-                <td className="pe-3 text-xs text-zinc-400">{movement.note}</td>
-                <td className="text-xs text-zinc-500">{formatRelativeTime(movement.at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {ledger.data !== undefined && <MovementsTable movements={ledger.data.movements} />}
     </section>
   );
 }
