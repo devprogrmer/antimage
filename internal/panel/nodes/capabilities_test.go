@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func TestRecordAndGetCapabilities(t *testing.T) {
 	ctx := context.Background()
 	// Use temp file instead of :memory: to ensure migrations run properly
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestRecordAndGetCapabilities(t *testing.T) {
 
 func TestGetAvailableProtocols(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestGetAvailableProtocols(t *testing.T) {
 
 func TestCapabilityUpdate(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestCapabilityUpdate(t *testing.T) {
 
 func TestCapabilitiesForNonexistentNode(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

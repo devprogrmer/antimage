@@ -16,6 +16,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/panel/subjects"
 	"github.com/amyrm/antimage/internal/shared/secrets"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 var testNow = time.Unix(1_700_000_000, 0).UTC()
@@ -48,7 +49,7 @@ func perms(p ...rbac.Permission) map[rbac.Permission]struct{} {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	db, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

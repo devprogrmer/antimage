@@ -15,6 +15,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/panel/subjects"
 	"github.com/amyrm/antimage/internal/shared/secrets"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 // The read commands go through the service layer precisely so they inherit
@@ -42,7 +43,7 @@ const (
 
 func newReadFixture(t *testing.T) *readFixture {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	db, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

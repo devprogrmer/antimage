@@ -17,12 +17,13 @@ import (
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func setupHealthTestDeps(t *testing.T) (Deps, *store.Store, *rbac.Actor) {
 	t.Helper()
 
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

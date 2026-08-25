@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 // TestCapabilityForeignKeyConstraint verifies that capabilities cannot reference nonexistent nodes.
 func TestCapabilityForeignKeyConstraint(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestCapabilityForeignKeyConstraint(t *testing.T) {
 // TestCapabilityCascadeDelete verifies that deleting a node cascades to its capabilities.
 func TestCapabilityCascadeDelete(t *testing.T) {
 	ctx := context.Background()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

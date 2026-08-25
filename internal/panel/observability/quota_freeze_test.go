@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func TestQuotaAutoFreeze(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestQuotaAutoFreeze(t *testing.T) {
 }
 
 func TestQuotaAutoFreezeIdempotent(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestQuotaAutoFreezeIdempotent(t *testing.T) {
 }
 
 func TestQuotaAutoFreezeDisabledSubjects(t *testing.T) {
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

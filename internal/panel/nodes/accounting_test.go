@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 func TestIngestUsageReportAppliesDeltasOnce(t *testing.T) {
@@ -183,7 +184,7 @@ func TestPruneUsageDeltasRemovesOldRows(t *testing.T) {
 
 func mustOpen(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

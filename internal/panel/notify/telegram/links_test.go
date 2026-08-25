@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 var base = time.Unix(1_700_000_000, 0).UTC()
@@ -24,7 +25,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	db, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
