@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/nodes"
@@ -17,18 +20,88 @@ type serviceRequest struct {
 	Enabled     *bool           `json:"enabled"`
 }
 
-// validateService checks the adapter exists and its params satisfy the schema
-// that adapter publishes. The panel holds no protocol knowledge of its own:
-// adding a protocol means registering a descriptor, not editing this file.
-func validateService(req serviceRequest) error {
-	desc, ok := nodes.KnownAdapters()[req.AdapterKind]
-	if !ok {
-		return errors.New("unknown adapter kind")
+// validateService checks the params against the schema for this adapter ON
+// THIS NODE. The panel holds no protocol knowledge of its own.
+//
+// The schema comes from the node when the node has told us one, and from the
+// panel's compiled-in descriptor otherwise. That order matters: a node reports
+// the schema its installed adapter actually publishes, while KnownAdapters
+// reports what this build of the panel was compiled with. When they differ the
+// node is right, because the node is the thing that has to apply the result --
+// and an editor built from the node's schema would otherwise offer fields the
+// panel then rejects.
+//
+// A kind the node does not run is refused outright, once the node has reported
+// anything at all. Creating a service no adapter on that host can apply is the
+// fake feature layer AD-3 names, and it fails at reconcile time where it is
+// hardest to diagnose rather than here where the reason is obvious.
+//
+// A node that has never connected has reported nothing, and is not held to that
+// rule: preparing a node's services before its agent first calls home is a real
+// workflow, and there is nothing yet to check against. "We do not know" is not
+// "it cannot".
+func (d Deps) validateService(ctx context.Context, nodeID int64, req serviceRequest) error {
+	schema, err := d.resolveServiceSchema(ctx, nodeID, req.AdapterKind)
+	if err != nil {
+		return err
 	}
 	if len(req.Params) == 0 {
 		req.Params = json.RawMessage(`{}`)
 	}
-	return nodes.ValidateServiceParams(desc.Caps.ServiceSchema, req.Params)
+	return nodes.ValidateServiceParams(schema, req.Params)
+}
+
+// resolveServiceSchema picks the schema this node's adapter publishes.
+func (d Deps) resolveServiceSchema(
+	ctx context.Context, nodeID int64, kind string,
+) (json.RawMessage, error) {
+	reported, err := nodes.ListAdapters(ctx, d.Store, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("read node adapters: %w", err)
+	}
+
+	if len(reported) > 0 {
+		for _, entry := range reported {
+			if entry.Kind != kind {
+				continue
+			}
+			if len(entry.ServiceSchema) > 0 {
+				return entry.ServiceSchema, nil
+			}
+			// The node runs this adapter but is too old to publish its schema.
+			// Fall back rather than refuse: the protocol demonstrably works on
+			// that host, and refusing would break it on an agent upgrade path.
+			break
+		}
+		if !runsKind(reported, kind) {
+			return nil, fmt.Errorf(
+				"this node does not run a %q adapter; it reports %s",
+				kind, strings.Join(kindsOf(reported), ", "))
+		}
+	}
+
+	desc, ok := nodes.KnownAdapters()[kind]
+	if !ok {
+		return nil, errors.New("unknown adapter kind")
+	}
+	return desc.Caps.ServiceSchema, nil
+}
+
+func runsKind(entries []nodes.AdapterRegistryEntry, kind string) bool {
+	for _, e := range entries {
+		if e.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func kindsOf(entries []nodes.AdapterRegistryEntry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Kind)
+	}
+	return out
 }
 
 // paramsOf returns the params to store, normalising an omitted body field to
@@ -94,7 +167,7 @@ func (d Deps) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
-	if err := validateService(req); err != nil {
+	if err := d.validateService(r.Context(), nodeID, req); err != nil {
 		d.rejectInvalidService(w, r, actor, "service.create",
 			rbac.Target{Kind: rbac.TargetNode, ID: nodeID}, req, err)
 		return
@@ -157,7 +230,7 @@ func (d Deps) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
-	if err := validateService(req); err != nil {
+	if err := d.validateService(r.Context(), nodeID, req); err != nil {
 		d.rejectInvalidService(w, r, actor, "service.update",
 			rbac.Target{Kind: rbac.TargetService, ID: serviceID}, req, err)
 		return

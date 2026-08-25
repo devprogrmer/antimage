@@ -199,6 +199,9 @@ func NewRouter(d Deps) http.Handler {
 			// Bulk node operations (M7)
 			private.Post("/nodes/bulk/action", d.handleBulkNodeAction)
 
+			// Services could be created, updated and deleted but never read, so
+			// nothing could show what a node is already serving.
+			private.Get("/nodes/{nodeID}/services", d.handleListServices)
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
 
 			// Egress. Node-scoped, because an outbound is a path off one host
