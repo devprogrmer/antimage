@@ -567,3 +567,66 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// A service belonging to another adapter must be left alone.
+//
+// A node runs several adapters over one desired document, each handling only
+// the services of its own kind -- Xray and sing-box have carried that check
+// since they were written. WireGuard did not, and looked safe only by accident:
+// foreign params usually fail ServiceParams.Validate, so buildPayload errors
+// and the service is skipped.
+//
+// That is a coincidence, not a rule. The l2tp service below carries a port, a
+// subnet and a private key, so it validates cleanly -- and before the filter it
+// was planned as a WireGuard interface, and would have been installed as one.
+func TestForeignServicesAreNotPlanned(t *testing.T) {
+	a := New(newFakeRuntime(), t.TempDir(), t.TempDir())
+
+	d := desiredWith(t, 1)
+	ours := d.Services[0].ID
+	d.Services = append(d.Services, adapter.Service{
+		ID: 77, Kind: "l2tp", Enabled: true,
+		// Deliberately shaped so WireGuard's own schema accepts it.
+		Params: json.RawMessage(testParams),
+	})
+
+	plan, err := a.Plan(context.Background(), d, adapter.Observed{})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	for _, step := range plan.Steps {
+		if step.ServiceID != ours {
+			t.Errorf("planned %q for service %d, which belongs to another adapter",
+				step.Kind, step.ServiceID)
+		}
+	}
+	if len(plan.Steps) != 1 {
+		t.Errorf("planned %d steps for one WireGuard service", len(plan.Steps))
+	}
+}
+
+// And a foreign service must not make this adapter tear its own work down.
+// The removal pass compares observed against desired; if desired still counted
+// foreign services, an id collision between two adapters would spare a service
+// that should have gone, and if it counted none, everything would be removed.
+func TestForeignServicesDoNotAffectRemoval(t *testing.T) {
+	a := New(newFakeRuntime(), t.TempDir(), t.TempDir())
+
+	// Desired holds ONLY a foreign service; ours is gone and must be removed.
+	d := desiredWith(t, 1)
+	d.Services = []adapter.Service{{
+		ID: 10, Kind: "l2tp", Enabled: true, Params: json.RawMessage(testParams),
+	}}
+	obs := adapter.Observed{Services: []adapter.ObservedService{
+		{ID: 10, Present: true, Managed: true, Checksum: "whatever"},
+	}}
+
+	plan, err := a.Plan(context.Background(), d, obs)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Steps) != 1 || plan.Steps[0].Kind != "remove" {
+		t.Fatalf("want a single remove step, got %+v; a foreign service sharing "+
+			"an id must not keep our interface alive", plan.Steps)
+	}
+}
