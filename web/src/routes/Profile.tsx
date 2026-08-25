@@ -1,3 +1,4 @@
+import { MyTenancy } from "../components/MyTenancy";
 import { TelegramLink } from "../components/TelegramLink";
 import { t } from "../i18n";
 
@@ -12,7 +13,8 @@ export function Profile() {
   return (
     <div className="space-y-4">
       <h1 className="text-sm font-semibold text-zinc-100">{t("profile.title")}</h1>
-      <div className="max-w-xl">
+      <div className="max-w-xl space-y-4">
+        <MyTenancy />
         <TelegramLink />
       </div>
     </div>
