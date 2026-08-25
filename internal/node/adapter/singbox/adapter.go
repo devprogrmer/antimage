@@ -180,6 +180,7 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			SupportsOutbounds: true,
 			SupportsRouting:   true,
 			OutboundSchema:    outboundSchema,
+			OutboundKinds:     OutboundKinds,
 		},
 	}
 }

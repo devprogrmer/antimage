@@ -182,6 +182,7 @@ func NewRouter(d Deps) http.Handler {
 			// egress bumps the node's revision like any other desired-state
 			// change rather than leaving the panel holding a policy the node
 			// was never told about.
+			private.Get("/nodes/{nodeID}/egress/capabilities", d.handleGetEgressCapabilities)
 			private.Get("/nodes/{nodeID}/outbounds", d.handleListOutbounds)
 			private.Post("/nodes/{nodeID}/outbounds", d.handleCreateOutbound)
 			private.Put("/nodes/{nodeID}/outbounds/{outboundID}", d.handleUpdateOutbound)

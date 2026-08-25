@@ -367,3 +367,68 @@ func TestEgressReadStillNeedsNodeScope(t *testing.T) {
 		t.Errorf("list outbounds as super admin = %d, want 200: %s", res.Code, res.Body)
 	}
 }
+
+// The capabilities endpoint is what stops the UI holding protocol knowledge of
+// its own. If it ever reported a kind the adapter cannot render, the frontend
+// would offer it, the API would accept it, and the node would fail to start its
+// proxy -- taking every working inbound with it.
+func TestEgressCapabilitiesComeFromTheAdapter(t *testing.T) {
+	env, adminToken, _ := newSubjectEnv(t)
+	egressNode(t, env, 1, `["xray"]`)
+
+	res := env.get(t, "/api/v1/nodes/1/egress/capabilities", adminToken)
+	if res.Code != http.StatusOK {
+		t.Fatalf("capabilities = %d: %s", res.Code, res.Body)
+	}
+	var got struct {
+		Supported     bool     `json:"supported"`
+		AdapterKind   string   `json:"adapter_kind"`
+		OutboundKinds []string `json:"outbound_kinds"`
+		BuiltinTags   []string `json:"builtin_tags"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.Supported || got.AdapterKind != "xray" {
+		t.Fatalf("xray node reported unsupported: %+v", got)
+	}
+	if len(got.OutboundKinds) == 0 {
+		t.Error("no outbound kinds reported; the UI would have nothing to offer")
+	}
+	// direct is supplied by Xray's own accounting configuration, so a rule may
+	// target it although no outbound row exists. The UI needs it in the picker.
+	var hasDirect bool
+	for _, tag := range got.BuiltinTags {
+		if tag == "direct" {
+			hasDirect = true
+		}
+	}
+	if !hasDirect {
+		t.Errorf("builtin tags omit direct: %+v — a rule could not send traffic straight out", got.BuiltinTags)
+	}
+}
+
+// An incapable node reports the fact with a reason rather than erroring, so the
+// UI can explain itself instead of showing an empty panel.
+func TestEgressCapabilitiesExplainAnIncapableNode(t *testing.T) {
+	env, adminToken, _ := newSubjectEnv(t)
+	egressNode(t, env, 1, `["wireguard"]`)
+
+	res := env.get(t, "/api/v1/nodes/1/egress/capabilities", adminToken)
+	if res.Code != http.StatusOK {
+		t.Fatalf("capabilities = %d, want 200 even when unsupported: %s", res.Code, res.Body)
+	}
+	var got struct {
+		Supported bool   `json:"supported"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Supported {
+		t.Error("wireguard-only node reported as egress-capable")
+	}
+	if got.Reason == "" {
+		t.Error("no reason given; the UI would hide the feature with no account of itself")
+	}
+}
