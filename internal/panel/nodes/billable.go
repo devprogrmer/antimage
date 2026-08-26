@@ -8,7 +8,7 @@ import (
 
 // Billable computation (C3, implementing AD-2).
 //
-//	billable = raw * node_coef * service_coef * subject_coef * reseller_coef
+//	billable = raw * node_coef * service_coef * subject_coef * reseller_coef * outbound_coef
 //
 // Never stored. The same discipline as the reseller balance, which is
 // SUM(delta) and never a cached column: a stored billable figure drifts the
@@ -28,10 +28,10 @@ const CoefficientUnit = 10000
 // an invoice, and there is no value that is a safe guess.
 var ErrCoefficientOverflow = errors.New("billable computation overflowed int64")
 
-// Factors are the four coefficients applied to one quantity of raw bytes, in
-// the order AD-2 names them.
+// Factors are the five coefficients applied to one quantity of raw bytes, in
+// the order AD-2 names them plus outbound (Phase F §27).
 //
-// A struct rather than four int64 arguments because they are mutually
+// A struct rather than five int64 arguments because they are mutually
 // transposable at the call site and nothing would catch it: swapping node and
 // subject compiles, runs, and produces a bill that is wrong only when the two
 // happen to differ.
@@ -40,35 +40,37 @@ type Factors struct {
 	Service  int64
 	Subject  int64
 	Reseller int64
+	Outbound int64
 }
 
 // UnitFactors is every coefficient at x1.0, which computes exactly what the
-// system computed before AD-2.
+// system computed before AD-2 and Phase F.
 func UnitFactors() Factors {
 	return Factors{
 		Node:     CoefficientUnit,
 		Service:  CoefficientUnit,
 		Subject:  CoefficientUnit,
 		Reseller: CoefficientUnit,
+		Outbound: CoefficientUnit,
 	}
 }
 
 // All returns the factors in application order, for callers that render the
 // derivation. Section 11 requires the calculation be shown, not hidden.
 func (f Factors) All() []int64 {
-	return []int64{f.Node, f.Service, f.Subject, f.Reseller}
+	return []int64{f.Node, f.Service, f.Subject, f.Reseller, f.Outbound}
 }
 
-// Billable applies the four coefficients to raw bytes.
+// Billable applies the five coefficients to raw bytes.
 //
 // Progressive rather than one big product, as the plan requires: raw with all
-// four coefficients multiplied first overflows int64 long before the RESULT
+// five coefficients multiplied first overflows int64 long before the RESULT
 // would, so a bill that is perfectly representable would fail to compute.
 // Each step is exact in 128 bits and divides before the next multiply.
 //
 // The cost is that each step truncates below one byte, so a result can be up to
-// four bytes under the infinitely-precise value. That is deliberate and it
-// rounds DOWN: an operator overcharging a customer by four bytes because of
+// five bytes under the infinitely-precise value. That is deliberate and it
+// rounds DOWN: an operator overcharging a customer by five bytes because of
 // rounding is a worse failure than undercharging by it.
 func Billable(raw int64, f Factors) (int64, error) {
 	if raw < 0 {
