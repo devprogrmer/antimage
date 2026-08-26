@@ -304,5 +304,6 @@
   "command.title": "پنل فرمان",
   "command.placeholder": "جست‌وجو یا پرش به…",
   "command.empty": "چیزی مطابقت ندارد.",
-  "command.navigation": "برو به"
+  "command.navigation": "برو به",
+  "error.requestId": "شناسه پیگیری"
 }

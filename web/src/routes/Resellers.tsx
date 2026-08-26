@@ -24,10 +24,20 @@ export function MutationError({ error }: { error: unknown }) {
   // more use to an operator than a generic failure, so they are shown verbatim
   // rather than mapped onto a local string.
   const message = error instanceof ApiError ? error.message : String(error);
+  const requestID = error instanceof ApiError ? error.requestID : "";
   return (
-    <p className="mt-1 text-xs text-red-400" role="alert">
-      {message}
-    </p>
+    <div role="alert">
+      <p className="mt-1 text-xs text-red-400">{message}</p>
+      {/* The id the server stamped on this request, which is also on the audit
+          row and in the log. Selectable and monospaced because its only job is
+          to be copied into a support message -- an id an operator cannot read
+          back accurately is no better than no id. */}
+      {requestID !== "" && (
+        <p className="mt-0.5 select-all font-mono text-[11px] text-zinc-500">
+          {t("error.requestId")}: {requestID}
+        </p>
+      )}
+    </div>
   );
 }
 

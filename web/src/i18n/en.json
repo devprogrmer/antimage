@@ -304,5 +304,6 @@
   "command.title": "Command palette",
   "command.placeholder": "Search or jump to…",
   "command.empty": "Nothing matches.",
-  "command.navigation": "Go to"
+  "command.navigation": "Go to",
+  "error.requestId": "Reference"
 }
