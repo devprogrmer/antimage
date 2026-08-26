@@ -197,7 +197,7 @@ func TestTheRealSecretStillReachesTheDesiredDocument(t *testing.T) {
 	var snap *nodes.Snapshot
 	if err := env.store.Write(context.Background(), func(tx *sql.Tx) error {
 		var err error
-		snap, err = nodes.BuildDesiredSnapshot(context.Background(), tx, 1)
+		snap, err = nodes.BuildDesiredSnapshot(context.Background(), tx, 1, nodes.WithUnsealer(env.deps.Box))
 		return err
 	}); err != nil {
 		t.Fatalf("build desired snapshot: %v", err)
