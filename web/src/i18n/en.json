@@ -292,5 +292,10 @@
   "studio.emptyOption": "None",
   "studio.commaSeparated": "Separate several with commas.",
   "studio.requiresPki": "This protocol needs a TLS certificate and key on the node.",
-  "studio.noHotAdd": "This node restarts the service to add or remove a user."
+  "studio.noHotAdd": "This node restarts the service to add or remove a user.",
+  "nav.primary": "Primary navigation",
+  "theme.label": "Theme",
+  "theme.light": "Light",
+  "theme.dark": "Dark",
+  "theme.system": "System"
 }

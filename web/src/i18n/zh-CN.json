@@ -292,5 +292,10 @@
   "studio.emptyOption": "无",
   "studio.commaSeparated": "多个值请用逗号分隔。",
   "studio.requiresPki": "此协议需要节点上具备 TLS 证书和密钥。",
-  "studio.noHotAdd": "该节点增删用户时会重启服务。"
+  "studio.noHotAdd": "该节点增删用户时会重启服务。",
+  "nav.primary": "主导航",
+  "theme.label": "主题",
+  "theme.light": "浅色",
+  "theme.dark": "深色",
+  "theme.system": "跟随系统"
 }

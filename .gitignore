@@ -23,3 +23,7 @@ dist/
 antimage-node.exe
 antimage-panel.exe
 *.exe
+
+# Machine-local Claude Code configuration. Claude.reg in the repo root carries
+# an inference-gateway API key; committing it would publish a live credential.
+*.reg
