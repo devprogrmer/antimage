@@ -3,7 +3,16 @@ import { useState } from "react";
 import { api } from "../lib/api";
 import { formatTimestamp, t } from "../i18n";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { MutationError } from "./Resellers";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 import { SubjectFilters, searchParamsFor } from "../components/SubjectFilters";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "../components/ui/sheet";
 import type { FilterParams } from "../components/SubjectFilters";
 
 interface Subject {
@@ -61,9 +70,19 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
         </button>
       </div>
 
-      {showCreate && (
-        <CreateSubjectForm onClose={() => setShowCreate(false)} />
-      )}
+      {/* In a sheet rather than inline. The form used to appear between the
+          header and the table and push the list down the page, so the rows an
+          operator was reading moved as they clicked New. It also had no focus
+          management: the form opened and the keyboard stayed on the button
+          behind it. */}
+      <Sheet open={showCreate} onOpenChange={setShowCreate}>
+        <SheetContent aria-describedby={undefined}>
+          <SheetHeader>
+            <SheetTitle>{t("subjects.create")}</SheetTitle>
+          </SheetHeader>
+          <CreateSubjectForm onClose={() => setShowCreate(false)} />
+        </SheetContent>
+      </Sheet>
 
       <SubjectFilters onFilterChange={setFilters} />
 
@@ -149,43 +168,45 @@ function CreateSubjectForm({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div className="mb-4 rounded border border-zinc-800 bg-zinc-900 p-4">
-      <h3 className="mb-3 text-sm font-semibold">{t("subjects.createNew")}</h3>
+    // No card or heading of its own: the sheet supplies both, and nesting a
+    // bordered panel inside a panel is the doubled chrome that makes a UI look
+    // assembled rather than designed.
+    <div>
       <div className="space-y-3">
         <div>
-          <label className="block text-xs text-zinc-400">{t("subject.name")}</label>
-          <input
+          <label className="block text-xs text-muted-foreground" htmlFor="subject-name">
+            {t("subject.name")}
+          </label>
+          <Input
+            id="subject-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-400">{t("subject.note")}</label>
-          <input
+          <label className="block text-xs text-muted-foreground" htmlFor="subject-note">
+            {t("subject.note")}
+          </label>
+          <Input
+            id="subject-note"
             type="text"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
           />
         </div>
+        <MutationError error={create.error} />
         <div className="flex gap-2">
-          <button
-            type="button"
+          <Button
+            size="sm"
             onClick={() => create.mutate({ name, note, service_ids: [] })}
             disabled={!name || create.isPending}
-            className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700 disabled:opacity-50"
           >
             {t("create")}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
-          >
+          </Button>
+          <Button variant="outline" size="sm" onClick={onClose}>
             {t("cancel")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
