@@ -54,11 +54,11 @@ func isPortListening(port int) bool {
 	addr := fmt.Sprintf(":%d", port)
 	conn, err := net.ListenPacket("udp", addr)
 	if err != nil {
-		// If we get "address already in use", the port is listening.
-		if opErr, ok := err.(*net.OpError); ok {
-			// Check if it's an "address already in use" error.
-			// This is the expected case when the port is in use.
-			return opErr.Err.Error() == "bind: address already in use"
+		// If we get an error binding, check if it's "address already in use".
+		// On Windows, the error message may be different from Unix.
+		errStr := err.Error()
+		if containsAny(errStr, []string{"address already in use", "bind", "Only one usage"}) {
+			return true
 		}
 		// Other errors mean we couldn't verify the port.
 		return false
@@ -66,6 +66,20 @@ func isPortListening(port int) bool {
 	// If we successfully bound to the port, it's NOT in use.
 	// Close it and return false.
 	conn.Close()
+	return false
+}
+
+// containsAny checks if a string contains any of the substrings.
+func containsAny(s string, substrs []string) bool {
+	for _, substr := range substrs {
+		if len(substr) > 0 && len(s) >= len(substr) {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+		}
+	}
 	return false
 }
 
