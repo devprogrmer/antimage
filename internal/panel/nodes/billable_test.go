@@ -32,16 +32,17 @@ func TestBillableAppliesEveryFactor(t *testing.T) {
 		f    Factors
 		want int64
 	}{
-		{"node x2", 1000, Factors{20000, 10000, 10000, 10000}, 2000},
-		{"service x2", 1000, Factors{10000, 20000, 10000, 10000}, 2000},
-		{"subject x2", 1000, Factors{10000, 10000, 20000, 10000}, 2000},
-		{"reseller x2", 1000, Factors{10000, 10000, 10000, 20000}, 2000},
-		{"all x2 compounds", 1000, Factors{20000, 20000, 20000, 20000}, 16000},
-		{"half", 1000, Factors{5000, 10000, 10000, 10000}, 500},
-		{"x1.5 x0.5 cancels", 1000, Factors{15000, 5000, 10000, 10000}, 750},
+		{"node x2", 1000, Factors{20000, 10000, 10000, 10000, 10000}, 2000},
+		{"service x2", 1000, Factors{10000, 20000, 10000, 10000, 10000}, 2000},
+		{"subject x2", 1000, Factors{10000, 10000, 20000, 10000, 10000}, 2000},
+		{"reseller x2", 1000, Factors{10000, 10000, 10000, 20000, 10000}, 2000},
+		{"outbound x2", 1000, Factors{10000, 10000, 10000, 10000, 20000}, 2000},
+		{"all x2 compounds", 1000, Factors{20000, 20000, 20000, 20000, 20000}, 32000},
+		{"half", 1000, Factors{5000, 10000, 10000, 10000, 10000}, 500},
+		{"x1.5 x0.5 cancels", 1000, Factors{15000, 5000, 10000, 10000, 10000}, 750},
 		// x0.0001 is the finest the basis-point scale expresses.
-		{"minimum resolution", 10000, Factors{1, 10000, 10000, 10000}, 1},
-		{"free", 1000, Factors{0, 10000, 10000, 10000}, 0},
+		{"minimum resolution", 10000, Factors{1, 10000, 10000, 10000, 10000}, 1},
+		{"free", 1000, Factors{0, 10000, 10000, 10000, 10000}, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -60,7 +61,7 @@ func TestBillableAppliesEveryFactor(t *testing.T) {
 // and runs, and produces a wrong bill only when they differ -- which is exactly
 // when it matters.
 func TestBillableFactorsAreNotInterchangeable(t *testing.T) {
-	base := Factors{Node: 20000, Service: 10000, Subject: 10000, Reseller: 10000}
+	base := Factors{Node: 20000, Service: 10000, Subject: 10000, Reseller: 10000, Outbound: 10000}
 	got, err := Billable(1000, base)
 	if err != nil {
 		t.Fatalf("Billable: %v", err)
@@ -68,8 +69,8 @@ func TestBillableFactorsAreNotInterchangeable(t *testing.T) {
 	// The product is commutative, so position cannot be caught by arithmetic
 	// alone -- it is caught by what the API reports back.
 	if all := base.All(); all[0] != base.Node || all[1] != base.Service ||
-		all[2] != base.Subject || all[3] != base.Reseller {
-		t.Errorf("All() = %v, want node, service, subject, reseller in that order; "+
+		all[2] != base.Subject || all[3] != base.Reseller || all[4] != base.Outbound {
+		t.Errorf("All() = %v, want node, service, subject, reseller, outbound in that order; "+
 			"the UI renders this as the derivation and would mislabel every factor", all)
 	}
 	if got != 2000 {
@@ -81,16 +82,16 @@ func TestBillableFactorsAreNotInterchangeable(t *testing.T) {
 // a bill, not a rendering artifact".
 func TestBillableOverflow(t *testing.T) {
 	// A result that does not fit must be an error, not a wrapped negative.
-	_, err := Billable(math.MaxInt64, Factors{20000, 10000, 10000, 10000})
+	_, err := Billable(math.MaxInt64, Factors{20000, 10000, 10000, 10000, 10000})
 	if !errors.Is(err, ErrCoefficientOverflow) {
 		t.Errorf("doubling MaxInt64 gave err = %v, want ErrCoefficientOverflow", err)
 	}
 
-	// THE case the plan warns about: naively multiplying all five terms first
-	// overflows long before the RESULT would. raw x 1.0 x 1.0 x 1.0 x 1.0 with
+	// THE case the plan warns about: naively multiplying all six terms first
+	// overflows long before the RESULT would. raw x 1.0 x 1.0 x 1.0 x 1.0 x 1.0 with
 	// a big raw is perfectly representable and must compute.
 	//
-	// 10^18 x 10000^4 is 10^34, far past int64, so anything that forms the full
+	// 10^18 x 10000^5 is 10^38, far past int64, so anything that forms the full
 	// product before dividing fails this.
 	const big = int64(1_000_000_000_000_000_000)
 	got, err := Billable(big, UnitFactors())
@@ -103,7 +104,7 @@ func TestBillableOverflow(t *testing.T) {
 	}
 
 	// And one that genuinely does not fit is refused rather than truncated.
-	if _, err := Billable(big, Factors{100000, 100000, 100000, 100000}); err == nil {
+	if _, err := Billable(big, Factors{100000, 100000, 100000, 100000, 100000}); err == nil {
 		t.Error("a bill of 10^22 bytes was reported as representable")
 	}
 }
@@ -112,7 +113,7 @@ func TestBillableOverflow(t *testing.T) {
 // overcharges because of truncation.
 func TestBillableRoundsDown(t *testing.T) {
 	// 1 byte at x0.5 is half a byte.
-	got, err := Billable(1, Factors{5000, 10000, 10000, 10000})
+	got, err := Billable(1, Factors{5000, 10000, 10000, 10000, 10000})
 	if err != nil {
 		t.Fatalf("Billable: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestBillableRefusesNegatives(t *testing.T) {
 		t.Error("negative raw bytes were accepted; a corrupted counter would be " +
 			"laundered into a credit")
 	}
-	if _, err := Billable(100, Factors{-1, 10000, 10000, 10000}); err == nil {
+	if _, err := Billable(100, Factors{-1, 10000, 10000, 10000, 10000}); err == nil {
 		t.Error("a negative coefficient was accepted")
 	}
 }
@@ -137,9 +138,9 @@ func TestBillableRefusesNegatives(t *testing.T) {
 func TestThresholdInvertsBillable(t *testing.T) {
 	for _, f := range []Factors{
 		UnitFactors(),
-		{20000, 10000, 10000, 10000},
-		{10000, 5000, 10000, 10000},
-		{15000, 15000, 10000, 10000},
+		{20000, 10000, 10000, 10000, 10000},
+		{10000, 5000, 10000, 10000, 10000},
+		{15000, 15000, 10000, 10000, 10000},
 	} {
 		const quota = 1_000_000
 		raw, err := Threshold(quota, f)
@@ -161,7 +162,7 @@ func TestThresholdInvertsBillable(t *testing.T) {
 // Rounds up, so nobody is frozen a byte early.
 func TestThresholdRoundsUp(t *testing.T) {
 	// Quota 1 at x2.0: half a raw byte reaches it, so the threshold is 1.
-	raw, err := Threshold(1, Factors{20000, 10000, 10000, 10000})
+	raw, err := Threshold(1, Factors{20000, 10000, 10000, 10000, 10000})
 	if err != nil {
 		t.Fatalf("Threshold: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestThresholdRoundsUp(t *testing.T) {
 // A zero coefficient means the traffic is free, so no amount of it reaches the
 // quota. Dividing by zero is the wrong way to say that.
 func TestThresholdWithAFreeCoefficient(t *testing.T) {
-	raw, err := Threshold(1000, Factors{0, 10000, 10000, 10000})
+	raw, err := Threshold(1000, Factors{0, 10000, 10000, 10000, 10000})
 	if err != nil {
 		t.Fatalf("Threshold: %v", err)
 	}

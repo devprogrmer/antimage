@@ -125,8 +125,11 @@ func findSubjectsOverQuota(ctx context.Context, st *store.Store, now int64) ([]o
 		}
 
 		billable, err := Billable(bytes, Factors{
-			Node: nodeCoef, Service: serviceCoef,
-			Subject: subjectCoef, Reseller: resellerCoef,
+			Node:     nodeCoef,
+			Service:  serviceCoef,
+			Subject:  subjectCoef,
+			Reseller: resellerCoef,
+			Outbound: CoefficientUnit, // TODO: add outbound_id attribution
 		})
 		if err != nil {
 			// A subject whose bill cannot be computed must not be silently

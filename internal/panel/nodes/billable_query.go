@@ -9,7 +9,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/store"
 )
 
-// BillableGroup is one (node, service) combination's contribution to a bill.
+// BillableGroup is one (node, service, outbound) combination's contribution to a bill.
 //
 // The groups are returned, not just the total, because section 11 requires the
 // calculation be shown rather than hidden, and section 3.1 forbids the frontend
@@ -17,11 +17,12 @@ import (
 type BillableGroup struct {
 	// Nil when the traffic was never attributed -- an adapter that cannot
 	// account per inbound, or usage recorded before attribution existed.
-	NodeID    *int64
-	ServiceID *int64
-	RawBytes  int64
-	Factors   Factors
-	Billable  int64
+	NodeID     *int64
+	ServiceID  *int64
+	OutboundID *int64
+	RawBytes   int64
+	Factors    Factors
+	Billable   int64
 }
 
 // BillableReport is one subject's bill for a period, with its derivation.
@@ -36,7 +37,7 @@ type BillableReport struct {
 
 // BillableForSubject computes what a subject owes for [from, to).
 //
-//	billable = raw * node_coef * service_coef * subject_coef * reseller_coef
+//	billable = raw * node_coef * service_coef * subject_coef * reseller_coef * outbound_coef
 //
 // Summed PER (node, service) group rather than applied once to a total, and
 // that is the whole reason the rollups gained those dimensions. A subject on a
@@ -103,6 +104,7 @@ func BillableForSubject(
 			Factors: Factors{
 				Node: nodeCoef, Service: svcCoef,
 				Subject: subjectCoef, Reseller: resellerCoef,
+				Outbound: CoefficientUnit, // TODO: add outbound_id attribution to usage_deltas
 			},
 		}
 		if nodeID.Valid {
