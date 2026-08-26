@@ -3,6 +3,8 @@ import { useState } from "react";
 import { api } from "../lib/api";
 import { formatTimestamp, t } from "../i18n";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { SubjectFilters, searchParamsFor } from "../components/SubjectFilters";
+import type { FilterParams } from "../components/SubjectFilters";
 
 interface Subject {
   id: number;
@@ -21,9 +23,21 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
   // because deleting the wrong customer is not recoverable from the UI.
   const [pendingDelete, setPendingDelete] = useState<Subject | null>(null);
 
+  // The filter state the bar reports. Kept here rather than inside the bar so
+  // it is part of the query key: the list refetches when a filter changes,
+  // which is the whole point of a server-side search.
+  const [filters, setFilters] = useState<FilterParams | null>(null);
+
+  // /api/v2/subjects, not v1. The v2 endpoint is the paginated, filterable,
+  // scope-checked search -- it and SubjectFilters were both written and never
+  // connected, so the panel shipped a filter bar that rendered nowhere and a
+  // search API that nothing called.
   const subjects = useQuery({
-    queryKey: ["subjects"],
-    queryFn: () => api.get<{ subjects: Subject[] }>("/api/v1/subjects"),
+    queryKey: ["subjects", filters],
+    queryFn: () =>
+      api.get<{ subjects: Subject[]; total: number }>(
+        "/api/v2/subjects?" + searchParamsFor(filters),
+      ),
   });
 
   const deleteSubject = useMutation({
@@ -50,6 +64,8 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
       {showCreate && (
         <CreateSubjectForm onClose={() => setShowCreate(false)} />
       )}
+
+      <SubjectFilters onFilterChange={setFilters} />
 
       <table className="w-full border-collapse text-sm text-zinc-200">
         <thead>
