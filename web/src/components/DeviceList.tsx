@@ -53,11 +53,11 @@ export function DeviceList({ subjectId }: DeviceListProps) {
     const diffSeconds = now - lastSeen;
 
     if (diffSeconds < 300) {
-      return { label: t('devices.online'), color: "text-green-400" };
+      return { label: t('devices.online'), color: "text-success" };
     } else if (diffSeconds < 3600) {
-      return { label: t('devices.recently_active'), color: "text-yellow-400" };
+      return { label: t('devices.recently_active'), color: "text-warning" };
     } else {
-      return { label: t('devices.offline'), color: "text-zinc-500" };
+      return { label: t('devices.offline'), color: "text-muted-foreground" };
     }
   }
 
@@ -68,24 +68,24 @@ export function DeviceList({ subjectId }: DeviceListProps) {
         {/* Phrased as a label and a count rather than "N devices". t() has no
             interpolation, and an English "s" suffix cannot stand in for the
             three plural forms Russian needs or the six Arabic needs. */}
-        <p className="text-xs text-zinc-400 mt-1">
+        <p className="text-xs text-muted-foreground mt-1">
           {t('devices.count')}: {formatNumber(devices.length)}
         </p>
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-zinc-400">{t('common.loading')}</div>
+        <div className="text-center py-8 text-sm text-muted-foreground">{t('common.loading')}</div>
       ) : devices.length === 0 ? (
-        <div className="text-center py-8 text-sm text-zinc-400">{t('devices.no_devices')}</div>
+        <div className="text-center py-8 text-sm text-muted-foreground">{t('devices.no_devices')}</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {devices.map((device) => {
             const status = getDeviceStatus(device.last_seen);
             return (
-              <div key={device.device_id} className="bg-zinc-900 border border-zinc-800 rounded p-4">
+              <div key={device.device_id} className="bg-card border border-border rounded p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
-                    <div className="font-mono text-xs text-zinc-300 mb-1">
+                    <div className="font-mono text-xs text-foreground mb-1">
                       {device.device_id}
                     </div>
                     <div className={`text-xs font-semibold ${status.color}`}>
@@ -94,37 +94,37 @@ export function DeviceList({ subjectId }: DeviceListProps) {
                   </div>
                 </div>
 
-                <div className="space-y-2 text-xs text-zinc-400">
+                <div className="space-y-2 text-xs text-muted-foreground">
                   <div className="flex justify-between">
                     <span>{t('devices.first_seen')}:</span>
-                    <span className="text-zinc-300">{formatTimestamp(device.first_seen)}</span>
+                    <span className="text-foreground">{formatTimestamp(device.first_seen)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>{t('devices.last_seen')}:</span>
-                    <span className="text-zinc-300">{formatTimestamp(device.last_seen)}</span>
+                    <span className="text-foreground">{formatTimestamp(device.last_seen)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>{t('devices.connections')}:</span>
-                    <span className="text-zinc-300">{device.connection_count}</span>
+                    <span className="text-foreground">{device.connection_count}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>{t('devices.upload')}:</span>
-                    <span className="text-blue-400">{formatBytes(device.total_bytes_up)}</span>
+                    <span className="text-primary">{formatBytes(device.total_bytes_up)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>{t('devices.download')}:</span>
-                    <span className="text-green-400">{formatBytes(device.total_bytes_down)}</span>
+                    <span className="text-success">{formatBytes(device.total_bytes_down)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>{t('devices.total_traffic')}:</span>
-                    <span className="text-zinc-100 font-semibold">
+                    <span className="text-foreground font-semibold">
                       {formatBytes(device.total_bytes_up + device.total_bytes_down)}
                     </span>
                   </div>
                   {device.last_ip_address && (
-                    <div className="flex justify-between pt-2 border-t border-zinc-800">
+                    <div className="flex justify-between pt-2 border-t border-border">
                       <span>{t('devices.last_ip')}:</span>
-                      <span className="text-zinc-300 font-mono">{device.last_ip_address}</span>
+                      <span className="text-foreground font-mono">{device.last_ip_address}</span>
                     </div>
                   )}
                 </div>

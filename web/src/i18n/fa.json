@@ -305,5 +305,7 @@
   "command.placeholder": "جست‌وجو یا پرش به…",
   "command.empty": "چیزی مطابقت ندارد.",
   "command.navigation": "برو به",
-  "error.requestId": "شناسه پیگیری"
+  "error.requestId": "شناسه پیگیری",
+  "subjects.none": "هنوز کاربری وجود ندارد.",
+  "reseller.none": "هنوز مستأجری وجود ندارد."
 }

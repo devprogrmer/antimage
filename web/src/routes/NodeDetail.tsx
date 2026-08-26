@@ -64,19 +64,19 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
   const drift = node.data.applied_revision !== node.data.desired_revision;
 
   return (
-    <div className="space-y-6 p-4 text-sm text-zinc-200">
+    <div className="space-y-6 p-4 text-sm text-foreground">
       <header className="flex items-center gap-3">
         <h2 className="font-mono text-base">{node.data.name}</h2>
         <StatusBadge status={node.data.status} />
-        <span className="font-mono text-xs text-zinc-500">{node.data.address}</span>
+        <span className="font-mono text-xs text-muted-foreground">{node.data.address}</span>
       </header>
 
-      <section className="flex gap-6 border-y border-zinc-800 py-2 font-mono text-xs">
+      <section className="flex gap-6 border-y border-border py-2 font-mono text-xs">
         <span>
           {t("node.revision")}: {formatNumber(node.data.applied_revision)} /{" "}
           {formatNumber(node.data.desired_revision)}
         </span>
-        {drift && <span className="text-amber-400">{t("node.drift")}</span>}
+        {drift && <span className="text-warning">{t("node.drift")}</span>}
       </section>
 
       <InboundStudio nodeId={nodeId} />
@@ -85,18 +85,18 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
       <EgressPanel nodeId={nodeId} />
 
       <section>
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
           {t("node.revisions")}
         </h3>
         <table className="w-full border-collapse font-mono text-xs">
           <tbody>
             {revisions.data?.revisions.map((rev) => (
-              <tr key={rev.revision} className="border-b border-zinc-900">
-                <td className="py-1 pe-3 text-zinc-400">{formatNumber(rev.revision)}</td>
-                <td className="pe-3 text-zinc-500">{formatTimestamp(rev.created_at)}</td>
+              <tr key={rev.revision} className="border-b border-border">
+                <td className="py-1 pe-3 text-muted-foreground">{formatNumber(rev.revision)}</td>
+                <td className="pe-3 text-muted-foreground">{formatTimestamp(rev.created_at)}</td>
                 <td className="pe-3">{rev.actor_label || rev.actor_type}</td>
-                <td className="pe-3 text-zinc-400">{rev.reason}</td>
-                <td className="text-zinc-600">{rev.sha256.slice(0, 12)}</td>
+                <td className="pe-3 text-muted-foreground">{rev.reason}</td>
+                <td className="text-muted-foreground">{rev.sha256.slice(0, 12)}</td>
               </tr>
             ))}
           </tbody>
@@ -104,16 +104,16 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
       </section>
 
       <section>
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
           {t("node.applyRuns")}
         </h3>
         {runs.data?.runs.map((run) => (
-          <details key={run.id} className="border-b border-zinc-900 py-1">
+          <details key={run.id} className="border-b border-border py-1">
             <summary className="cursor-pointer font-mono text-xs">
-              <span className="text-zinc-400">{formatNumber(run.target_revision)}</span>{" "}
-              <span className="text-zinc-500">{formatTimestamp(run.started_at)}</span>{" "}
+              <span className="text-muted-foreground">{formatNumber(run.target_revision)}</span>{" "}
+              <span className="text-muted-foreground">{formatTimestamp(run.started_at)}</span>{" "}
               <span
-                className={run.outcome === "converged" ? "text-emerald-400" : "text-amber-400"}
+                className={run.outcome === "converged" ? "text-success" : "text-warning"}
               >
                 {run.outcome}
               </span>
@@ -121,24 +121,24 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
             <table className="mt-1 w-full border-collapse font-mono text-[11px]">
               <tbody>
                 {run.steps.map((step) => (
-                  <tr key={step.seq} className="border-t border-zinc-900">
-                    <td className="py-0.5 pe-3 text-zinc-500">{formatNumber(step.seq)}</td>
+                  <tr key={step.seq} className="border-t border-border">
+                    <td className="py-0.5 pe-3 text-muted-foreground">{formatNumber(step.seq)}</td>
                     <td className="pe-3">{step.kind}</td>
-                    <td className="pe-3 text-zinc-500">{step.disruption}</td>
+                    <td className="pe-3 text-muted-foreground">{step.disruption}</td>
                     <td
                       className={`pe-3 ${
-                        step.outcome === "ok" ? "text-emerald-400" : "text-red-400"
+                        step.outcome === "ok" ? "text-success" : "text-destructive"
                       }`}
                     >
                       {step.outcome}
                     </td>
-                    <td className="pe-3 text-zinc-500">
+                    <td className="pe-3 text-muted-foreground">
                       {formatNumber(step.duration_ms)}
                       {t("unit.ms")}
                     </td>
                     {/* The step's stderr, verbatim: the whole point of keeping
                         it is that the operator reads what the tool said. */}
-                    <td className="whitespace-pre-wrap text-red-400">{step.error}</td>
+                    <td className="whitespace-pre-wrap text-destructive">{step.error}</td>
                   </tr>
                 ))}
               </tbody>

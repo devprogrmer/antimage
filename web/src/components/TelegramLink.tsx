@@ -104,58 +104,58 @@ export function TelegramLink() {
   }
 
   return (
-    <section className="rounded border border-zinc-800 bg-zinc-900/50 p-4">
-      <h2 className="text-sm font-semibold text-zinc-100">{t("telegram.title")}</h2>
-      <p className="mt-1 text-xs text-zinc-400">{t("telegram.description")}</p>
+    <section className="rounded border border-border bg-card/50 p-4">
+      <h2 className="text-sm font-semibold text-foreground">{t("telegram.title")}</h2>
+      <p className="mt-1 text-xs text-muted-foreground">{t("telegram.description")}</p>
 
       {error !== null && (
-        <p role="alert" className="mt-3 text-xs text-red-400">
+        <p role="alert" className="mt-3 text-xs text-destructive">
           {error}
         </p>
       )}
 
       {status === null ? (
-        <p className="mt-3 text-xs text-zinc-500">{t("common.loading")}</p>
+        <p className="mt-3 text-xs text-muted-foreground">{t("common.loading")}</p>
       ) : status.linked && status.link !== undefined ? (
         <div className="mt-3 space-y-2">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <dt className="text-zinc-500">{t("telegram.account")}</dt>
-            <dd className="font-mono text-zinc-200">
+            <dt className="text-muted-foreground">{t("telegram.account")}</dt>
+            <dd className="font-mono text-foreground">
               {status.link.username !== "" ? `@${status.link.username}` : status.link.telegram_id}
             </dd>
-            <dt className="text-zinc-500">{t("telegram.linkedAt")}</dt>
-            <dd className="text-zinc-300">{formatWhen(status.link.linked_at)}</dd>
-            <dt className="text-zinc-500">{t("telegram.lastSeen")}</dt>
-            <dd className="text-zinc-300">{formatWhen(status.link.last_seen_at)}</dd>
+            <dt className="text-muted-foreground">{t("telegram.linkedAt")}</dt>
+            <dd className="text-foreground">{formatWhen(status.link.linked_at)}</dd>
+            <dt className="text-muted-foreground">{t("telegram.lastSeen")}</dt>
+            <dd className="text-foreground">{formatWhen(status.link.last_seen_at)}</dd>
           </dl>
           <button
             type="button"
             onClick={unlink}
             disabled={busy}
-            className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950 disabled:opacity-50"
+            className="rounded border border-destructive/40 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
           >
             {t("telegram.unlink")}
           </button>
-          <p className="text-xs text-zinc-500">{t("telegram.unlinkHint")}</p>
+          <p className="text-xs text-muted-foreground">{t("telegram.unlinkHint")}</p>
         </div>
       ) : code !== null ? (
         <div className="mt-3 space-y-2">
-          <p className="text-xs text-zinc-300">{t("telegram.sendToBot")}</p>
+          <p className="text-xs text-foreground">{t("telegram.sendToBot")}</p>
           {/*
             select-all so one click grabs the whole command. The code is a
             credential with a ten-minute life, so it is deliberately shown as
             text to be read rather than stored anywhere.
           */}
-          <code className="block select-all rounded bg-zinc-950 px-3 py-2 font-mono text-sm text-emerald-300">
+          <code className="block select-all rounded bg-background px-3 py-2 font-mono text-sm text-success">
             /link {code}
           </code>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted-foreground">
             {t("telegram.expiresIn")} {formatRemaining(remaining)}
           </p>
           <button
             type="button"
             onClick={() => setCode(null)}
-            className="text-xs text-zinc-500 hover:text-zinc-300"
+            className="text-xs text-muted-foreground hover:text-foreground"
           >
             {t("common.cancel")}
           </button>
@@ -166,11 +166,11 @@ export function TelegramLink() {
             type="button"
             onClick={issue}
             disabled={busy}
-            className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+            className="rounded border border-input px-2 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-50"
           >
             {t("telegram.link")}
           </button>
-          <p className="text-xs text-zinc-500">{t("telegram.linkHint")}</p>
+          <p className="text-xs text-muted-foreground">{t("telegram.linkHint")}</p>
         </div>
       )}
     </section>

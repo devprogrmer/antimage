@@ -2,7 +2,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { formatTimestamp, t } from "../i18n";
+import { Link } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { DataTable } from "../components/DataTable";
+import type { Column } from "../components/DataTable";
 import { MutationError } from "./Resellers";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -57,6 +60,66 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
     },
   });
 
+  const columns: Column<Subject>[] = [
+    {
+      id: "name",
+      header: t("subject.name"),
+      sortValue: (s) => s.name,
+      // Pinned: the link is the keyboard path to the detail screen, and a row
+      // with no name cannot be told from the one above it.
+      hideable: false,
+      cell: (s) => (
+        <Link
+          to={`/subjects/${s.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="font-mono hover:underline"
+        >
+          {s.name}
+        </Link>
+      ),
+    },
+    {
+      id: "status",
+      header: t("subject.status"),
+      // Sorted by the state an operator is looking for, not alphabetically by
+      // its label -- which would order it differently in every language.
+      sortValue: (s) => (!s.enabled ? 2 : s.expired_at ? 1 : 0),
+      cell: (s) => <StatusBadge subject={s} />,
+    },
+    {
+      id: "expires",
+      header: t("subject.expires"),
+      sortValue: (s) => s.expires_at,
+      className: "font-mono text-xs text-muted-foreground",
+      cell: (s) => formatTimestamp(s.expires_at),
+    },
+    {
+      id: "created",
+      header: t("subject.created"),
+      sortValue: (s) => s.created_at,
+      className: "font-mono text-xs text-muted-foreground",
+      cell: (s) => formatTimestamp(s.created_at),
+    },
+    {
+      id: "actions",
+      header: t("actions"),
+      cell: (s) => (
+        <button
+          type="button"
+          onClick={(e) => {
+            // The row activates on click; without this, asking to delete would
+            // also navigate to the record being deleted.
+            e.stopPropagation();
+            setPendingDelete(s);
+          }}
+          className="text-xs text-destructive hover:underline"
+        >
+          {t("delete")}
+        </button>
+      ),
+    },
+  ];
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
@@ -64,7 +127,7 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
         <button
           type="button"
           onClick={() => setShowCreate(true)}
-          className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700"
+          className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90"
         >
           {t("subjects.create")}
         </button>
@@ -86,50 +149,15 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
 
       <SubjectFilters onFilterChange={setFilters} />
 
-      <table className="w-full border-collapse text-sm text-zinc-200">
-        <thead>
-          <tr className="border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
-            <th className="py-2 pe-3 text-start">{t("subject.name")}</th>
-            <th className="pe-3 text-start">{t("subject.status")}</th>
-            <th className="pe-3 text-start">{t("subject.expires")}</th>
-            <th className="pe-3 text-start">{t("subject.created")}</th>
-            <th className="text-start">{t("actions")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {subjects.data?.subjects.map((subject) => (
-            <tr
-              key={subject.id}
-              className="cursor-pointer border-b border-zinc-900 hover:bg-zinc-900"
-            >
-              <td
-                onClick={() => onSelect(subject.id)}
-                className="py-1.5 pe-3 font-mono"
-              >
-                {subject.name}
-              </td>
-              <td className="pe-3">
-                <StatusBadge subject={subject} />
-              </td>
-              <td className="pe-3 font-mono text-xs text-zinc-500">
-                {formatTimestamp(subject.expires_at)}
-              </td>
-              <td className="pe-3 font-mono text-xs text-zinc-500">
-                {formatTimestamp(subject.created_at)}
-              </td>
-              <td>
-                <button
-                  type="button"
-                  onClick={() => setPendingDelete(subject)}
-                  className="text-xs text-destructive hover:underline"
-                >
-                  {t("delete")}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        rows={subjects.data?.subjects ?? []}
+        columns={columns}
+        rowKey={(s) => s.id}
+        onRowActivate={(s) => onSelect(s.id)}
+        storageKey="subjects"
+        empty={t("subjects.none")}
+        caption={t("subjects.title")}
+      />
       <ConfirmDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
@@ -145,12 +173,12 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
 
 function StatusBadge({ subject }: { subject: Subject }) {
   if (!subject.enabled) {
-    return <span className="text-zinc-500">{t("subject.disabled")}</span>;
+    return <span className="text-muted-foreground">{t("subject.disabled")}</span>;
   }
   if (subject.expired_at) {
-    return <span className="text-amber-500">{t("subject.expired")}</span>;
+    return <span className="text-warning">{t("subject.expired")}</span>;
   }
-  return <span className="text-green-500">{t("subject.active")}</span>;
+  return <span className="text-success">{t("subject.active")}</span>;
 }
 
 function CreateSubjectForm({ onClose }: { onClose: () => void }) {

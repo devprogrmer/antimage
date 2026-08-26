@@ -75,7 +75,7 @@ export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as any)}
-          className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs"
+          className="px-3 py-1.5 bg-secondary border border-input rounded text-xs"
         >
           <option value="start_time">{t('connections.sort_recent')}</option>
           <option value="duration">{t('connections.sort_longest')}</option>
@@ -84,14 +84,14 @@ export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
       </div>
 
       {loading ? (
-        <div className="text-center py-8 text-sm text-zinc-400">{t('common.loading')}</div>
+        <div className="text-center py-8 text-sm text-muted-foreground">{t('common.loading')}</div>
       ) : connections.length === 0 ? (
-        <div className="text-center py-8 text-sm text-zinc-400">{t('connections.no_connections')}</div>
+        <div className="text-center py-8 text-sm text-muted-foreground">{t('connections.no_connections')}</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse">
             <thead>
-              <tr className="border-b border-zinc-800 text-start">
+              <tr className="border-b border-border text-start">
                 <th className="py-2 px-2">{t('connections.start_time')}</th>
                 <th className="py-2 px-2">{t('connections.duration')}</th>
                 <th className="py-2 px-2">{t('connections.upload')}</th>
@@ -105,26 +105,26 @@ export function ConnectionHistory({ subjectId }: ConnectionHistoryProps) {
             </thead>
             <tbody>
               {sortedConnections.map((conn) => (
-                <tr key={conn.id} className="border-b border-zinc-800 hover:bg-zinc-900">
+                <tr key={conn.id} className="border-b border-border hover:bg-accent/50">
                   <td className="py-2 px-2">{formatTimestamp(conn.start_time)}</td>
                   <td className="py-2 px-2">{formatDuration(conn.duration)}</td>
-                  <td className="py-2 px-2 text-blue-400">{formatBytes(conn.bytes_up)}</td>
-                  <td className="py-2 px-2 text-green-400">{formatBytes(conn.bytes_down)}</td>
+                  <td className="py-2 px-2 text-primary">{formatBytes(conn.bytes_up)}</td>
+                  <td className="py-2 px-2 text-success">{formatBytes(conn.bytes_down)}</td>
                   <td className="py-2 px-2 font-semibold">{formatBytes(conn.bytes_up + conn.bytes_down)}</td>
-                  <td className="py-2 px-2 text-zinc-400">{conn.ip_address || "-"}</td>
-                  <td className="py-2 px-2 text-zinc-400 font-mono text-xs">{conn.device_id || "-"}</td>
+                  <td className="py-2 px-2 text-muted-foreground">{conn.ip_address || "-"}</td>
+                  <td className="py-2 px-2 text-muted-foreground font-mono text-xs">{conn.device_id || "-"}</td>
                   <td className="py-2 px-2">
                     {conn.protocol ? (
-                      <span className="px-2 py-0.5 bg-zinc-800 rounded">{conn.protocol}</span>
+                      <span className="px-2 py-0.5 bg-secondary rounded">{conn.protocol}</span>
                     ) : (
                       "-"
                     )}
                   </td>
                   <td className="py-2 px-2">
                     {conn.end_time ? (
-                      <span className="text-zinc-500">{t('connections.ended')}</span>
+                      <span className="text-muted-foreground">{t('connections.ended')}</span>
                     ) : (
-                      <span className="text-green-400">● {t('connections.active')}</span>
+                      <span className="text-success">● {t('connections.active')}</span>
                     )}
                   </td>
                 </tr>

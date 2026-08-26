@@ -305,5 +305,7 @@
   "command.placeholder": "ابحث أو انتقل إلى…",
   "command.empty": "لا توجد نتائج مطابقة.",
   "command.navigation": "الانتقال إلى",
-  "error.requestId": "رقم المرجع"
+  "error.requestId": "رقم المرجع",
+  "subjects.none": "لا يوجد مستخدمون بعد.",
+  "reseller.none": "لا يوجد مستأجرون بعد."
 }

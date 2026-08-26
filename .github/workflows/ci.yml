@@ -10,6 +10,7 @@ jobs:
       - run: go build ./...
       - run: make check-imports
       - run: make check-rtl
+      - run: make check-tokens
       - run: go vet ./...
       # v8 installs golangci-lint v2. v6 pinned v1.64.8, which is built with
       # Go 1.24 and refuses to run against a module targeting 1.25.

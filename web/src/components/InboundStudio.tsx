@@ -52,14 +52,14 @@ export function InboundStudio({ nodeId }: { nodeId: number }) {
   const unofferable = (schemas.data?.adapters ?? []).filter((a) => !a.offerable);
 
   return (
-    <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
+    <section className="rounded border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold">{t("studio.title")}</h3>
         {offerable.length > 0 && !adding && (
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700"
+            className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90"
           >
             {t("studio.add")}
           </button>
@@ -72,14 +72,14 @@ export function InboundStudio({ nodeId }: { nodeId: number }) {
       {/* A node that has never connected reports nothing. Saying so beats an
           empty form the operator cannot explain. */}
       {schemas.data !== undefined && schemas.data.adapters.length === 0 && (
-        <p className="text-sm text-zinc-500">{t("studio.nodeReportedNothing")}</p>
+        <p className="text-sm text-muted-foreground">{t("studio.nodeReportedNothing")}</p>
       )}
 
       {/* A protocol the node runs but cannot describe is named, not hidden:
           otherwise an operator sees WireGuard running and no way to add one,
           with nothing to explain the gap. */}
       {unofferable.map((a) => (
-        <p key={a.kind} className="mb-2 text-xs text-amber-400" role="status">
+        <p key={a.kind} className="mb-2 text-xs text-warning" role="status">
           {a.reason ?? t("studio.notOfferable")}
         </p>
       ))}
@@ -113,14 +113,14 @@ function ServiceList({ nodeId, services }: { nodeId: number; services: Service[]
   });
 
   if (services.length === 0) {
-    return <p className="text-sm text-zinc-500">{t("studio.noInbounds")}</p>;
+    return <p className="text-sm text-muted-foreground">{t("studio.noInbounds")}</p>;
   }
 
   return (
     <>
-      <table className="w-full border-collapse text-sm text-zinc-200">
+      <table className="w-full border-collapse text-sm text-foreground">
         <thead>
-          <tr className="border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
+          <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
             <th className="py-2 pe-3 text-start">{t("studio.protocol")}</th>
             <th className="pe-3 text-start">{t("studio.status")}</th>
             <th className="pe-3 text-start">{t("studio.params")}</th>
@@ -130,21 +130,21 @@ function ServiceList({ nodeId, services }: { nodeId: number; services: Service[]
         </thead>
         <tbody>
           {services.map((svc) => (
-            <tr key={svc.id} className="border-b border-zinc-900 align-top">
+            <tr key={svc.id} className="border-b border-border align-top">
               <td className="py-1.5 pe-3 font-mono">{svc.adapter_kind}</td>
               <td className="pe-3">
                 {svc.enabled ? (
-                  <span className="text-green-500">{t("reseller.enabled")}</span>
+                  <span className="text-success">{t("reseller.enabled")}</span>
                 ) : (
-                  <span className="text-zinc-500">{t("reseller.disabled")}</span>
+                  <span className="text-muted-foreground">{t("reseller.disabled")}</span>
                 )}
               </td>
               <td className="pe-3">
-                <code className="block max-w-md overflow-x-auto whitespace-pre text-xs text-zinc-400">
+                <code className="block max-w-md overflow-x-auto whitespace-pre text-xs text-muted-foreground">
                   {JSON.stringify(svc.params, null, 2)}
                 </code>
               </td>
-              <td className="pe-3 font-mono text-xs text-zinc-500">
+              <td className="pe-3 font-mono text-xs text-muted-foreground">
                 {formatTimestamp(svc.created_at)}
               </td>
               <td>
@@ -249,20 +249,20 @@ function AddInbound({
   }
 
   return (
-    <div className="mb-4 rounded border border-zinc-800 bg-zinc-950 p-4">
+    <div className="mb-4 rounded border border-border bg-background p-4">
       <div className="mb-3 flex items-center justify-between">
         <h4 className="text-sm font-semibold">{t("studio.addNew")}</h4>
         <button
           type="button"
           onClick={() => (jsonMode ? toForm() : toJSON())}
-          className="text-xs text-zinc-400 hover:text-zinc-100"
+          className="text-xs text-muted-foreground hover:text-foreground"
         >
           {jsonMode ? t("studio.switchToForm") : t("studio.switchToJson")}
         </button>
       </div>
 
       <div className="mb-3">
-        <label className="block text-xs text-zinc-400" htmlFor="studio-kind">
+        <label className="block text-xs text-muted-foreground" htmlFor="studio-kind">
           {t("studio.protocol")}
         </label>
         <select
@@ -276,7 +276,7 @@ function AddInbound({
             setParams({});
             setJsonText("{}");
           }}
-          className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+          className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
         >
           {adapters.map((a) => (
             <option key={a.kind} value={a.kind}>
@@ -285,16 +285,16 @@ function AddInbound({
           ))}
         </select>
         {adapter?.requires_pki && (
-          <p className="mt-1 text-xs text-amber-400">{t("studio.requiresPki")}</p>
+          <p className="mt-1 text-xs text-warning">{t("studio.requiresPki")}</p>
         )}
         {adapter && !adapter.hot_user_add && (
-          <p className="mt-1 text-xs text-zinc-500">{t("studio.noHotAdd")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("studio.noHotAdd")}</p>
         )}
       </div>
 
       {jsonMode ? (
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="studio-json">
+          <label className="block text-xs text-muted-foreground" htmlFor="studio-json">
             {t("studio.paramsDocument")}
           </label>
           <textarea
@@ -303,11 +303,11 @@ function AddInbound({
             onChange={(e) => setJsonText(e.target.value)}
             rows={12}
             spellCheck={false}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs"
+            className="w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs"
           />
-          <p className="mt-1 text-xs text-zinc-500">{t("studio.jsonModeNote")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("studio.jsonModeNote")}</p>
           {jsonError !== "" && (
-            <p className="mt-1 text-xs text-red-400" role="alert">
+            <p className="mt-1 text-xs text-destructive" role="alert">
               {jsonError}
             </p>
           )}
@@ -323,14 +323,14 @@ function AddInbound({
           type="button"
           onClick={submit}
           disabled={kind === "" || create.isPending}
-          className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90 disabled:opacity-50"
         >
           {t("create")}
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="rounded bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
+          className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
         >
           {t("cancel")}
         </button>

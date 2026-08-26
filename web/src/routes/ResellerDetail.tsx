@@ -25,12 +25,12 @@ export interface Movement {
  */
 export function MovementsTable({ movements }: { movements: Movement[] }) {
   if (movements.length === 0) {
-    return <p className="text-sm text-zinc-500">{t("reseller.ledgerEmpty")}</p>;
+    return <p className="text-sm text-muted-foreground">{t("reseller.ledgerEmpty")}</p>;
   }
   return (
-    <table className="w-full border-collapse text-sm text-zinc-200">
+    <table className="w-full border-collapse text-sm text-foreground">
       <thead>
-        <tr className="border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
+        <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
           <th className="py-2 pe-3 text-start">{t("reseller.amount")}</th>
           <th className="pe-3 text-start">{t("reseller.reason")}</th>
           <th className="pe-3 text-start">{t("reseller.note")}</th>
@@ -39,19 +39,19 @@ export function MovementsTable({ movements }: { movements: Movement[] }) {
       </thead>
       <tbody>
         {movements.map((movement) => (
-          <tr key={movement.id} className="border-b border-zinc-900">
+          <tr key={movement.id} className="border-b border-border">
             <td
               className={
                 movement.delta < 0
-                  ? "py-1.5 pe-3 font-mono text-amber-400"
-                  : "py-1.5 pe-3 font-mono text-green-400"
+                  ? "py-1.5 pe-3 font-mono text-warning"
+                  : "py-1.5 pe-3 font-mono text-success"
               }
             >
               {formatNumber(movement.delta)}
             </td>
             <td className="pe-3 font-mono text-xs">{movement.reason}</td>
-            <td className="pe-3 text-xs text-zinc-400">{movement.note}</td>
-            <td className="text-xs text-zinc-500">{formatRelativeTime(movement.at)}</td>
+            <td className="pe-3 text-xs text-muted-foreground">{movement.note}</td>
+            <td className="text-xs text-muted-foreground">{formatRelativeTime(movement.at)}</td>
           </tr>
         ))}
       </tbody>
@@ -83,7 +83,7 @@ export function ResellerDetail({ resellerID }: { resellerID: number }) {
   });
 
   if (reseller.isError) return <MutationError error={reseller.error} />;
-  if (!reseller.data) return <p className="text-sm text-zinc-500">{t("common.loading")}</p>;
+  if (!reseller.data) return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
 
   const record = reseller.data;
   const funded = balance.data !== undefined && balance.data.balance > record.credit_floor;
@@ -93,38 +93,38 @@ export function ResellerDetail({ resellerID }: { resellerID: number }) {
       <div className="flex items-baseline gap-3">
         <h2 className="font-mono text-lg font-semibold">{record.display_name}</h2>
         {record.enabled ? (
-          <span className="text-xs text-green-500">{t("reseller.enabled")}</span>
+          <span className="text-xs text-success">{t("reseller.enabled")}</span>
         ) : (
-          <span className="text-xs text-zinc-500">{t("reseller.disabled")}</span>
+          <span className="text-xs text-muted-foreground">{t("reseller.disabled")}</span>
         )}
       </div>
 
-      <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
+      <section className="rounded border border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">{t("reseller.account")}</h3>
         <dl className="grid grid-cols-2 gap-2 text-sm">
-          <dt className="text-xs text-zinc-400">{t("reseller.balance")}</dt>
-          <dd className={funded ? "font-mono text-green-400" : "font-mono text-amber-400"}>
+          <dt className="text-xs text-muted-foreground">{t("reseller.balance")}</dt>
+          <dd className={funded ? "font-mono text-success" : "font-mono text-warning"}>
             {balance.data === undefined ? "—" : formatNumber(balance.data.balance)}
           </dd>
-          <dt className="text-xs text-zinc-400">{t("reseller.creditFloor")}</dt>
+          <dt className="text-xs text-muted-foreground">{t("reseller.creditFloor")}</dt>
           <dd className="font-mono">{formatNumber(record.credit_floor)}</dd>
-          <dt className="text-xs text-zinc-400">{t("reseller.maxSubjects")}</dt>
+          <dt className="text-xs text-muted-foreground">{t("reseller.maxSubjects")}</dt>
           <dd>
             <Limit value={record.max_subjects} />
           </dd>
-          <dt className="text-xs text-zinc-400">{t("reseller.maxQuota")}</dt>
+          <dt className="text-xs text-muted-foreground">{t("reseller.maxQuota")}</dt>
           <dd>
             <Limit value={record.max_quota_bytes} />
           </dd>
-          <dt className="text-xs text-zinc-400">{t("reseller.adminId")}</dt>
+          <dt className="text-xs text-muted-foreground">{t("reseller.adminId")}</dt>
           <dd className="font-mono">{formatNumber(record.admin_id)}</dd>
-          <dt className="text-xs text-zinc-400">{t("reseller.updated")}</dt>
-          <dd className="font-mono text-xs text-zinc-500">
+          <dt className="text-xs text-muted-foreground">{t("reseller.updated")}</dt>
+          <dd className="font-mono text-xs text-muted-foreground">
             {formatTimestamp(record.updated_at)}
           </dd>
         </dl>
         {!funded && balance.data !== undefined && (
-          <p className="mt-3 text-xs text-amber-400" role="status">
+          <p className="mt-3 text-xs text-warning" role="status">
             {t("reseller.atFloorWarning")}
           </p>
         )}
@@ -175,11 +175,11 @@ function SettingsForm({ record }: { record: Reseller }) {
   });
 
   return (
-    <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
+    <section className="rounded border border-border bg-card p-4">
       <h3 className="mb-3 text-sm font-semibold">{t("reseller.settings")}</h3>
       <div className="space-y-3">
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="edit-display-name">
+          <label className="block text-xs text-muted-foreground" htmlFor="edit-display-name">
             {t("reseller.displayName")}
           </label>
           <input
@@ -187,11 +187,11 @@ function SettingsForm({ record }: { record: Reseller }) {
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
         </div>
 
-        <label className="flex items-center gap-2 text-xs text-zinc-300">
+        <label className="flex items-center gap-2 text-xs text-foreground">
           <input
             type="checkbox"
             checked={enabled}
@@ -201,7 +201,7 @@ function SettingsForm({ record }: { record: Reseller }) {
         </label>
 
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="edit-credit-floor">
+          <label className="block text-xs text-muted-foreground" htmlFor="edit-credit-floor">
             {t("reseller.creditFloor")}
           </label>
           <input
@@ -209,9 +209,9 @@ function SettingsForm({ record }: { record: Reseller }) {
             type="number"
             value={creditFloor}
             onChange={(e) => setCreditFloor(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
-          <p className="mt-1 text-xs text-zinc-500">{t("reseller.creditFloorHint")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("reseller.creditFloorHint")}</p>
         </div>
 
         <LimitField
@@ -236,12 +236,12 @@ function SettingsForm({ record }: { record: Reseller }) {
           type="button"
           onClick={() => save.mutate()}
           disabled={!displayName || save.isPending}
-          className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90 disabled:opacity-50"
         >
           {t("save")}
         </button>
         {save.isSuccess && !save.isPending && (
-          <span className="ms-2 text-xs text-green-500" role="status">
+          <span className="ms-2 text-xs text-success" role="status">
             {t("common.saved")}
           </span>
         )}
@@ -274,7 +274,7 @@ function LimitField({
 }) {
   return (
     <div>
-      <label className="block text-xs text-zinc-400" htmlFor={id}>
+      <label className="block text-xs text-muted-foreground" htmlFor={id}>
         {label}
       </label>
       <div className="flex items-center gap-2">
@@ -285,9 +285,9 @@ function LimitField({
           value={value}
           disabled={unlimited}
           onChange={(e) => onValue(e.target.value)}
-          className="w-40 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm disabled:opacity-40"
+          className="w-40 rounded border border-input bg-background px-2 py-1 text-sm disabled:opacity-40"
         />
-        <label className="flex items-center gap-1 text-xs text-zinc-300">
+        <label className="flex items-center gap-1 text-xs text-foreground">
           <input
             type="checkbox"
             checked={unlimited}
@@ -296,7 +296,7 @@ function LimitField({
           {t("reseller.unlimited")}
         </label>
       </div>
-      <p className="mt-1 text-xs text-zinc-500">{t("reseller.zeroIsNotUnlimited")}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{t("reseller.zeroIsNotUnlimited")}</p>
     </div>
   );
 }
@@ -332,11 +332,11 @@ function GrantCreditForm({ resellerID }: { resellerID: number }) {
   });
 
   return (
-    <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
+    <section className="rounded border border-border bg-card p-4">
       <h3 className="mb-3 text-sm font-semibold">{t("reseller.grantCredit")}</h3>
       <div className="space-y-3">
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="grant-delta">
+          <label className="block text-xs text-muted-foreground" htmlFor="grant-delta">
             {t("reseller.amount")}
           </label>
           <input
@@ -344,12 +344,12 @@ function GrantCreditForm({ resellerID }: { resellerID: number }) {
             type="number"
             value={delta}
             onChange={(e) => setDelta(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
-          <p className="mt-1 text-xs text-zinc-500">{t("reseller.amountHint")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("reseller.amountHint")}</p>
         </div>
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="grant-note">
+          <label className="block text-xs text-muted-foreground" htmlFor="grant-note">
             {t("reseller.note")}
           </label>
           <input
@@ -357,12 +357,12 @@ function GrantCreditForm({ resellerID }: { resellerID: number }) {
             type="text"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
         </div>
         <MutationError error={grant.error} />
         {grant.isSuccess && (
-          <p className="text-xs text-green-500" role="status">
+          <p className="text-xs text-success" role="status">
             {t("reseller.granted")}
           </p>
         )}
@@ -370,7 +370,7 @@ function GrantCreditForm({ resellerID }: { resellerID: number }) {
           type="button"
           onClick={() => grant.mutate()}
           disabled={!delta || Number(delta) === 0 || grant.isPending}
-          className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90 disabled:opacity-50"
         >
           {t("reseller.grant")}
         </button>
@@ -420,11 +420,11 @@ function ProvisionForm({ resellerID }: { resellerID: number }) {
   });
 
   return (
-    <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
+    <section className="rounded border border-border bg-card p-4">
       <h3 className="mb-3 text-sm font-semibold">{t("reseller.provision")}</h3>
       <div className="space-y-3">
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="provision-name">
+          <label className="block text-xs text-muted-foreground" htmlFor="provision-name">
             {t("subject.name")}
           </label>
           <input
@@ -432,11 +432,11 @@ function ProvisionForm({ resellerID }: { resellerID: number }) {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="provision-cost">
+          <label className="block text-xs text-muted-foreground" htmlFor="provision-cost">
             {t("reseller.cost")}
           </label>
           <input
@@ -445,12 +445,12 @@ function ProvisionForm({ resellerID }: { resellerID: number }) {
             min="0"
             value={cost}
             onChange={(e) => setCost(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
-          <p className="mt-1 text-xs text-zinc-500">{t("reseller.costHint")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("reseller.costHint")}</p>
         </div>
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="provision-quota">
+          <label className="block text-xs text-muted-foreground" htmlFor="provision-quota">
             {t("reseller.quotaBytes")}
           </label>
           <input
@@ -459,13 +459,13 @@ function ProvisionForm({ resellerID }: { resellerID: number }) {
             min="0"
             value={quota}
             onChange={(e) => setQuota(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
-          <p className="mt-1 text-xs text-zinc-500">{t("reseller.quotaHint")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("reseller.quotaHint")}</p>
         </div>
         <MutationError error={provision.error} />
         {provision.isSuccess && (
-          <p className="text-xs text-green-500" role="status">
+          <p className="text-xs text-success" role="status">
             {t("reseller.provisioned")}
           </p>
         )}
@@ -473,7 +473,7 @@ function ProvisionForm({ resellerID }: { resellerID: number }) {
           type="button"
           onClick={() => provision.mutate()}
           disabled={!name || provision.isPending}
-          className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90 disabled:opacity-50"
         >
           {t("reseller.provisionAction")}
         </button>
@@ -495,7 +495,7 @@ function Ledger({ resellerID }: { resellerID: number }) {
   });
 
   return (
-    <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
+    <section className="rounded border border-border bg-card p-4">
       <h3 className="mb-3 text-sm font-semibold">{t("reseller.ledger")}</h3>
       {ledger.isError && <MutationError error={ledger.error} />}
       {ledger.data !== undefined && <MovementsTable movements={ledger.data.movements} />}
@@ -532,16 +532,16 @@ function DangerZone({ record }: { record: Reseller }) {
   });
 
   return (
-    <section className="rounded border border-red-900 bg-zinc-900 p-4">
-      <h3 className="mb-1 text-sm font-semibold text-red-400">{t("reseller.dangerZone")}</h3>
-      <p className="mb-3 text-xs text-zinc-400">{t("reseller.deleteExplain")}</p>
+    <section className="rounded border border-destructive/40 bg-card p-4">
+      <h3 className="mb-1 text-sm font-semibold text-destructive">{t("reseller.dangerZone")}</h3>
+      <p className="mb-3 text-xs text-muted-foreground">{t("reseller.deleteExplain")}</p>
       <div className="flex gap-2">
         {record.enabled && (
           <button
             type="button"
             onClick={() => deactivate.mutate()}
             disabled={deactivate.isPending}
-            className="rounded bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700 disabled:opacity-50"
+            className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80 disabled:opacity-50"
           >
             {t("reseller.deactivate")}
           </button>
@@ -550,7 +550,7 @@ function DangerZone({ record }: { record: Reseller }) {
           type="button"
           onClick={() => setConfirmingDelete(true)}
           disabled={remove.isPending}
-          className="rounded bg-red-700 px-3 py-1 text-sm hover:bg-red-600 disabled:opacity-50"
+          className="rounded bg-destructive px-3 py-1 text-sm hover:bg-destructive/90 disabled:opacity-50"
         >
           {t("delete")}
         </button>

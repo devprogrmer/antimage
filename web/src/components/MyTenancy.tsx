@@ -46,10 +46,10 @@ export function MyTenancy() {
   const atFloor = record.balance <= record.credit_floor;
 
   return (
-    <section className="rounded border border-zinc-800 bg-zinc-900 p-4">
+    <section className="rounded border border-border bg-card p-4">
       <h2 className="mb-3 text-sm font-semibold">{t("tenancy.title")}</h2>
 
-      <div className="mb-3 flex gap-3 border-b border-zinc-800 text-xs" role="tablist">
+      <div className="mb-3 flex gap-3 border-b border-border text-xs" role="tablist">
         {(["overview", "ledger"] as const).map((name) => (
           <button
             key={name}
@@ -59,8 +59,8 @@ export function MyTenancy() {
             onClick={() => setTab(name)}
             className={
               tab === name
-                ? "border-b border-zinc-100 pb-1 text-zinc-100"
-                : "pb-1 text-zinc-400 hover:text-zinc-100"
+                ? "border-b border-foreground pb-1 text-foreground"
+                : "pb-1 text-muted-foreground hover:text-foreground"
             }
           >
             {name === "overview" ? t("tenancy.overview") : t("reseller.ledger")}
@@ -77,30 +77,30 @@ function Overview({ record, atFloor }: { record: MyTenancy; atFloor: boolean }) 
   return (
     <>
       <dl className="grid grid-cols-2 gap-2 text-sm">
-        <dt className="text-xs text-zinc-400">{t("reseller.displayName")}</dt>
+        <dt className="text-xs text-muted-foreground">{t("reseller.displayName")}</dt>
         <dd className="font-mono">{record.display_name}</dd>
-        <dt className="text-xs text-zinc-400">{t("reseller.status")}</dt>
+        <dt className="text-xs text-muted-foreground">{t("reseller.status")}</dt>
         <dd>
           {record.enabled ? (
-            <span className="text-green-500">{t("reseller.enabled")}</span>
+            <span className="text-success">{t("reseller.enabled")}</span>
           ) : (
-            <span className="text-zinc-500">{t("reseller.disabled")}</span>
+            <span className="text-muted-foreground">{t("reseller.disabled")}</span>
           )}
         </dd>
-        <dt className="text-xs text-zinc-400">{t("reseller.balance")}</dt>
-        <dd className={atFloor ? "font-mono text-amber-400" : "font-mono text-green-400"}>
+        <dt className="text-xs text-muted-foreground">{t("reseller.balance")}</dt>
+        <dd className={atFloor ? "font-mono text-warning" : "font-mono text-success"}>
           {formatNumber(record.balance)}
         </dd>
-        <dt className="text-xs text-zinc-400">{t("reseller.creditFloor")}</dt>
+        <dt className="text-xs text-muted-foreground">{t("reseller.creditFloor")}</dt>
         <dd className="font-mono">{formatNumber(record.credit_floor)}</dd>
       </dl>
       {atFloor && (
-        <p className="mt-3 text-xs text-amber-400" role="status">
+        <p className="mt-3 text-xs text-warning" role="status">
           {t("tenancy.atFloor")}
         </p>
       )}
       {!record.enabled && (
-        <p className="mt-3 text-xs text-amber-400" role="status">
+        <p className="mt-3 text-xs text-warning" role="status">
           {t("tenancy.deactivated")}
         </p>
       )}
@@ -129,11 +129,11 @@ function MyLedger() {
     const message =
       ledger.error instanceof ApiError ? ledger.error.message : String(ledger.error);
     return (
-      <p className="text-xs text-red-400" role="alert">
+      <p className="text-xs text-destructive" role="alert">
         {message}
       </p>
     );
   }
-  if (!ledger.data) return <p className="text-sm text-zinc-500">{t("common.loading")}</p>;
+  if (!ledger.data) return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
   return <MovementsTable movements={ledger.data.movements} />;
 }
