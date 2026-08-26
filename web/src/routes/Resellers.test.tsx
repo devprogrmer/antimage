@@ -6,7 +6,8 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { can } from "../lib/session";
 import type { Session } from "../lib/session";
-import { Resellers } from "./Resellers";
+import { Resellers, MutationError } from "./Resellers";
+import { ApiError } from "../lib/api";
 import { ResellerDetail } from "./ResellerDetail";
 import { MyTenancy } from "../components/MyTenancy";
 import { setLocale } from "../i18n";
@@ -374,5 +375,24 @@ describe("tenant self-service", () => {
 
     renderWithQuery(<MyTenancy />);
     expect((await screen.findByRole("status")).textContent).toContain("credit floor");
+  });
+});
+
+// Phase B: a failed action has to give the operator something to quote.
+describe("MutationError", () => {
+  it("shows the request id the server reported", () => {
+    render(<MutationError error={new ApiError(500, "internal", "it broke", "abc123")} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("it broke");
+    expect(screen.getByRole("alert")).toHaveTextContent("abc123");
+  });
+
+  it("shows only the message when there is no id", () => {
+    // No id means the failure happened before the middleware ran -- a network
+    // error, or a proxy in between. An empty "Reference:" label would suggest
+    // an id that failed to generate.
+    render(<MutationError error={new ApiError(0, "network", "offline")} />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("offline");
+    expect(alert.textContent).not.toMatch(/Reference/);
   });
 });

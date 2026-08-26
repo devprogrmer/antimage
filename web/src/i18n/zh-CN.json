@@ -305,6 +305,7 @@
   "command.placeholder": "搜索或跳转…",
   "command.empty": "没有匹配项。",
   "command.navigation": "前往",
+  "error.requestId": "追踪编号",
   "subjects.none": "暂无用户。",
   "reseller.none": "暂无租户。"
 }

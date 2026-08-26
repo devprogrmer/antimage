@@ -305,6 +305,7 @@
   "command.placeholder": "Найти или перейти…",
   "command.empty": "Ничего не найдено.",
   "command.navigation": "Перейти к",
+  "error.requestId": "Код обращения",
   "subjects.none": "Пользователей пока нет.",
   "reseller.none": "Арендаторов пока нет."
 }
