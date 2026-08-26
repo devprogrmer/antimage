@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { formatNumber, formatTimestamp, t } from "../i18n";
 import { StatusBadge, type NodeStatus } from "../components/StatusBadge";
 import { EgressPanel } from "../components/EgressPanel";
+import { DeploymentPanel } from "../components/DeploymentPanel";
 import { InboundStudio } from "../components/InboundStudio";
 
 interface NodeDetailData {
@@ -83,6 +84,11 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
 
 
       <EgressPanel nodeId={nodeId} />
+
+      <DeploymentPanel
+        nodeId={nodeId}
+        targetRevision={node.data.desired_revision}
+      />
 
       <section>
         <h3 className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">

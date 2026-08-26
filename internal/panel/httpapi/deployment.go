@@ -223,6 +223,7 @@ func (d Deps) handleDeploymentGet(w http.ResponseWriter, r *http.Request) {
 
 	var dep struct {
 		ID          int64  `json:"id"`
+		NodeID      int64  `json:"node_id"`
 		RevisionID  int64  `json:"revision_id"`
 		Strategy    string `json:"strategy"`
 		Status      string `json:"status"`
@@ -234,10 +235,10 @@ func (d Deps) handleDeploymentGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = d.Store.Read().QueryRowContext(r.Context(),
-		`SELECT id, revision_id, strategy, status, created_by, created_at, started_at, completed_at, error
+		`SELECT id, node_id, revision_id, strategy, status, created_by, created_at, started_at, completed_at, error
 		 FROM deployments WHERE id = ?`,
 		deploymentID,
-	).Scan(&dep.ID, &dep.RevisionID, &dep.Strategy, &dep.Status, &dep.CreatedBy, &dep.CreatedAt, &dep.StartedAt, &dep.CompletedAt, &dep.Error)
+	).Scan(&dep.ID, &dep.NodeID, &dep.RevisionID, &dep.Strategy, &dep.Status, &dep.CreatedBy, &dep.CreatedAt, &dep.StartedAt, &dep.CompletedAt, &dep.Error)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "get deployment", "error", err, "deployment_id", deploymentID)
 		http.Error(w, "deployment not found", http.StatusNotFound)
@@ -304,7 +305,7 @@ func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
 	// -- is dropped by the join rather than shown to everyone, which is the
 	// fail-closed direction for a row nobody can attribute.
 	rows, err := d.Store.Read().QueryContext(r.Context(),
-		`SELECT d.id, d.revision_id, d.strategy, d.status, d.created_by,
+		`SELECT d.id, d.node_id, d.revision_id, d.strategy, d.status, d.created_by,
 		        d.created_at, d.started_at, d.completed_at, d.error
 		   FROM deployments d
 		   JOIN nodes ON nodes.id = d.node_id
@@ -320,6 +321,7 @@ func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
 
 	type deploymentRow struct {
 		ID          int64  `json:"id"`
+		NodeID      int64  `json:"node_id"`
 		RevisionID  int64  `json:"revision_id"`
 		Strategy    string `json:"strategy"`
 		Status      string `json:"status"`
@@ -333,7 +335,7 @@ func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
 	var deployments []deploymentRow
 	for rows.Next() {
 		var d deploymentRow
-		if err := rows.Scan(&d.ID, &d.RevisionID, &d.Strategy, &d.Status, &d.CreatedBy, &d.CreatedAt, &d.StartedAt, &d.CompletedAt, &d.Error); err != nil {
+		if err := rows.Scan(&d.ID, &d.NodeID, &d.RevisionID, &d.Strategy, &d.Status, &d.CreatedBy, &d.CreatedAt, &d.StartedAt, &d.CompletedAt, &d.Error); err != nil {
 			slog.ErrorContext(r.Context(), "scan deployment", "error", err)
 			continue
 		}
