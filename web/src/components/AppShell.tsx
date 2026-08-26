@@ -6,6 +6,7 @@ import {
   Building2,
   Activity,
   ScrollText,
+  BookMarked,
   UserCircle,
   Monitor,
   Moon,
@@ -50,6 +51,7 @@ const NAV: NavItem[] = [
   { to: "/resellers", label: "nav.resellers", icon: Building2, permission: "reseller:read" },
   { to: "/observability", label: "observability.title", icon: Activity },
   { to: "/audit", label: "nav.audit", icon: ScrollText, permission: "audit:read" },
+  { to: "/templates", label: "templates.title", icon: BookMarked },
   { to: "/profile", label: "nav.profile", icon: UserCircle },
 ];
 

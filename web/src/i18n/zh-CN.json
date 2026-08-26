@@ -363,5 +363,17 @@
   "audit.before": "变更前",
   "audit.after": "变更后",
   "audit.none": "没有匹配的记录。",
-  "filters.clear": "清除"
+  "filters.clear": "清除",
+  "templates.title": "模板",
+  "templates.services": "服务模板",
+  "templates.presets": "用户预设",
+  "templates.newService": "新建模板",
+  "templates.name": "名称",
+  "templates.description": "说明",
+  "templates.public": "共享",
+  "templates.validity": "有效期（天）",
+  "templates.noServices": "暂无服务模板。",
+  "templates.noPresets": "暂无用户预设。",
+  "templates.confirmDelete": "要删除此模板吗？",
+  "templates.confirmDeletePreset": "要删除此预设吗？"
 }

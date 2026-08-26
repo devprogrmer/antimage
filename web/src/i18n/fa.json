@@ -363,5 +363,17 @@
   "audit.before": "پیش از",
   "audit.after": "پس از",
   "audit.none": "هیچ رکوردی مطابقت ندارد.",
-  "filters.clear": "پاک کردن"
+  "filters.clear": "پاک کردن",
+  "templates.title": "الگوها",
+  "templates.services": "الگوهای سرویس",
+  "templates.presets": "پیش‌تنظیم‌های کاربر",
+  "templates.newService": "الگوی تازه",
+  "templates.name": "نام",
+  "templates.description": "توضیح",
+  "templates.public": "اشتراکی",
+  "templates.validity": "اعتبار (روز)",
+  "templates.noServices": "هنوز الگوی سرویسی نیست.",
+  "templates.noPresets": "هنوز پیش‌تنظیمی نیست.",
+  "templates.confirmDelete": "این الگو حذف شود؟",
+  "templates.confirmDeletePreset": "این پیش‌تنظیم حذف شود؟"
 }

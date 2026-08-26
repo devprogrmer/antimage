@@ -363,5 +363,17 @@
   "audit.before": "قبل",
   "audit.after": "بعد",
   "audit.none": "لا توجد سجلات مطابقة.",
-  "filters.clear": "مسح"
+  "filters.clear": "مسح",
+  "templates.title": "القوالب",
+  "templates.services": "قوالب الخدمات",
+  "templates.presets": "إعدادات المستخدم",
+  "templates.newService": "قالب جديد",
+  "templates.name": "الاسم",
+  "templates.description": "الوصف",
+  "templates.public": "مشترك",
+  "templates.validity": "الصلاحية (أيام)",
+  "templates.noServices": "لا توجد قوالب خدمات بعد.",
+  "templates.noPresets": "لا توجد إعدادات مسبقة بعد.",
+  "templates.confirmDelete": "هل تريد حذف هذا القالب؟",
+  "templates.confirmDeletePreset": "هل تريد حذف هذا الإعداد؟"
 }
