@@ -5,6 +5,7 @@ import {
   Users,
   Building2,
   Activity,
+  ScrollText,
   UserCircle,
   Monitor,
   Moon,
@@ -48,6 +49,7 @@ const NAV: NavItem[] = [
   // regardless. A tenant reaches their own account through Profile instead.
   { to: "/resellers", label: "nav.resellers", icon: Building2, permission: "reseller:read" },
   { to: "/observability", label: "observability.title", icon: Activity },
+  { to: "/audit", label: "nav.audit", icon: ScrollText, permission: "audit:read" },
   { to: "/profile", label: "nav.profile", icon: UserCircle },
 ];
 

@@ -348,5 +348,20 @@
   "node.confirmRestart": "Restart this node?",
   "node.confirmMaintenance": "Put this node into maintenance?",
   "node.syncEffect": "The node re-applies its desired document. Sessions are not dropped.",
-  "node.restartEffect": "The node restarts and active sessions drop."
+  "node.restartEffect": "The node restarts and active sessions drop.",
+  "session.title": "Active sessions",
+  "session.ip": "IP",
+  "session.device": "Device",
+  "session.lastUsed": "Last used",
+  "session.current": "This device",
+  "session.revoke": "Revoke",
+  "session.confirmRevoke": "Sign this session out?",
+  "audit.action": "Action",
+  "audit.actor": "Actor",
+  "audit.result": "Result",
+  "audit.search": "Search",
+  "audit.before": "Before",
+  "audit.after": "After",
+  "audit.none": "No entries match.",
+  "filters.clear": "Clear"
 }

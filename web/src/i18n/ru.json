@@ -348,5 +348,20 @@
   "node.confirmRestart": "Перезапустить этот узел?",
   "node.confirmMaintenance": "Перевести узел в обслуживание?",
   "node.syncEffect": "Узел заново применит желаемый документ. Сессии не обрываются.",
-  "node.restartEffect": "Узел перезапустится, активные сессии оборвутся."
+  "node.restartEffect": "Узел перезапустится, активные сессии оборвутся.",
+  "session.title": "Активные сеансы",
+  "session.ip": "IP-адрес",
+  "session.device": "Устройство",
+  "session.lastUsed": "Последнее использование",
+  "session.current": "Это устройство",
+  "session.revoke": "Отозвать",
+  "session.confirmRevoke": "Завершить этот сеанс?",
+  "audit.action": "Действие",
+  "audit.actor": "Субъект",
+  "audit.result": "Результат",
+  "audit.search": "Искать",
+  "audit.before": "До",
+  "audit.after": "После",
+  "audit.none": "Ничего не найдено.",
+  "filters.clear": "Очистить"
 }

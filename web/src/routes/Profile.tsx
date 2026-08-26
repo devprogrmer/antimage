@@ -1,4 +1,5 @@
 import { MyTenancy } from "../components/MyTenancy";
+import { SessionList } from "../components/SessionList";
 import { TelegramLink } from "../components/TelegramLink";
 import { t } from "../i18n";
 
@@ -13,6 +14,7 @@ export function Profile() {
   return (
     <div className="space-y-4">
       <h1 className="text-sm font-semibold text-foreground">{t("profile.title")}</h1>
+      <SessionList />
       <div className="max-w-xl space-y-4">
         <MyTenancy />
         <TelegramLink />

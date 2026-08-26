@@ -1,8 +1,12 @@
 package httpapi
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -314,5 +318,148 @@ func TestCreateNodeValidationRejectionIsAudited(t *testing.T) {
 	_ = env.store.Read().QueryRow(`SELECT count(*) FROM nodes`).Scan(&nodes)
 	if nodes != 0 {
 		t.Errorf("nodes = %d, want 0", nodes)
+	}
+}
+
+// audit_log has carried before_json and after_json since SP1 and the query
+// never selected them, so "what actually changed" was written down and
+// unreadable. These cover surfacing them, and the filters that make a log of
+// 500 rows usable.
+
+func auditEntries(t *testing.T, env *testEnv, token, query string) []map[string]any {
+	t.Helper()
+	res := env.get(t, "/api/v1/audit"+query, token)
+	if res.Code != http.StatusOK {
+		t.Fatalf("audit%s = %d: %s", query, res.Code, res.Body)
+	}
+	var out struct {
+		Entries []map[string]any `json:"entries"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return out.Entries
+}
+
+func TestAuditReturnsTheRecordedBeforeAndAfter(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "root", "pw", "super_admin")
+	token := env.login(t, "root", "pw")
+
+	if err := env.store.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO audit_log (at, actor_type, actor_admin_id, action, target_type,
+			                        before_json, after_json, result)
+			 VALUES (1000, 'admin', 1, 'subject.update', 'subject',
+			         '{"quota_bytes":100}', '{"quota_bytes":200}', 'ok')`)
+		return err
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	entries := auditEntries(t, env, token, "")
+	var found map[string]any
+	for _, e := range entries {
+		if e["action"] == "subject.update" {
+			found = e
+		}
+	}
+	if found == nil {
+		t.Fatal("seeded entry not returned")
+	}
+	if found["before"] == nil || found["after"] == nil {
+		t.Errorf("entry = %v; before and after were recorded and are not returned, "+
+			"so the log says an action happened and not what it changed", found)
+	}
+}
+
+// An action with no recorded before-state is different from one whose
+// before-state was the JSON literal null.
+func TestAuditOmitsAnAbsentPayloadRatherThanSendingNull(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "root", "pw", "super_admin")
+	token := env.login(t, "root", "pw")
+
+	res := env.get(t, "/api/v1/audit", token)
+	if res.Code != http.StatusOK {
+		t.Fatalf("audit = %d", res.Code)
+	}
+	// The login above records an entry with no before-state.
+	if strings.Contains(res.Body.String(), `"before":null`) {
+		t.Errorf("an absent payload was sent as null: %s", res.Body)
+	}
+}
+
+func TestAuditFiltersByAction(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "root", "pw", "super_admin")
+	token := env.login(t, "root", "pw")
+
+	if err := env.store.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO audit_log (at, actor_type, actor_admin_id, action, result)
+			 VALUES (1000, 'admin', 1, 'node.delete', 'ok'),
+			        (1001, 'admin', 1, 'subject.create', 'ok')`)
+		return err
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	entries := auditEntries(t, env, token, "?action=node.delete")
+	if len(entries) != 1 || entries[0]["action"] != "node.delete" {
+		t.Errorf("filtered to %d entries: %v", len(entries), entries)
+	}
+}
+
+func TestAuditFiltersByRequestID(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "root", "pw", "super_admin")
+	token := env.login(t, "root", "pw")
+
+	if err := env.store.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO audit_log (at, actor_type, actor_admin_id, action, request_id, result)
+			 VALUES (1000, 'admin', 1, 'node.delete', 'abc123', 'ok'),
+			        (1001, 'admin', 1, 'node.delete', 'zzz999', 'ok')`)
+		return err
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// The id an operator quotes off a failure screen, which is the whole
+	// reason WriteError returns it.
+	entries := auditEntries(t, env, token, "?request_id=abc123")
+	if len(entries) != 1 || entries[0]["request_id"] != "abc123" {
+		t.Errorf("filtered to %v", entries)
+	}
+}
+
+// A filter assembled by string concatenation is a search whose results can be
+// rewritten by whoever types into it -- the one thing an audit log must not
+// allow.
+func TestAuditFilterIsNotInjectable(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t, "root", "pw", "super_admin")
+	token := env.login(t, "root", "pw")
+
+	if err := env.store.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(
+			`INSERT INTO audit_log (at, actor_type, actor_admin_id, action, result)
+			 VALUES (1000, 'admin', 1, 'node.delete', 'ok')`)
+		return err
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Matches nothing if bound, matches everything if interpolated.
+	entries := auditEntries(t, env, token, "?action="+url.QueryEscape("x' OR '1'='1"))
+	if len(entries) != 0 {
+		t.Errorf("an injected predicate returned %d entries; the filter is being "+
+			"concatenated into the SQL", len(entries))
+	}
+
+	// And the table is still there afterwards.
+	if got := auditEntries(t, env, token, "?action=node.delete"); len(got) != 1 {
+		t.Errorf("the log is not intact after the attempt: %v", got)
 	}
 }

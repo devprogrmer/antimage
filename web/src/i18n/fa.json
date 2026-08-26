@@ -348,5 +348,20 @@
   "node.confirmRestart": "این گره دوباره راه‌اندازی شود؟",
   "node.confirmMaintenance": "این گره به حالت تعمیرات برود؟",
   "node.syncEffect": "گره سند مطلوب خود را دوباره اعمال می‌کند. نشست‌ها قطع نمی‌شوند.",
-  "node.restartEffect": "گره دوباره راه‌اندازی می‌شود و نشست‌های فعال قطع می‌شوند."
+  "node.restartEffect": "گره دوباره راه‌اندازی می‌شود و نشست‌های فعال قطع می‌شوند.",
+  "session.title": "نشست‌های فعال",
+  "session.ip": "نشانی آی‌پی",
+  "session.device": "دستگاه",
+  "session.lastUsed": "آخرین استفاده",
+  "session.current": "همین دستگاه",
+  "session.revoke": "ابطال",
+  "session.confirmRevoke": "این نشست خارج شود؟",
+  "audit.action": "کنش",
+  "audit.actor": "کنشگر",
+  "audit.result": "نتیجه",
+  "audit.search": "جست‌وجو",
+  "audit.before": "پیش از",
+  "audit.after": "پس از",
+  "audit.none": "هیچ رکوردی مطابقت ندارد.",
+  "filters.clear": "پاک کردن"
 }
