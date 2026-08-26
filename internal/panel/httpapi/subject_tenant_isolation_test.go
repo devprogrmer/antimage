@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 )
@@ -154,7 +153,10 @@ func TestAPIForeignSubjectIsNotFoundNotForbidden(t *testing.T) {
 			"for the existence of another tenant's customers",
 			foreign.Code, missing.Code)
 	}
-	if strings.TrimSpace(foreign.Body.String()) != strings.TrimSpace(missing.Body.String()) {
+	// Compared without the per-request id, which differs by design and says
+	// nothing about whether the subject exists. Everything else must match.
+	if indistinguishableError(t, foreign.Body.Bytes()) !=
+		indistinguishableError(t, missing.Body.Bytes()) {
 		t.Errorf("response bodies differ:\n foreign: %s\n missing: %s",
 			foreign.Body.String(), missing.Body.String())
 	}

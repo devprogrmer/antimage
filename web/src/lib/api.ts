@@ -4,11 +4,21 @@
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /**
+   * The id the server stamped on this request.
+   *
+   * It is the same id on the audit row and in the server log, so it is the one
+   * thing an operator can quote that lets somebody else find what happened.
+   * Empty when the server did not send one, which means the failure happened
+   * before the middleware ran -- a network error, or a proxy in between.
+   */
+  readonly requestID: string;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, requestID = "") {
     super(message);
     this.status = status;
     this.code = code;
+    this.requestID = requestID;
   }
 }
 
@@ -24,8 +34,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const err = (payload as { error?: { code: string; message: string } }).error;
-    throw new ApiError(response.status, err?.code ?? "unknown", err?.message ?? "request failed");
+    const err = (payload as {
+      error?: { code: string; message: string; request_id?: string };
+    }).error;
+    // Falls back to the header, which the middleware sets even on a response
+    // whose body never made it through an intermediary.
+    const requestID = err?.request_id ?? response.headers.get("X-Request-ID") ?? "";
+    throw new ApiError(
+      response.status,
+      err?.code ?? "unknown",
+      err?.message ?? "request failed",
+      requestID,
+    );
   }
   return payload as T;
 }
