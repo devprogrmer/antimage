@@ -143,9 +143,19 @@ message UsageReport {
   repeated UsageSample samples = 3;
 }
 
-// UsageSample is one subject's traffic delta since the last report.
+// UsageSample is one subject's traffic delta on one service since the last
+// report.
 message UsageSample {
   int64 subject_id = 1;
   uint64 uplink_bytes = 2;
   uint64 downlink_bytes = 3;
+  // Which service the traffic went through, when the adapter can attribute it
+  // (C2). Zero means "not attributed", which the panel stores as NULL rather
+  // than guessing: a node running one adapter that cannot attribute, or an
+  // agent older than this field, both send zero and must keep accounting.
+  //
+  // Deliberately not optional. Proto3 scalar presence would distinguish "the
+  // agent said zero" from "the agent said nothing", and there is nothing the
+  // panel would do differently: both mean the same NULL.
+  int64 service_id = 4;
 }

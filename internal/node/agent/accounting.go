@@ -49,6 +49,29 @@ func (c *Client) AccountingLoop(ctx context.Context, stream antimagev1.Control_S
 	}
 }
 
+// protoSamplesFrom puts adapter samples on the wire.
+//
+// A function rather than a loop inside pollAndReport so it can be tested
+// without a stream. That is not cosmetic: this is the hop where C2's
+// attribution is easiest to lose -- dropping ServiceID here would silently NULL
+// every attribution on the platform while the adapter still computed it
+// correctly and the panel still stored whatever it was given.
+func protoSamplesFrom(samples []adapter.UsageSample) []*antimagev1.UsageSample {
+	out := make([]*antimagev1.UsageSample, len(samples))
+	for i, s := range samples {
+		out[i] = &antimagev1.UsageSample{
+			SubjectId: s.SubjectID,
+			// Zero when the adapter could not attribute the traffic; the panel
+			// stores that as NULL. Carried verbatim rather than defaulted to
+			// anything, because the agent knows less than the adapter did.
+			ServiceId:     s.ServiceID,
+			UplinkBytes:   s.UplinkBytes,
+			DownlinkBytes: s.DownlinkBytes,
+		}
+	}
+	return out
+}
+
 func (c *Client) pollAndReport(ctx context.Context, stream antimagev1.Control_StreamClient) error {
 	// Poll EVERY adapter that accounts for its own traffic.
 	//
@@ -79,14 +102,7 @@ func (c *Client) pollAndReport(ctx context.Context, stream antimagev1.Control_St
 	}
 
 	// Convert to protobuf samples.
-	protoSamples := make([]*antimagev1.UsageSample, len(samples))
-	for i, s := range samples {
-		protoSamples[i] = &antimagev1.UsageSample{
-			SubjectId:     s.SubjectID,
-			UplinkBytes:   s.UplinkBytes,
-			DownlinkBytes: s.DownlinkBytes,
-		}
-	}
+	protoSamples := protoSamplesFrom(samples)
 
 	// Add new samples to pending.
 	state.Pending = append(state.Pending, protoSamples...)

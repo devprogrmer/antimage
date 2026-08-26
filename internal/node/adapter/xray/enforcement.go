@@ -77,8 +77,10 @@ func (ct *ConnectionTracker) handleNewConnection(ctx context.Context, inboundTag
 		return nil // Enforcement disabled
 	}
 
-	// Extract subject ID from email (format: subject-123@antimage)
-	subjectID, err := parseSubjectEmail(email)
+	// Extract subject ID from the tag. Enforcement is per person, not per
+	// inbound -- a device limit counts a subject's connections across every
+	// service -- so the service id the tag now also carries is discarded here.
+	subjectID, _, err := parseSubjectEmail(email)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to parse subject email",
 			"email", email, "error", err)

@@ -248,23 +248,38 @@ func TestConnectionTracker(t *testing.T) {
 
 func TestParseSubjectEmail(t *testing.T) {
 	tests := []struct {
-		email     string
-		wantID    int64
-		wantError bool
+		email       string
+		wantID      int64
+		wantService int64
+		wantError   bool
 	}{
-		{"subject-1@antimage", 1, false},
-		{"subject-123@antimage", 123, false},
-		{"subject-999@antimage", 999, false},
-		{"invalid@antimage", 0, true},
-		{"subject-@antimage", 0, true},
-		{"subject-abc@antimage", 0, true},
-		{"no-at-sign", 0, true},
-		{"", 0, true},
+		// The C2 form carries both ids.
+		{"subject-1.svc-7@antimage", 1, 7, false},
+		{"subject-123.svc-4560@antimage", 123, 4560, false},
+
+		// The legacy form still parses, with no service. An agent upgrade does
+		// not rewrite Xray's config, so between the upgrade and the next
+		// convergence the running process is still counting against these
+		// tags. Rejecting them would throw away real traffic for the sake of a
+		// format, and unattributed traffic is worth far more than none.
+		{"subject-1@antimage", 1, 0, false},
+		{"subject-123@antimage", 123, 0, false},
+		{"subject-999@antimage", 999, 0, false},
+
+		// A mangled service part keeps the subject: attribution is the smaller
+		// loss, and the person the traffic belongs to is still known.
+		{"subject-5.svc-nonsense@antimage", 5, 0, false},
+
+		{"invalid@antimage", 0, 0, true},
+		{"subject-@antimage", 0, 0, true},
+		{"subject-abc@antimage", 0, 0, true},
+		{"no-at-sign", 0, 0, true},
+		{"", 0, 0, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.email, func(t *testing.T) {
-			gotID, err := parseSubjectEmail(tt.email)
+			gotID, gotService, err := parseSubjectEmail(tt.email)
 
 			if tt.wantError {
 				if err == nil {
@@ -280,7 +295,29 @@ func TestParseSubjectEmail(t *testing.T) {
 			if gotID != tt.wantID {
 				t.Errorf("expected ID %d, got %d", tt.wantID, gotID)
 			}
+			if gotService != tt.wantService {
+				t.Errorf("expected service %d, got %d", tt.wantService, gotService)
+			}
 		})
+	}
+}
+
+// The tag the adapter writes and the tag the parser reads must be the same
+// thing. They are produced by different functions, so nothing but a round trip
+// keeps them in step -- and a drift here silently unattributes every sample.
+func TestSubjectEmailRoundTrips(t *testing.T) {
+	for _, tc := range []struct{ subject, service int64 }{
+		{1, 1}, {42, 7}, {999, 4560}, {1, 999999},
+	} {
+		email := subjectEmail(tc.subject, tc.service)
+		gotSubject, gotService, err := parseSubjectEmail(email)
+		if err != nil {
+			t.Fatalf("the adapter wrote %q and the parser rejected it: %v", email, err)
+		}
+		if gotSubject != tc.subject || gotService != tc.service {
+			t.Errorf("%q round-tripped to subject %d service %d, want %d and %d",
+				email, gotSubject, gotService, tc.subject, tc.service)
+		}
 	}
 }
 

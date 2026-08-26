@@ -399,9 +399,14 @@ func (a *Adapter) Plan(
 
 	// Subjects are node-wide in the document; every enabled service serves
 	// every subject granted to it, and the panel has already filtered to the
-	// ones entitled here.
-	users, err := usersFrom(desired)
-	if err != nil {
+	// ones entitled here. The user LIST is now built per service inside the
+	// loop below, because since C2 each user's Xray tag carries the service id.
+	//
+	// Built once here anyway, purely to fail fast: a subject with no usable
+	// credential is an error about the document, not about any one service, and
+	// discovering it on the first service would report it as that service's
+	// fault.
+	if _, err := usersFor(desired, 0); err != nil {
 		return plan, err
 	}
 
@@ -441,6 +446,13 @@ func (a *Adapter) Plan(
 		}
 
 		in, err := ParseInbound(svc.Params)
+		if err != nil {
+			return adapter.Plan{}, fmt.Errorf("service %d: %w", svc.ID, err)
+		}
+		// Per service: each user's tag carries this service's id, so Xray keeps
+		// one counter per (subject, service) and the usage report can say which
+		// inbound earned the traffic.
+		users, err := usersFor(desired, svc.ID)
 		if err != nil {
 			return adapter.Plan{}, fmt.Errorf("service %d: %w", svc.ID, err)
 		}
@@ -559,7 +571,18 @@ func (a *Adapter) Plan(
 func (a *Adapter) planEgress(
 	desired adapter.Desired, observed adapter.Observed, seq int,
 ) (*adapter.Step, error) {
-	rendered, err := GenerateEgressConfig(desired.Outbounds, desired.Routing)
+	// A rule naming a subject matches them on every inbound they are on, and
+	// since C2 that means one email per service. The renderer needs the service
+	// list to expand them; enabled services only, because a disabled one has no
+	// inbound for a rule to match against.
+	var serviceIDs []int64
+	for _, svc := range desired.Services {
+		if svc.Kind == string(Kind) && svc.Enabled {
+			serviceIDs = append(serviceIDs, svc.ID)
+		}
+	}
+
+	rendered, err := GenerateEgressConfig(desired.Outbounds, desired.Routing, serviceIDs)
 	if err != nil {
 		return nil, fmt.Errorf("generate egress config: %w", err)
 	}
@@ -672,11 +695,18 @@ func mustPayload(p stepPayload) json.RawMessage {
 	return raw
 }
 
-// usersFrom projects the document's subjects into the per-inbound user list.
-func usersFrom(desired adapter.Desired) ([]User, error) {
+// usersFor projects the document's subjects into one inbound's user list.
+//
+// The email is per-SERVICE, which is what makes C2 attribution possible at all.
+// Xray keeps one counter per email, so a subject carrying the same email on two
+// inbounds has their traffic summed into a single counter and there is no way
+// to tell afterwards which inbound earned it. Deriving the email from both ids
+// gives one counter per (subject, service) pair, which is exactly the grain the
+// usage report needs.
+func usersFor(desired adapter.Desired, serviceID int64) ([]User, error) {
 	users := make([]User, 0, len(desired.Subjects))
 	for _, s := range desired.Subjects {
-		u := User{SubjectID: s.ID, Email: subjectEmail(s.ID)}
+		u := User{SubjectID: s.ID, ServiceID: serviceID, Email: subjectEmail(s.ID, serviceID)}
 		for _, c := range s.Credentials {
 			// Prefer uuid; trojan inbounds pick password at render time.
 			if c.Kind == "uuid" {
@@ -696,10 +726,22 @@ func usersFrom(desired adapter.Desired) ([]User, error) {
 }
 
 // subjectEmail is the per-user tag inside Xray. It is derived from the subject
-// id rather than a name so it is stable across renames, which matters because
-// SP3 will aggregate traffic by it.
-func subjectEmail(id int64) string {
-	return fmt.Sprintf("subject-%d@antimage", id)
+// and service ids rather than a name so it is stable across renames, which
+// matters because accounting aggregates by it.
+//
+// The service id is in the tag because Xray's stats are keyed by email alone.
+// Without it every inbound a subject is on shares one counter, and C2's
+// question -- which service earned this traffic -- has no answer at the edge to
+// carry inward.
+//
+// serviceID 0 renders the legacy node-wide form. Nothing in production asks for
+// it; it exists so the routing rules in egress.go, which match a subject across
+// every inbound, keep a tag to build from.
+func subjectEmail(subjectID, serviceID int64) string {
+	if serviceID == 0 {
+		return fmt.Sprintf("subject-%d@antimage", subjectID)
+	}
+	return fmt.Sprintf("subject-%d.svc-%d@antimage", subjectID, serviceID)
 }
 
 // Apply executes exactly one step. Every branch is idempotent, because the

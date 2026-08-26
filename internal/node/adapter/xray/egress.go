@@ -143,7 +143,7 @@ func renderOutbound(o adapter.Outbound) (map[string]any, error) {
 // match everything, which is not what an operator who left every matcher empty
 // meant -- they meant the rule to be inert, or they made a mistake. Either way
 // silently routing all traffic somewhere is the wrong reading.
-func renderRule(r adapter.RoutingRule, known map[string]bool) (map[string]any, error) {
+func renderRule(r adapter.RoutingRule, known map[string]bool, serviceIDs []int64) (map[string]any, error) {
 	if strings.TrimSpace(r.OutboundTag) == "" {
 		return nil, fmt.Errorf("routing rule %d selects no outbound", r.ID)
 	}
@@ -196,9 +196,23 @@ func renderRule(r adapter.RoutingRule, known map[string]bool) (map[string]any, e
 	if len(r.SubjectIDs) > 0 {
 		// Xray matches users by the same email tag accounting aggregates by, so
 		// the two cannot disagree about who a rule applies to.
-		emails := make([]string, 0, len(r.SubjectIDs))
+		//
+		// Since C2 that tag is per-service, so ONE subject now has one email
+		// per inbound they are on and a rule naming a subject has to list all
+		// of them. Listing only the legacy node-wide form here would leave a
+		// rule that matches nobody: the operator's routing policy would sit in
+		// the config looking correct and never fire.
+		emails := make([]string, 0, len(r.SubjectIDs)*max(len(serviceIDs), 1))
 		for _, id := range r.SubjectIDs {
-			emails = append(emails, subjectEmail(id))
+			if len(serviceIDs) == 0 {
+				// No inbounds on this node, so nothing can match whatever is
+				// written. The legacy form keeps the document well-formed.
+				emails = append(emails, subjectEmail(id, 0))
+				continue
+			}
+			for _, svcID := range serviceIDs {
+				emails = append(emails, subjectEmail(id, svcID))
+			}
 		}
 		sort.Strings(emails)
 		rule["user"] = toAny(emails)
@@ -218,7 +232,9 @@ func renderRule(r adapter.RoutingRule, known map[string]bool) (map[string]any, e
 // "remove the file" rather than "write an empty document": an empty routing
 // block is not inert in Xray, and a file that exists with no rules is harder to
 // reason about than no file.
-func GenerateEgressConfig(outbounds []adapter.Outbound, routing *adapter.Routing) ([]byte, error) {
+func GenerateEgressConfig(
+	outbounds []adapter.Outbound, routing *adapter.Routing, serviceIDs []int64,
+) ([]byte, error) {
 	if len(outbounds) == 0 && routing == nil {
 		return nil, nil
 	}
@@ -274,7 +290,7 @@ func GenerateEgressConfig(outbounds []adapter.Outbound, routing *adapter.Routing
 			return ordered[i].ID < ordered[j].ID
 		})
 		for _, r := range ordered {
-			obj, err := renderRule(r, known)
+			obj, err := renderRule(r, known, serviceIDs)
 			if err != nil {
 				return nil, err
 			}
