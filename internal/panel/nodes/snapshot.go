@@ -125,7 +125,7 @@ func BuildDesiredSnapshot(
 		return nil, err
 	}
 
-	outbounds, err := buildOutbounds(ctx, tx, nodeID)
+	outbounds, err := buildOutbounds(ctx, tx, nodeID, options.unsealer)
 	if err != nil {
 		return nil, err
 	}
