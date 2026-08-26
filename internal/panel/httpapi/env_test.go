@@ -16,12 +16,14 @@ import (
 	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
+	"github.com/amyrm/antimage/internal/shared/secrets"
 	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 type testEnv struct {
 	store   *store.Store
 	handler http.Handler
+	box     *secrets.Box // Master key box for unsealing credentials
 }
 
 func itoa64(i int64) string { return strconv.FormatInt(i, 10) }
@@ -48,7 +50,7 @@ func newTestEnv(t *testing.T, opts ...func(*Deps)) *testEnv {
 	for _, opt := range opts {
 		opt(&deps)
 	}
-	return &testEnv{store: s, handler: NewRouter(deps)}
+	return &testEnv{store: s, handler: NewRouter(deps), box: deps.Box}
 }
 
 func (e *testEnv) seedAdmin(t *testing.T, username, password, role string) int64 {
