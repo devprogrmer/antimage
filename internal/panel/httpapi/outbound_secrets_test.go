@@ -32,6 +32,11 @@ import (
 
 const wgOutboundKey = "aFakePrivateKeyForTestingOnly0000000000000o="
 
+func mustMarshal(v interface{}) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
 // seedWireGuardOutbound creates an outbound whose params contain a secret.
 func seedWireGuardOutbound(t *testing.T, env *testEnv, token string) {
 	t.Helper()
@@ -102,6 +107,11 @@ func TestOutboundRedactionKeepsTheRestOfTheParams(t *testing.T) {
 		t.Fatalf("listed %d outbounds, want 1", len(out.Outbounds))
 	}
 	p := out.Outbounds[0].Params
+
+	// Debug: print what we actually got
+	t.Logf("Received params: %+v", p)
+	t.Logf("Params as JSON: %s", mustMarshal(p))
+
 	if p["endpoint"] != "198.51.100.1:51820" {
 		t.Errorf("endpoint = %v, want it preserved; redaction removed a "+
 			"non-secret field the operator needs to see", p["endpoint"])

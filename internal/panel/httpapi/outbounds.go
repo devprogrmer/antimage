@@ -153,9 +153,15 @@ func (d Deps) handleListOutbounds(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusInternalServerError, "internal", "could not read outbounds")
 			return
 		}
+		// Unseal params before redaction
+		unsealed, err := nodes.OpenOutboundParams(d.Box, params)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "internal", "could not unseal outbound params")
+			return
+		}
 		// Credential fields never leave the panel. Which ones they are comes
 		// from the adapter's own schema; see secret_params.go.
-		o.Params = redactParams(outboundSchemaFor(adapterKind), []byte(params))
+		o.Params = redactParams(outboundSchemaFor(adapterKind), unsealed)
 		o.Enabled = enabled == 1
 		out = append(out, o)
 	}
