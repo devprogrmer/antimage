@@ -37,6 +37,33 @@ func seqOf(t *testing.T, st *Store, table string) int64 {
 	return seq.Int64
 }
 
+// deltaIDs reads every delta id in order.
+//
+// Checking rows.Err is the point of having this in one place: a mid-iteration
+// failure would otherwise return a SHORT list that the caller compares happily
+// against another short list, and the test would pass having examined nothing.
+func deltaIDs(t *testing.T, st *Store) []int64 {
+	t.Helper()
+	rows, err := st.Read().Query(`SELECT id FROM usage_deltas ORDER BY id`)
+	if err != nil {
+		t.Fatalf("read ids: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate ids: %v", err)
+	}
+	return ids
+}
+
 // nextDeltaID inserts one delta and returns the id SQLite chose.
 func nextDeltaID(t *testing.T, st *Store, nodeID, subjectID, sequence int64) int64 {
 	t.Helper()
@@ -121,19 +148,7 @@ func TestGrainMigrationKeepsIDsWhenRowsArePresent(t *testing.T) {
 	}
 	seedAccountingRows(t, st)
 
-	var wantIDs []int64
-	rows, err := st.Read().Query(`SELECT id FROM usage_deltas ORDER BY id`)
-	if err != nil {
-		t.Fatalf("read ids: %v", err)
-	}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		wantIDs = append(wantIDs, id)
-	}
-	_ = rows.Close()
+	wantIDs := deltaIDs(t, st)
 	if len(wantIDs) == 0 {
 		t.Fatal("no deltas seeded, so this would pass vacuously")
 	}
@@ -142,19 +157,7 @@ func TestGrainMigrationKeepsIDsWhenRowsArePresent(t *testing.T) {
 		t.Fatalf("up: %v", err)
 	}
 
-	var gotIDs []int64
-	rows, err = st.Read().Query(`SELECT id FROM usage_deltas ORDER BY id`)
-	if err != nil {
-		t.Fatalf("read ids after: %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		gotIDs = append(gotIDs, id)
-	}
+	gotIDs := deltaIDs(t, st)
 
 	if len(gotIDs) != len(wantIDs) {
 		t.Fatalf("kept %d deltas, want %d", len(gotIDs), len(wantIDs))
