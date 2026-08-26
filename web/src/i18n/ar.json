@@ -348,5 +348,20 @@
   "node.confirmRestart": "هل تريد إعادة تشغيل هذه العقدة؟",
   "node.confirmMaintenance": "هل تريد وضع هذه العقدة في الصيانة؟",
   "node.syncEffect": "ستعيد العقدة تطبيق مستندها المطلوب، ولن تنقطع الجلسات.",
-  "node.restartEffect": "ستُعاد تشغيل العقدة وستنقطع الجلسات النشطة."
+  "node.restartEffect": "ستُعاد تشغيل العقدة وستنقطع الجلسات النشطة.",
+  "session.title": "الجلسات النشطة",
+  "session.ip": "عنوان IP",
+  "session.device": "الجهاز",
+  "session.lastUsed": "آخر استخدام",
+  "session.current": "هذا الجهاز",
+  "session.revoke": "إبطال",
+  "session.confirmRevoke": "هل تريد إنهاء هذه الجلسة؟",
+  "audit.action": "الإجراء",
+  "audit.actor": "الفاعل",
+  "audit.result": "النتيجة",
+  "audit.search": "بحث",
+  "audit.before": "قبل",
+  "audit.after": "بعد",
+  "audit.none": "لا توجد سجلات مطابقة.",
+  "filters.clear": "مسح"
 }

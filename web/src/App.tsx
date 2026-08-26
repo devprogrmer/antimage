@@ -8,6 +8,7 @@ import { Dashboard } from "@/routes/Dashboard";
 import { Nodes } from "@/routes/Nodes";
 import { NodeDetail } from "@/routes/NodeDetail";
 import { Observability } from "@/routes/Observability";
+import { Audit } from "@/routes/Audit";
 import { Subjects } from "@/routes/Subjects";
 import { SubjectDetail } from "@/routes/SubjectDetail";
 import { Profile } from "@/routes/Profile";
@@ -82,6 +83,14 @@ export default function App() {
           }
         />
         <Route path="observability" element={<Observability />} />
+        <Route
+          path="audit"
+          element={
+            <RequirePermission session={session.data} permission="audit:read">
+              <Audit />
+            </RequirePermission>
+          }
+        />
         <Route path="profile" element={<Profile />} />
         {/* An unknown path is an operator's typo or a stale bookmark, not an
             error worth a screen of its own. */}

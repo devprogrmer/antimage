@@ -348,5 +348,20 @@
   "node.confirmRestart": "要重启该节点吗？",
   "node.confirmMaintenance": "要将该节点置于维护状态吗？",
   "node.syncEffect": "节点将重新应用其目标文档，会话不会断开。",
-  "node.restartEffect": "节点将重启，活动会话会断开。"
+  "node.restartEffect": "节点将重启，活动会话会断开。",
+  "session.title": "活动会话",
+  "session.ip": "IP 地址",
+  "session.device": "设备",
+  "session.lastUsed": "最近使用",
+  "session.current": "当前设备",
+  "session.revoke": "吊销",
+  "session.confirmRevoke": "要退出此会话吗？",
+  "audit.action": "操作",
+  "audit.actor": "操作者",
+  "audit.result": "结果",
+  "audit.search": "搜索",
+  "audit.before": "变更前",
+  "audit.after": "变更后",
+  "audit.none": "没有匹配的记录。",
+  "filters.clear": "清除"
 }
