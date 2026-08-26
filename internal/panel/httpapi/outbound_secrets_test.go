@@ -142,16 +142,23 @@ func TestEditingAnOutboundKeepsTheUnchangedSecret(t *testing.T) {
 		`SELECT params FROM outbounds WHERE id = 1`).Scan(&stored); err != nil {
 		t.Fatalf("read stored params: %v", err)
 	}
-	if !strings.Contains(stored, wgOutboundKey) {
-		t.Errorf("the stored private key was overwritten by the round trip; "+
-			"stored params are now %s", stored)
+
+	// Params are now sealed in the database, so unseal them first
+	unsealed, err := nodes.OpenOutboundParams(env.box, stored)
+	if err != nil {
+		t.Fatalf("unseal stored params: %v", err)
 	}
-	if strings.Contains(stored, RedactedValue) {
-		t.Errorf("the literal sentinel was written into storage: %s", stored)
+
+	if !strings.Contains(string(unsealed), wgOutboundKey) {
+		t.Errorf("the stored private key was overwritten by the round trip; "+
+			"stored params are now %s", unsealed)
+	}
+	if strings.Contains(string(unsealed), RedactedValue) {
+		t.Errorf("the literal sentinel was written into storage: %s", unsealed)
 	}
 	// And the edit the operator actually made took effect.
-	if !strings.Contains(stored, "203.0.113.9") {
-		t.Errorf("the endpoint edit was lost: %s", stored)
+	if !strings.Contains(string(unsealed), "203.0.113.9") {
+		t.Errorf("the endpoint edit was lost: %s", unsealed)
 	}
 }
 
@@ -175,12 +182,19 @@ func TestASecretCanStillBeChanged(t *testing.T) {
 		`SELECT params FROM outbounds WHERE id = 1`).Scan(&stored); err != nil {
 		t.Fatalf("read stored params: %v", err)
 	}
-	if !strings.Contains(stored, rotated) {
-		t.Errorf("the rotated key was not stored, so an operator cannot change "+
-			"an upstream credential: %s", stored)
+
+	// Params are now sealed in the database, so unseal them first
+	unsealed, err := nodes.OpenOutboundParams(env.box, stored)
+	if err != nil {
+		t.Fatalf("unseal stored params: %v", err)
 	}
-	if strings.Contains(stored, wgOutboundKey) {
-		t.Errorf("the old key survived a deliberate rotation: %s", stored)
+
+	if !strings.Contains(string(unsealed), rotated) {
+		t.Errorf("the rotated key was not stored, so an operator cannot change "+
+			"an upstream credential: %s", unsealed)
+	}
+	if strings.Contains(string(unsealed), wgOutboundKey) {
+		t.Errorf("the old key survived a deliberate rotation: %s", unsealed)
 	}
 }
 
