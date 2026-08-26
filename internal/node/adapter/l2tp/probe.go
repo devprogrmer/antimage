@@ -66,7 +66,7 @@ func isPortListening(port int) bool {
 	}
 	// If we successfully bound to the port, it's NOT in use.
 	// Close it and return false.
-	conn.Close()
+	_ = conn.Close() // Ignore close error - we just checked if port is free
 	return false
 }
 
@@ -88,6 +88,6 @@ func isPortReachable(port int) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close() // Ignore close error - we're only checking reachability
 	return true
 }
