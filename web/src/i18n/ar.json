@@ -375,5 +375,17 @@
   "templates.noServices": "لا توجد قوالب خدمات بعد.",
   "templates.noPresets": "لا توجد إعدادات مسبقة بعد.",
   "templates.confirmDelete": "هل تريد حذف هذا القالب؟",
-  "templates.confirmDeletePreset": "هل تريد حذف هذا الإعداد؟"
+  "templates.confirmDeletePreset": "هل تريد حذف هذا الإعداد؟",
+  "health.tab": "الصحة",
+  "health.controlPlane": "مستوى التحكم",
+  "health.host": "المضيف",
+  "health.reconnects": "إعادة الاتصال",
+  "health.reconcileMs": "آخر مطابقة",
+  "health.rtt": "متوسط زمن الرحلة",
+  "health.failedStreak": "إخفاقات متتالية",
+  "health.disk": "القرص",
+  "health.connections": "الاتصالات",
+  "health.latency": "زمن الاستجابة",
+  "health.lastSample": "آخر عيّنة",
+  "health.noHistory": "لم تُسجَّل عيّنات صحة بعد."
 }

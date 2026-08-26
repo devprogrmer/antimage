@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NodeReconciliation } from "./NodeReconciliation";
 import { NodeAdapters } from "./NodeAdapters";
+import { NodeHealth } from "./NodeHealth";
 import { setLocale } from "../i18n";
 
 let calls: Array<{ method: string; path: string }> = [];
@@ -15,7 +16,11 @@ function stubFetch() {
   vi.stubGlobal("fetch", async (path: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     calls.push({ method, path });
-    const route = routes[`${method} ${path}`] ?? routes[path];
+    // Falls back to the bare path so a request carrying a query string still
+    // resolves; NodeHealth asks for ?limit=100.
+    const bare = path.split("?")[0];
+    const route =
+      routes[`${method} ${path}`] ?? routes[path] ?? routes[`${method} ${bare}`] ?? routes[bare];
     if (route === undefined) {
       return new Response(JSON.stringify({ error: { code: "not_found", message: "no stub" } }), {
         status: 404,
@@ -154,5 +159,76 @@ describe("NodeAdapters", () => {
     routes["/api/v1/nodes/1/capabilities"] = { body: { capabilities: [] } };
     renderPanel(<NodeAdapters nodeId={1} />);
     expect(await screen.findByText(/has not reported any adapters/i)).toBeInTheDocument();
+  });
+});
+
+describe("NodeHealth", () => {
+  beforeEach(() => {
+    routes["/api/v1/nodes/1/metrics"] = {
+      body: {
+        reconnect_count: 3, last_reconcile_duration_ms: 420,
+        failed_reconcile_streak: 0, avg_rtt_ms: 18,
+      },
+    };
+    routes["/api/v1/nodes/1/health/history"] = {
+      body: {
+        count: 2,
+        metrics: [
+          { timestamp: 1, cpu_percent: 10.5, memory_used_bytes: 500, memory_total_bytes: 1000,
+            disk_used_bytes: 1, disk_total_bytes: 4, network_rx_bytes: 0, network_tx_bytes: 0,
+            active_connections: 7, latency_ms: 20 },
+          { timestamp: 2, cpu_percent: 30.5, memory_used_bytes: 750, memory_total_bytes: 1000,
+            disk_used_bytes: 2, disk_total_bytes: 4, network_rx_bytes: 0, network_tx_bytes: 0,
+            active_connections: 9, latency_ms: 40 },
+        ],
+      },
+    };
+  });
+
+  it("shows the control-plane counters and the latest host sample", async () => {
+    renderPanel(<NodeHealth nodeId={1} />);
+    await screen.findByText("30.5%");
+    // Memory as a percentage of the total the node reported.
+    expect(screen.getByText("75.0%")).toBeInTheDocument();
+    expect(screen.getByText("9")).toBeInTheDocument();
+  });
+
+  // A node that reconnects happily while failing every reconcile looks healthy
+  // from every other angle, so the streak is called out when it is non-zero.
+  it("calls out a failing reconcile streak", async () => {
+    routes["/api/v1/nodes/1/metrics"] = {
+      body: {
+        reconnect_count: 3, last_reconcile_duration_ms: 420,
+        failed_reconcile_streak: 5, avg_rtt_ms: 18,
+      },
+    };
+    renderPanel(<NodeHealth nodeId={1} />);
+    const streak = await screen.findByText("5");
+    expect(streak.className).toMatch(/text-destructive/);
+  });
+
+  // Dividing by a total of zero renders NaN%, which reads as a broken panel
+  // rather than as a node that has not reported its memory size.
+  it("renders a dash rather than NaN when a total is unknown", async () => {
+    routes["/api/v1/nodes/1/health/history"] = {
+      body: {
+        count: 1,
+        metrics: [
+          { timestamp: 1, cpu_percent: 5, memory_used_bytes: 0, memory_total_bytes: 0,
+            disk_used_bytes: 0, disk_total_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0,
+            active_connections: 0, latency_ms: 1 },
+        ],
+      },
+    };
+    renderPanel(<NodeHealth nodeId={1} />);
+    await screen.findByText("5.0%");
+    expect(screen.queryByText(/NaN/)).toBeNull();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("explains a node with no samples instead of drawing an empty chart", async () => {
+    routes["/api/v1/nodes/1/health/history"] = { body: { count: 0, metrics: [] } };
+    renderPanel(<NodeHealth nodeId={1} />);
+    expect(await screen.findByText(/No health samples/i)).toBeInTheDocument();
   });
 });

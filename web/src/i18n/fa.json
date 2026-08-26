@@ -375,5 +375,17 @@
   "templates.noServices": "هنوز الگوی سرویسی نیست.",
   "templates.noPresets": "هنوز پیش‌تنظیمی نیست.",
   "templates.confirmDelete": "این الگو حذف شود؟",
-  "templates.confirmDeletePreset": "این پیش‌تنظیم حذف شود؟"
+  "templates.confirmDeletePreset": "این پیش‌تنظیم حذف شود؟",
+  "health.tab": "سلامت",
+  "health.controlPlane": "صفحهٔ کنترل",
+  "health.host": "میزبان",
+  "health.reconnects": "اتصال‌های دوباره",
+  "health.reconcileMs": "آخرین همگام‌سازی",
+  "health.rtt": "میانگین رفت‌وبرگشت",
+  "health.failedStreak": "ناکامی پیاپی",
+  "health.disk": "دیسک",
+  "health.connections": "اتصال‌ها",
+  "health.latency": "تأخیر",
+  "health.lastSample": "آخرین نمونه",
+  "health.noHistory": "هنوز نمونهٔ سلامتی ثبت نشده است."
 }

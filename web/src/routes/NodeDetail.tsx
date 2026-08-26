@@ -5,6 +5,7 @@ import { StatusBadge, type NodeStatus } from "../components/StatusBadge";
 import { EgressPanel } from "../components/EgressPanel";
 import { DeploymentPanel } from "../components/DeploymentPanel";
 import { NodeAdapters } from "../components/NodeAdapters";
+import { NodeHealth } from "../components/NodeHealth";
 import { NodeReconciliation } from "../components/NodeReconciliation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { InboundStudio } from "../components/InboundStudio";
@@ -90,6 +91,7 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
           <TabsTrigger value="egress">{t("egress.title")}</TabsTrigger>
           <TabsTrigger value="deployments">{t("deploy.title")}</TabsTrigger>
           <TabsTrigger value="adapters">{t("node.adapters")}</TabsTrigger>
+          <TabsTrigger value="health">{t("health.tab")}</TabsTrigger>
           <TabsTrigger value="history">{t("node.tabHistory")}</TabsTrigger>
         </TabsList>
 
@@ -114,6 +116,10 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
 
         <TabsContent value="adapters">
           <NodeAdapters nodeId={nodeId} />
+        </TabsContent>
+
+        <TabsContent value="health">
+          <NodeHealth nodeId={nodeId} />
         </TabsContent>
 
         <TabsContent value="history" className="space-y-6">
