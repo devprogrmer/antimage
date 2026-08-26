@@ -4,6 +4,9 @@ import { formatNumber, formatTimestamp, t } from "../i18n";
 import { StatusBadge, type NodeStatus } from "../components/StatusBadge";
 import { EgressPanel } from "../components/EgressPanel";
 import { DeploymentPanel } from "../components/DeploymentPanel";
+import { NodeAdapters } from "../components/NodeAdapters";
+import { NodeReconciliation } from "../components/NodeReconciliation";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { InboundStudio } from "../components/InboundStudio";
 
 interface NodeDetailData {
@@ -80,16 +83,40 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
         {drift && <span className="text-warning">{t("node.drift")}</span>}
       </section>
 
-      <InboundStudio nodeId={nodeId} />
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">{t("node.tabOverview")}</TabsTrigger>
+          <TabsTrigger value="inbounds">{t("studio.title")}</TabsTrigger>
+          <TabsTrigger value="egress">{t("egress.title")}</TabsTrigger>
+          <TabsTrigger value="deployments">{t("deploy.title")}</TabsTrigger>
+          <TabsTrigger value="adapters">{t("node.adapters")}</TabsTrigger>
+          <TabsTrigger value="history">{t("node.tabHistory")}</TabsTrigger>
+        </TabsList>
 
+        <TabsContent value="overview">
+          <NodeReconciliation nodeId={nodeId} />
+        </TabsContent>
 
-      <EgressPanel nodeId={nodeId} />
+        <TabsContent value="inbounds">
+          <InboundStudio nodeId={nodeId} />
+        </TabsContent>
 
-      <DeploymentPanel
-        nodeId={nodeId}
-        targetRevision={node.data.desired_revision}
-      />
+        <TabsContent value="egress">
+          <EgressPanel nodeId={nodeId} />
+        </TabsContent>
 
+        <TabsContent value="deployments">
+          <DeploymentPanel
+            nodeId={nodeId}
+            targetRevision={node.data.desired_revision}
+          />
+        </TabsContent>
+
+        <TabsContent value="adapters">
+          <NodeAdapters nodeId={nodeId} />
+        </TabsContent>
+
+        <TabsContent value="history" className="space-y-6">
       <section>
         <h3 className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
           {t("node.revisions")}
@@ -152,6 +179,8 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
           </details>
         ))}
       </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
