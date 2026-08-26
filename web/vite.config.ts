@@ -28,6 +28,12 @@ function keepEmbedPlaceholder(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), keepEmbedPlaceholder()],
+  // Mirrors the `paths` entry in tsconfig.app.json. Both are needed: TypeScript
+  // resolves the alias for type checking, Vite resolves it for the bundle, and
+  // a mismatch between them type-checks clean and fails at build.
+  resolve: {
+    alias: { '@': resolve(import.meta.dirname, 'src') },
+  },
   build: {
     outDir,
     emptyOutDir: true,

@@ -292,5 +292,10 @@
   "studio.emptyOption": "هیچ‌کدام",
   "studio.commaSeparated": "چند مورد را با ویرگول جدا کنید.",
   "studio.requiresPki": "این پروتکل روی گره به گواهی و کلید TLS نیاز دارد.",
-  "studio.noHotAdd": "این گره برای افزودن یا حذف کاربر سرویس را راه‌اندازی مجدد می‌کند."
+  "studio.noHotAdd": "این گره برای افزودن یا حذف کاربر سرویس را راه‌اندازی مجدد می‌کند.",
+  "nav.primary": "ناوبری اصلی",
+  "theme.label": "پوسته",
+  "theme.light": "روشن",
+  "theme.dark": "تیره",
+  "theme.system": "سیستم"
 }

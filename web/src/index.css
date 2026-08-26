@@ -3,8 +3,148 @@
 /* Direction is carried by <html dir>, set once by setLocale(). Components use
    logical utilities (ms-/me-/ps-/pe-/text-start) so nothing has to be mirrored
    by hand; scripts/check-rtl.sh keeps the physical ones out. */
+
+/* Dark mode is a CLASS, not a media query.
+
+   Tailwind v4 defaults `dark:` to prefers-color-scheme, which cannot express
+   "this operator chose light while their OS is dark". The theme provider writes
+   .dark onto <html>, and resolves "system" itself so there is exactly one place
+   that decides which theme is in force. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens.
+
+   Every colour in the app resolves through one of these, so a theme is a set of
+   values rather than a sweep through class names. The dark values are the
+   zinc palette the app already used -- background is zinc-950 and foreground is
+   zinc-100 -- so turning the token layer on is not a visual change for anyone
+   already using it. Light is new, and is a real palette rather than an
+   inversion: inverted dark themes read as grey mud. */
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.21 0.006 285.9);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 285.9);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 285.9);
+
+  --primary: oklch(0.55 0.22 262.9);
+  --primary-foreground: oklch(0.98 0.003 247.9);
+
+  --secondary: oklch(0.967 0.001 286.4);
+  --secondary-foreground: oklch(0.21 0.006 285.9);
+
+  --muted: oklch(0.967 0.001 286.4);
+  --muted-foreground: oklch(0.552 0.016 285.9);
+
+  --accent: oklch(0.967 0.001 286.4);
+  --accent-foreground: oklch(0.21 0.006 285.9);
+
+  --destructive: oklch(0.577 0.245 27.3);
+  --destructive-foreground: oklch(0.98 0.003 247.9);
+
+  --success: oklch(0.596 0.145 163.2);
+  --warning: oklch(0.681 0.162 75.8);
+
+  --border: oklch(0.92 0.004 286.3);
+  --input: oklch(0.92 0.004 286.3);
+  --ring: oklch(0.55 0.22 262.9);
+
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.21 0.006 285.9);
+  --sidebar-border: oklch(0.92 0.004 286.3);
+
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: oklch(0.141 0.005 285.8);
+  --foreground: oklch(0.967 0.001 286.4);
+
+  --card: oklch(0.18 0.006 285.9);
+  --card-foreground: oklch(0.967 0.001 286.4);
+
+  --popover: oklch(0.18 0.006 285.9);
+  --popover-foreground: oklch(0.967 0.001 286.4);
+
+  --primary: oklch(0.62 0.19 259.8);
+  --primary-foreground: oklch(0.141 0.005 285.8);
+
+  --secondary: oklch(0.274 0.006 286.0);
+  --secondary-foreground: oklch(0.967 0.001 286.4);
+
+  --muted: oklch(0.274 0.006 286.0);
+  --muted-foreground: oklch(0.705 0.015 286.1);
+
+  --accent: oklch(0.274 0.006 286.0);
+  --accent-foreground: oklch(0.967 0.001 286.4);
+
+  --destructive: oklch(0.637 0.208 25.3);
+  --destructive-foreground: oklch(0.967 0.001 286.4);
+
+  --success: oklch(0.696 0.17 162.5);
+  --warning: oklch(0.769 0.188 70.1);
+
+  --border: oklch(0.274 0.006 286.0);
+  --input: oklch(0.274 0.006 286.0);
+  --ring: oklch(0.62 0.19 259.8);
+
+  --sidebar: oklch(0.174 0.006 285.9);
+  --sidebar-foreground: oklch(0.967 0.001 286.4);
+  --sidebar-border: oklch(0.274 0.006 286.0);
+}
+
+/* Exposing the tokens to Tailwind, so `bg-background` and `text-muted-foreground`
+   exist as utilities rather than every component reaching for var() by hand. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
 html,
 body,
 #root {
   min-height: 100%;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+/* A focus ring that is visible in both themes and only on keyboard focus.
+   §65 asks for keyboard navigation to work end to end, and an invisible focus
+   ring is the most common way that requirement is met on paper and not in
+   practice. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }

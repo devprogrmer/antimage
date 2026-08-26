@@ -1,9 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter } from "react-router-dom";
 import "./index.css";
 import App from "./App.tsx";
 import { localeFromTag, setLocale } from "./i18n";
+import { ThemeProvider } from "./lib/theme";
 
 // Setting the locale once at boot fixes <html lang> and <html dir>, which is
 // what every logical CSS property in the app resolves against.
@@ -28,7 +30,14 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <ThemeProvider>
+        {/* BrowserRouter, not HashRouter: the Go handler already falls back to
+            index.html for any non-asset path (internal/panel/webui/embed.go),
+            so real URLs survive a reload and can be shared. */}
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

@@ -292,5 +292,10 @@
   "studio.emptyOption": "لا شيء",
   "studio.commaSeparated": "افصل بين القيم بفواصل.",
   "studio.requiresPki": "يحتاج هذا البروتوكول إلى شهادة ومفتاح TLS على العقدة.",
-  "studio.noHotAdd": "تعيد هذه العقدة تشغيل الخدمة لإضافة مستخدم أو إزالته."
+  "studio.noHotAdd": "تعيد هذه العقدة تشغيل الخدمة لإضافة مستخدم أو إزالته.",
+  "nav.primary": "التنقل الرئيسي",
+  "theme.label": "المظهر",
+  "theme.light": "فاتح",
+  "theme.dark": "داكن",
+  "theme.system": "النظام"
 }
