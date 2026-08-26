@@ -298,5 +298,7 @@
   "theme.light": "Светлая",
   "theme.dark": "Тёмная",
   "theme.system": "Системная",
-  "close": "Закрыть"
+  "close": "Закрыть",
+  "table.columns": "Столбцы",
+  "node.none": "Узлов пока нет."
 }

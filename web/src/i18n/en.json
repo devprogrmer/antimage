@@ -298,5 +298,7 @@
   "theme.light": "Light",
   "theme.dark": "Dark",
   "theme.system": "System",
-  "close": "Close"
+  "close": "Close",
+  "table.columns": "Columns",
+  "node.none": "No nodes yet."
 }

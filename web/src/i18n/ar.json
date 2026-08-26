@@ -298,5 +298,7 @@
   "theme.light": "فاتح",
   "theme.dark": "داكن",
   "theme.system": "النظام",
-  "close": "إغلاق"
+  "close": "إغلاق",
+  "table.columns": "الأعمدة",
+  "node.none": "لا توجد عقد بعد."
 }

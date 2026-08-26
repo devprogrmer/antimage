@@ -298,5 +298,7 @@
   "theme.light": "روشن",
   "theme.dark": "تیره",
   "theme.system": "سیستم",
-  "close": "بستن"
+  "close": "بستن",
+  "table.columns": "ستون‌ها",
+  "node.none": "هنوز گره‌ای وجود ندارد."
 }

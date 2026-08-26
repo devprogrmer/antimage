@@ -1,7 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { Link } from "react-router-dom";
+
 import { api } from "../lib/api";
 import { formatNumber, formatTimestamp, t } from "../i18n";
 import { StatusBadge, type NodeStatus } from "../components/StatusBadge";
+import { DataTable } from "../components/DataTable";
+import type { Column } from "../components/DataTable";
 import { useNodeStream } from "../lib/useNodeStream";
 
 interface NodeRow {
@@ -24,46 +29,90 @@ export function Nodes({ onSelect }: { onSelect: (id: number) => void }) {
   // three fields that move, so a node that has not been seen live still renders.
   const live = useNodeStream();
 
+  // Live values folded in BEFORE the table sees them, so sorting by status or
+  // revision sorts by what is on screen. Sorting the fetched values while
+  // rendering the streamed ones would produce an order that contradicts the
+  // column it claims to be sorted by.
+  const rows = useMemo(
+    () =>
+      (nodes.data?.nodes ?? []).map((node) => ({
+        ...node,
+        status: (live[node.id]?.status ?? node.status) as NodeStatus,
+        applied_revision: live[node.id]?.applied_revision ?? node.applied_revision,
+        desired_revision: live[node.id]?.desired_revision ?? node.desired_revision,
+      })),
+    [nodes.data, live],
+  );
+
+  const columns: Column<NodeRow>[] = [
+    {
+      id: "name",
+      header: t("node.name"),
+      sortValue: (n) => n.name,
+      // Pinned: a row with no name is unidentifiable, and the link in it is
+      // the keyboard path to the detail screen.
+      hideable: false,
+      cell: (n) => (
+        <Link
+          to={`/nodes/${n.id}`}
+          // The row is clickable for the mouse; this is what a keyboard and a
+          // screen reader use, and it is what makes middle-click open a node
+          // in a new tab the way an operator expects.
+          onClick={(e) => e.stopPropagation()}
+          className="font-mono hover:underline"
+        >
+          {n.name}
+        </Link>
+      ),
+    },
+    {
+      id: "address",
+      header: t("node.address"),
+      sortValue: (n) => n.address,
+      className: "font-mono text-xs text-muted-foreground",
+      cell: (n) => n.address,
+    },
+    {
+      id: "status",
+      header: t("node.status"),
+      sortValue: (n) => n.status,
+      cell: (n) => <StatusBadge status={n.status} />,
+    },
+    {
+      id: "revision",
+      header: t("node.revision"),
+      // Sorted by the SIZE of the drift, not the revision number: "which nodes
+      // are furthest behind" is the question an operator is asking when they
+      // sort this column.
+      sortValue: (n) => n.desired_revision - n.applied_revision,
+      className: "font-mono text-xs",
+      cell: (n) => (
+        <>
+          {formatNumber(n.applied_revision)} / {formatNumber(n.desired_revision)}
+          {n.applied_revision !== n.desired_revision && (
+            <span className="ms-2 text-warning">{t("node.drift")}</span>
+          )}
+        </>
+      ),
+    },
+    {
+      id: "lastSeen",
+      header: t("node.lastSeen"),
+      sortValue: (n) => n.last_seen_at,
+      className: "font-mono text-xs text-muted-foreground",
+      cell: (n) => formatTimestamp(n.last_seen_at),
+    },
+  ];
+
   return (
-    <table className="w-full border-collapse text-sm text-zinc-200">
-      <thead>
-        <tr className="border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
-          <th className="py-2 pe-3 text-start">{t("node.name")}</th>
-          <th className="pe-3 text-start">{t("node.address")}</th>
-          <th className="pe-3 text-start">{t("node.status")}</th>
-          <th className="pe-3 text-start">{t("node.revision")}</th>
-          <th className="text-start">{t("node.lastSeen")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {nodes.data?.nodes.map((node) => {
-          const status = live[node.id]?.status ?? node.status;
-          const applied = live[node.id]?.applied_revision ?? node.applied_revision;
-          const desired = live[node.id]?.desired_revision ?? node.desired_revision;
-          return (
-            <tr
-              key={node.id}
-              onClick={() => onSelect(node.id)}
-              className="cursor-pointer border-b border-zinc-900 hover:bg-zinc-900"
-            >
-              <td className="py-1.5 pe-3 font-mono">{node.name}</td>
-              <td className="pe-3 font-mono text-xs text-zinc-500">{node.address}</td>
-              <td className="pe-3">
-                <StatusBadge status={status as NodeStatus} />
-              </td>
-              <td className="pe-3 font-mono text-xs">
-                {formatNumber(applied)} / {formatNumber(desired)}
-                {applied !== desired && (
-                  <span className="ms-2 text-amber-400">{t("node.drift")}</span>
-                )}
-              </td>
-              <td className="font-mono text-xs text-zinc-500">
-                {formatTimestamp(node.last_seen_at)}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <DataTable
+      rows={rows}
+      columns={columns}
+      rowKey={(n) => n.id}
+      onRowActivate={(n) => onSelect(n.id)}
+      storageKey="nodes"
+      empty={t("node.none")}
+      caption={t("nav.nodes")}
+    />
   );
 }
