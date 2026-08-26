@@ -51,9 +51,9 @@ interface NodeHistoryResponse {
 }
 
 const severityColors: Record<string, string> = {
-  info: "border-sky-600 text-sky-400",
-  warning: "border-amber-600 text-amber-400",
-  critical: "border-red-600 text-red-400",
+  info: "border-primary text-primary",
+  warning: "border-warning text-warning",
+  critical: "border-destructive text-destructive",
 };
 
 export function Observability() {
@@ -99,7 +99,7 @@ export function Observability() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="font-mono text-lg font-semibold text-zinc-100">
+        <h2 className="font-mono text-lg font-semibold text-foreground">
           {t("observability.title")}
         </h2>
         <div className="flex gap-2">
@@ -110,8 +110,8 @@ export function Observability() {
               onClick={() => setTimeRange(range)}
               className={`rounded-full px-3 py-1 text-xs font-medium ${
                 timeRange === range
-                  ? "bg-cyan-900/40 text-cyan-300"
-                  : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
+                  ? "bg-primary/20 text-primary"
+                  : "bg-card text-muted-foreground hover:text-foreground"
               }`}
             >
               {range}
@@ -159,9 +159,9 @@ export function Observability() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-zinc-800 bg-[#0A0D12] p-4">
+        <section className="rounded-xl border border-border bg-[#0A0D12] p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-mono text-sm font-semibold text-zinc-300">
+            <h3 className="font-mono text-sm font-semibold text-foreground">
               {t("observability.fleetStatus")}
             </h3>
           </div>
@@ -173,25 +173,25 @@ export function Observability() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-zinc-800 bg-[#0A0D12] p-4">
+        <section className="rounded-xl border border-border bg-[#0A0D12] p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-mono text-sm font-semibold text-zinc-300">
+            <h3 className="font-mono text-sm font-semibold text-foreground">
               {t("observability.fleetRTT")}
             </h3>
           </div>
           {fleetRTT.data && fleetRTT.data.data.length > 0 ? (
             <MiniSparkline data={fleetRTT.data.data} />
           ) : (
-            <div className="flex h-24 items-center justify-center text-xs text-zinc-600">
+            <div className="flex h-24 items-center justify-center text-xs text-muted-foreground">
               {t("observability.noData")}
             </div>
           )}
         </section>
       </div>
 
-      <section className="rounded-xl border border-zinc-800 bg-[#0A0D12] p-4">
+      <section className="rounded-xl border border-border bg-[#0A0D12] p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-mono text-sm font-semibold text-zinc-300">
+          <h3 className="font-mono text-sm font-semibold text-foreground">
             {t("observability.activeAlerts")}
           </h3>
           <div className="flex gap-2">
@@ -200,8 +200,8 @@ export function Observability() {
               onClick={() => setAlertFilter("all")}
               className={`rounded-full px-2 py-0.5 text-xs ${
                 alertFilter === "all"
-                  ? "bg-zinc-800 text-zinc-200"
-                  : "text-zinc-500 hover:text-zinc-300"
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {t("observability.all")}
@@ -211,8 +211,8 @@ export function Observability() {
               onClick={() => setAlertFilter("critical")}
               className={`rounded-full px-2 py-0.5 text-xs ${
                 alertFilter === "critical"
-                  ? "bg-zinc-800 text-zinc-200"
-                  : "text-zinc-500 hover:text-zinc-300"
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {t("observability.criticalOnly")}
@@ -225,25 +225,25 @@ export function Observability() {
             {alerts.data.alerts.map((alert) => (
               <div
                 key={alert.id}
-                className="flex items-start gap-3 rounded-lg border border-zinc-800/50 bg-[#05070C] p-3 text-xs"
+                className="flex items-start gap-3 rounded-lg border border-border/50 bg-background p-3 text-xs"
               >
                 <span
                   className={`inline-block rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase ${
-                    severityColors[alert.severity] ?? "border-zinc-600 text-zinc-400"
+                    severityColors[alert.severity] ?? "border-border text-muted-foreground"
                   }`}
                 >
                   {alert.severity}
                 </span>
                 <div className="flex-1 space-y-1">
-                  <div className="font-mono text-zinc-200">{alert.alert_type}</div>
-                  <div className="text-zinc-500">
+                  <div className="font-mono text-foreground">{alert.alert_type}</div>
+                  <div className="text-muted-foreground">
                     {alert.target_type} #{alert.target_id}
                   </div>
-                  <div className="text-zinc-600">
+                  <div className="text-muted-foreground">
                     {t("observability.firstSeen")}: {formatTimestamp(new Date(alert.first_seen_at).getTime() / 1000)}
                   </div>
                 </div>
-                <div className="text-end text-zinc-500">
+                <div className="text-end text-muted-foreground">
                   <div>{t("observability.current")}: {alert.current_value}</div>
                   <div>{t("observability.threshold")}: {alert.threshold_value}</div>
                 </div>
@@ -251,7 +251,7 @@ export function Observability() {
             ))}
           </div>
         ) : (
-          <div className="flex h-24 items-center justify-center text-xs text-zinc-600">
+          <div className="flex h-24 items-center justify-center text-xs text-muted-foreground">
             {t("observability.noActiveAlerts")}
           </div>
         )}
@@ -272,17 +272,17 @@ function StatCard({
   severity: "ok" | "info" | "warning" | "critical";
 }) {
   const colors = {
-    ok: "border-emerald-900/30 bg-emerald-950/20",
-    info: "border-zinc-800 bg-[#0A0D12]",
-    warning: "border-amber-900/30 bg-amber-950/20",
-    critical: "border-red-900/30 bg-red-950/20",
+    ok: "border-success/30 bg-success/10",
+    info: "border-border bg-[#0A0D12]",
+    warning: "border-warning/30 bg-warning/10",
+    critical: "border-destructive/30 bg-destructive/10",
   };
 
   return (
     <div className={`rounded-xl border p-4 ${colors[severity]}`}>
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="mt-1 font-mono text-2xl font-semibold text-zinc-100">{value}</div>
-      {detail && <div className="mt-1 text-xs text-zinc-400">{detail}</div>}
+      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-1 font-mono text-2xl font-semibold text-foreground">{value}</div>
+      {detail && <div className="mt-1 text-xs text-muted-foreground">{detail}</div>}
     </div>
   );
 }
@@ -297,10 +297,10 @@ function StatusRow({
   severity: "ok" | "warning" | "warn" | "alert";
 }) {
   const colors = {
-    ok: "bg-emerald-600",
-    warning: "bg-amber-600",
-    warn: "bg-zinc-600",
-    alert: "bg-red-600",
+    ok: "bg-success",
+    warning: "bg-warning",
+    warn: "bg-warning",
+    alert: "bg-destructive",
   };
 
   const total = 100;
@@ -308,16 +308,16 @@ function StatusRow({
 
   return (
     <div className="flex items-center gap-3">
-      <div className="w-24 text-xs text-zinc-400">{label}</div>
+      <div className="w-24 text-xs text-muted-foreground">{label}</div>
       <div className="flex-1">
-        <div className="h-2 overflow-hidden rounded-full bg-zinc-900">
+        <div className="h-2 overflow-hidden rounded-full bg-card">
           <div
             className={`h-full ${colors[severity]}`}
             style={{ width: `${Math.min(percentage, 100)}%` }}
           />
         </div>
       </div>
-      <div className="w-12 text-end font-mono text-xs text-zinc-300">{formatNumber(count)}</div>
+      <div className="w-12 text-end font-mono text-xs text-foreground">{formatNumber(count)}</div>
     </div>
   );
 }
@@ -347,7 +347,7 @@ function MiniSparkline({ data }: { data: HistoryDataPoint[] }) {
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div className="absolute inset-x-0 bottom-0 flex justify-between text-[10px] text-zinc-600">
+      <div className="absolute inset-x-0 bottom-0 flex justify-between text-[10px] text-muted-foreground">
         <span>{formatNumber(min)} ms</span>
         <span>{formatNumber(max)} ms</span>
       </div>

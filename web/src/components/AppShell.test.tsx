@@ -230,3 +230,22 @@ describe("command palette", () => {
     );
   });
 });
+
+// A3: every colour resolves through a token, so both themes are correct from
+// one set of class names. The gate that keeps it is scripts/check-tokens.sh;
+// this is the behavioural half -- that switching theme actually changes what
+// the tokens resolve to, rather than the class merely existing.
+describe("theme tokens", () => {
+  it("changes the resolved colour scheme when the theme changes", async () => {
+    const user = userEvent.setup();
+    renderShell(superAdmin);
+
+    await user.click(screen.getByRole("button", { name: "Dark" }));
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+
+    await user.click(screen.getByRole("button", { name: "Light" }));
+    // Without this the browser still paints scrollbars and form controls dark
+    // on a light page, which is the half of theming a class alone does not do.
+    expect(document.documentElement.style.colorScheme).toBe("light");
+  });
+});

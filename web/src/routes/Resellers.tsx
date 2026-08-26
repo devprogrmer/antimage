@@ -25,7 +25,7 @@ export function MutationError({ error }: { error: unknown }) {
   // rather than mapped onto a local string.
   const message = error instanceof ApiError ? error.message : String(error);
   return (
-    <p className="mt-1 text-xs text-red-400" role="alert">
+    <p className="mt-1 text-xs text-destructive" role="alert">
       {message}
     </p>
   );
@@ -33,7 +33,7 @@ export function MutationError({ error }: { error: unknown }) {
 
 /** Renders a nullable limit, where null is unlimited rather than zero. */
 export function Limit({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-zinc-500">{t("reseller.unlimited")}</span>;
+  if (value === null) return <span className="text-muted-foreground">{t("reseller.unlimited")}</span>;
   return <span className="font-mono">{formatNumber(value)}</span>;
 }
 
@@ -58,7 +58,7 @@ export function Resellers({ onSelect }: { onSelect: (id: number) => void }) {
           <button
             type="button"
             onClick={() => setShowCreate(true)}
-            className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700"
+            className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90"
           >
             {t("resellers.create")}
           </button>
@@ -68,12 +68,12 @@ export function Resellers({ onSelect }: { onSelect: (id: number) => void }) {
       {showCreate && <CreateResellerForm onClose={() => setShowCreate(false)} />}
 
       {resellers.data?.resellers.length === 0 && (
-        <p className="text-sm text-zinc-500">{t("resellers.empty")}</p>
+        <p className="text-sm text-muted-foreground">{t("resellers.empty")}</p>
       )}
 
-      <table className="w-full border-collapse text-sm text-zinc-200">
+      <table className="w-full border-collapse text-sm text-foreground">
         <thead>
-          <tr className="border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
+          <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
             <th className="py-2 pe-3 text-start">{t("reseller.displayName")}</th>
             <th className="pe-3 text-start">{t("reseller.status")}</th>
             <th className="pe-3 text-start">{t("reseller.maxSubjects")}</th>
@@ -86,21 +86,21 @@ export function Resellers({ onSelect }: { onSelect: (id: number) => void }) {
             <tr
               key={reseller.id}
               onClick={() => onSelect(reseller.id)}
-              className="cursor-pointer border-b border-zinc-900 hover:bg-zinc-900"
+              className="cursor-pointer border-b border-border hover:bg-accent/50"
             >
               <td className="py-1.5 pe-3 font-mono">{reseller.display_name}</td>
               <td className="pe-3">
                 {reseller.enabled ? (
-                  <span className="text-green-500">{t("reseller.enabled")}</span>
+                  <span className="text-success">{t("reseller.enabled")}</span>
                 ) : (
-                  <span className="text-zinc-500">{t("reseller.disabled")}</span>
+                  <span className="text-muted-foreground">{t("reseller.disabled")}</span>
                 )}
               </td>
               <td className="pe-3">
                 <Limit value={reseller.max_subjects} />
               </td>
               <td className="pe-3 font-mono text-xs">{formatNumber(reseller.credit_floor)}</td>
-              <td className="font-mono text-xs text-zinc-500">
+              <td className="font-mono text-xs text-muted-foreground">
                 {formatTimestamp(reseller.created_at)}
               </td>
             </tr>
@@ -137,11 +137,11 @@ function CreateResellerForm({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div className="mb-4 rounded border border-zinc-800 bg-zinc-900 p-4">
+    <div className="mb-4 rounded border border-border bg-card p-4">
       <h3 className="mb-3 text-sm font-semibold">{t("resellers.createNew")}</h3>
       <div className="space-y-3">
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="reseller-admin-id">
+          <label className="block text-xs text-muted-foreground" htmlFor="reseller-admin-id">
             {t("reseller.adminId")}
           </label>
           <input
@@ -149,12 +149,12 @@ function CreateResellerForm({ onClose }: { onClose: () => void }) {
             type="number"
             value={adminID}
             onChange={(e) => setAdminID(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
-          <p className="mt-1 text-xs text-zinc-500">{t("reseller.adminIdHint")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("reseller.adminIdHint")}</p>
         </div>
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="reseller-display-name">
+          <label className="block text-xs text-muted-foreground" htmlFor="reseller-display-name">
             {t("reseller.displayName")}
           </label>
           <input
@@ -162,11 +162,11 @@ function CreateResellerForm({ onClose }: { onClose: () => void }) {
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-400" htmlFor="reseller-credit-floor">
+          <label className="block text-xs text-muted-foreground" htmlFor="reseller-credit-floor">
             {t("reseller.creditFloor")}
           </label>
           <input
@@ -174,9 +174,9 @@ function CreateResellerForm({ onClose }: { onClose: () => void }) {
             type="number"
             value={creditFloor}
             onChange={(e) => setCreditFloor(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
           />
-          <p className="mt-1 text-xs text-zinc-500">{t("reseller.creditFloorHint")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("reseller.creditFloorHint")}</p>
         </div>
         <MutationError error={create.error} />
         <div className="flex gap-2">
@@ -184,14 +184,14 @@ function CreateResellerForm({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={() => create.mutate()}
             disabled={!adminID || !displayName || create.isPending}
-            className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700 disabled:opacity-50"
+            className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90 disabled:opacity-50"
           >
             {t("create")}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="rounded bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
+            className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
           >
             {t("cancel")}
           </button>

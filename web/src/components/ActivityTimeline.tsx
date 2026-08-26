@@ -91,7 +91,7 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
             setEventTypeFilter(e.target.value);
             setOffset(0);
           }}
-          className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-xs"
+          className="px-3 py-1.5 bg-secondary border border-input rounded text-xs"
         >
           <option value="">{t('activity.all_events')}</option>
           <option value="connection_start">{t('activity.connection_start')}</option>
@@ -104,13 +104,13 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
       </div>
 
       {loading && offset === 0 ? (
-        <div className="text-center py-8 text-sm text-zinc-400">{t('common.loading')}</div>
+        <div className="text-center py-8 text-sm text-muted-foreground">{t('common.loading')}</div>
       ) : activities.length === 0 ? (
-        <div className="text-center py-8 text-sm text-zinc-400">{t('activity.no_activity')}</div>
+        <div className="text-center py-8 text-sm text-muted-foreground">{t('activity.no_activity')}</div>
       ) : (
         <div className="space-y-3">
           {activities.map((activity) => (
-            <div key={activity.id} className="bg-zinc-900 border border-zinc-800 rounded p-3">
+            <div key={activity.id} className="bg-card border border-border rounded p-3">
               <div className="flex items-start gap-3">
                 <span className="text-2xl">{getEventIcon(activity.event_type)}</span>
                 <div className="flex-1">
@@ -118,12 +118,12 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
                     <span className="text-sm font-medium">
                       {activity.event_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                     </span>
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-muted-foreground">
                       {formatRelativeTime(activity.timestamp)}
                     </span>
                   </div>
 
-                  <div className="text-xs text-zinc-400 space-y-1">
+                  <div className="text-xs text-muted-foreground space-y-1">
                     {activity.ip_address && (
                       <div>{t('activity.ip')}: {activity.ip_address}</div>
                     )}
@@ -136,7 +136,7 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
                       </div>
                     )}
                     {activity.details && (
-                      <div className="mt-2 p-2 bg-zinc-950 rounded font-mono text-xs">
+                      <div className="mt-2 p-2 bg-background rounded font-mono text-xs">
                         {activity.details}
                       </div>
                     )}
@@ -151,7 +151,7 @@ export function ActivityTimeline({ subjectId }: ActivityTimelineProps) {
               type="button"
               onClick={loadMore}
               disabled={loading}
-              className="w-full py-2 text-xs text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
+              className="w-full py-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
               {loading ? t('common.loading') : t('common.load_more')}
             </button>

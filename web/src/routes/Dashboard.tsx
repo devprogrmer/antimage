@@ -65,8 +65,8 @@ export function Dashboard() {
   if (error && !metrics) {
     return (
       <div className="p-8">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">{error}</p>
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4">
+          <p className="text-destructive">{error}</p>
         </div>
       </div>
     );
@@ -76,10 +76,10 @@ export function Dashboard() {
     return (
       <div className="p-8">
         <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-8"></div>
+          <div className="h-8 bg-muted rounded w-1/4 mb-8"></div>
           <div className="grid grid-cols-4 gap-4 mb-8">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-gray-200 rounded-lg h-32"></div>
+              <div key={i} className="bg-muted rounded-lg h-32"></div>
             ))}
           </div>
         </div>
@@ -95,10 +95,10 @@ export function Dashboard() {
         <div className="flex items-center space-x-2">
           <div
             className={`w-3 h-3 rounded-full ${
-              connected ? 'bg-green-500' : 'bg-red-500'
+              connected ? 'bg-success' : 'bg-destructive'
             }`}
           ></div>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-muted-foreground">
             {connected ? t('dashboard.live') : t('dashboard.disconnected')}
           </span>
         </div>
@@ -137,7 +137,7 @@ export function Dashboard() {
       </div>
 
       {/* Nodes Grid */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-card rounded-lg shadow-sm border border-border p-6">
         <h2 className="text-xl font-semibold mb-4">{t('dashboard.nodes')}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {metrics.nodes.map((node) => (
@@ -160,11 +160,11 @@ interface MetricCardProps {
 
 function MetricCard({ title, value, total, subtitle, icon, color }: MetricCardProps) {
   const colorClasses = {
-    blue: 'bg-blue-50 text-blue-600 border-blue-200',
-    green: 'bg-green-50 text-green-600 border-green-200',
-    purple: 'bg-purple-50 text-purple-600 border-purple-200',
-    red: 'bg-red-50 text-red-600 border-red-200',
-    gray: 'bg-gray-50 text-gray-600 border-gray-200',
+    blue: 'border-primary/30 bg-primary/10 text-primary',
+    green: 'border-success/30 bg-success/10 text-success',
+    purple: 'border-primary/30 bg-primary/10 text-primary',
+    red: 'border-destructive/30 bg-destructive/10 text-destructive',
+    gray: 'border-border bg-muted text-muted-foreground',
   };
 
   return (
@@ -190,17 +190,17 @@ interface NodeCardProps {
 
 function NodeCard({ node }: NodeCardProps) {
   const statusColors = {
-    online: 'bg-green-100 text-green-800 border-green-300',
-    degraded: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-    offline: 'bg-red-100 text-red-800 border-red-300',
+    online: 'border-success/30 bg-success/10 text-success',
+    degraded: 'border-warning/30 bg-warning/10 text-warning',
+    offline: 'border-destructive/30 bg-destructive/10 text-destructive',
   };
 
   const statusColor = statusColors[node.status as keyof typeof statusColors] || statusColors.offline;
 
   return (
-    <div className="bg-gray-50 rounded-lg border border-gray-200 p-4">
+    <div className="bg-muted rounded-lg border border-border p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-gray-900">{node.name}</h3>
+        <h3 className="font-semibold text-foreground">{node.name}</h3>
         <span
           className={`px-2 py-1 rounded-full text-xs font-medium border ${statusColor}`}
         >
@@ -209,18 +209,18 @@ function NodeCard({ node }: NodeCardProps) {
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-600">{t('dashboard.users')}</span>
+          <span className="text-muted-foreground">{t('dashboard.users')}</span>
           <span className="font-medium">{node.user_count}</span>
         </div>
         {node.cpu_percent > 0 && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">{t('dashboard.cpu')}</span>
+            <span className="text-muted-foreground">{t('dashboard.cpu')}</span>
             <span className="font-medium">{node.cpu_percent.toFixed(1)}%</span>
           </div>
         )}
         {node.ram_percent > 0 && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">{t('dashboard.ram')}</span>
+            <span className="text-muted-foreground">{t('dashboard.ram')}</span>
             <span className="font-medium">{node.ram_percent.toFixed(1)}%</span>
           </div>
         )}

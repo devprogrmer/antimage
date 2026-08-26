@@ -98,7 +98,7 @@ export function SchemaForm({
   const properties = Object.entries(schema.properties ?? {});
 
   if (properties.length === 0) {
-    return <p className="text-xs text-zinc-500">{t("studio.noFields")}</p>;
+    return <p className="text-xs text-muted-foreground">{t("studio.noFields")}</p>;
   }
 
   return (
@@ -109,7 +109,7 @@ export function SchemaForm({
         );
         return (
           <fieldset key={group} className="space-y-3">
-            <legend className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {labelFor(group)}
             </legend>
             {inGroup.map(([name, field]) => (
@@ -156,13 +156,13 @@ function SchemaField({
 }) {
   const id = "field-" + name;
   const label = (
-    <label className="block text-xs text-zinc-400" htmlFor={id}>
+    <label className="block text-xs text-muted-foreground" htmlFor={id}>
       {name}
-      {required && <span className="ms-1 text-red-400">{t("studio.requiredMark")}</span>}
+      {required && <span className="ms-1 text-destructive">{t("studio.requiredMark")}</span>}
     </label>
   );
   const hint = field.description ? (
-    <p className="mt-1 text-xs text-zinc-500">{field.description}</p>
+    <p className="mt-1 text-xs text-muted-foreground">{field.description}</p>
   ) : null;
 
   // An enum is a closed set, so it is a select and nothing else can be typed.
@@ -176,7 +176,7 @@ function SchemaField({
           id={id}
           value={typeof value === "string" ? value : ""}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+          className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
         >
           <option value="">{t("studio.unset")}</option>
           {field.enum.map((option) => (
@@ -193,7 +193,7 @@ function SchemaField({
   if (field.type === "boolean") {
     return (
       <div>
-        <label className="flex items-center gap-2 text-xs text-zinc-300" htmlFor={id}>
+        <label className="flex items-center gap-2 text-xs text-foreground" htmlFor={id}>
           <input
             id={id}
             type="checkbox"
@@ -229,7 +229,7 @@ function SchemaField({
             // field that appears correct.
             onChange(Number.isNaN(parsed) ? undefined : parsed);
           }}
-          className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+          className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
         />
         {hint}
       </div>
@@ -256,9 +256,9 @@ function SchemaField({
               .filter((s) => s !== "");
             onChange(parts.length === 0 ? undefined : parts);
           }}
-          className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+          className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
         />
-        <p className="mt-1 text-xs text-zinc-500">{t("studio.commaSeparated")}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t("studio.commaSeparated")}</p>
         {hint}
       </div>
     );
@@ -274,7 +274,7 @@ function SchemaField({
         maxLength={field.maxLength}
         value={typeof value === "string" ? value : ""}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+        className="w-full rounded border border-input bg-background px-2 py-1 text-sm"
       />
       {hint}
     </div>

@@ -87,14 +87,14 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
               <button
                 type="button"
                 onClick={() => freeze.mutate()}
-                className="rounded bg-amber-600 px-3 py-1 text-sm hover:bg-amber-700"
+                className="rounded bg-warning px-3 py-1 text-sm text-background hover:bg-warning/90"
               >
                 {t("subject.freeze")}
               </button>
               <button
                 type="button"
                 onClick={() => disable.mutate()}
-                className="rounded bg-red-600 px-3 py-1 text-sm hover:bg-red-700"
+                className="rounded bg-destructive px-3 py-1 text-sm hover:bg-destructive/90"
               >
                 {t("subject.disable")}
               </button>
@@ -104,14 +104,14 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
               <button
                 type="button"
                 onClick={() => unfreeze.mutate()}
-                className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700"
+                className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90"
               >
                 {t("subject.unfreeze")}
               </button>
               <button
                 type="button"
                 onClick={() => enable.mutate()}
-                className="rounded bg-green-600 px-3 py-1 text-sm hover:bg-green-700"
+                className="rounded bg-success px-3 py-1 text-sm text-background hover:bg-success/90"
               >
                 {t("subject.enable")}
               </button>
@@ -120,66 +120,66 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
         </div>
       </div>
 
-      <div className="rounded border border-zinc-800 bg-zinc-900 p-4">
+      <div className="rounded border border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">{t("subject.details")}</h3>
         <dl className="grid grid-cols-2 gap-3 text-sm">
           <div>
-            <dt className="text-zinc-400">{t("subject.status")}</dt>
+            <dt className="text-muted-foreground">{t("subject.status")}</dt>
             <dd>{s.enabled ? t("subject.enabled") : t("subject.disabled")}</dd>
           </div>
           <div>
-            <dt className="text-zinc-400">{t("subject.created")}</dt>
+            <dt className="text-muted-foreground">{t("subject.created")}</dt>
             <dd className="font-mono text-xs">{formatTimestamp(s.created_at)}</dd>
           </div>
           {s.expires_at && (
             <div>
-              <dt className="text-zinc-400">{t("subject.expires")}</dt>
+              <dt className="text-muted-foreground">{t("subject.expires")}</dt>
               <dd className="font-mono text-xs">{formatTimestamp(s.expires_at)}</dd>
             </div>
           )}
           {s.note && (
             <div className="col-span-2">
-              <dt className="text-zinc-400">{t("subject.note")}</dt>
+              <dt className="text-muted-foreground">{t("subject.note")}</dt>
               <dd>{s.note}</dd>
             </div>
           )}
         </dl>
       </div>
 
-      <div className="rounded border border-zinc-800 bg-zinc-900 p-4">
+      <div className="rounded border border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">{t("subject.credentials")}</h3>
         <div className="flex gap-2">
           <button
             type="button"
             onClick={() => revealCredential("uuid")}
-            className="rounded bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
+            className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
           >
             {t("subject.revealUUID")}
           </button>
           <button
             type="button"
             onClick={() => revealCredential("password")}
-            className="rounded bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
+            className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
           >
             {t("subject.revealPassword")}
           </button>
         </div>
         {showCredential && (
-          <div className="mt-3 rounded bg-zinc-950 p-3">
-            <div className="text-xs text-zinc-400">{showCredential}</div>
+          <div className="mt-3 rounded bg-background p-3">
+            <div className="text-xs text-muted-foreground">{showCredential}</div>
             <div className="font-mono text-sm">{credentialValue}</div>
           </div>
         )}
       </div>
 
-      <div className="rounded border border-zinc-800 bg-zinc-900 p-4">
+      <div className="rounded border border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">{t("subject.devices")}</h3>
         {devices.data?.devices.length === 0 ? (
-          <div className="text-sm text-zinc-400">{t("subject.noDevices")}</div>
+          <div className="text-sm text-muted-foreground">{t("subject.noDevices")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-zinc-800 text-xs text-zinc-400">
+              <tr className="border-b border-border text-xs text-muted-foreground">
                 <th className="py-2 text-start">{t("device.fingerprint")}</th>
                 <th className="text-start">{t("device.lastSeen")}</th>
                 <th className="text-start">{t("device.lastIP")}</th>
@@ -187,12 +187,12 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
             </thead>
             <tbody>
               {devices.data?.devices.map((device) => (
-                <tr key={device.id} className="border-b border-zinc-900">
+                <tr key={device.id} className="border-b border-border">
                   <td className="py-1.5 font-mono text-xs">{device.fingerprint}</td>
-                  <td className="font-mono text-xs text-zinc-500">
+                  <td className="font-mono text-xs text-muted-foreground">
                     {formatTimestamp(device.last_seen_at)}
                   </td>
-                  <td className="font-mono text-xs text-zinc-500">{device.last_ip}</td>
+                  <td className="font-mono text-xs text-muted-foreground">{device.last_ip}</td>
                 </tr>
               ))}
             </tbody>

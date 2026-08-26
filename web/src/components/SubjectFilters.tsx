@@ -156,7 +156,7 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
             <button
               type="button"
               onClick={() => setOrder(order === "asc" ? "desc" : "asc")}
-              className="px-3 py-1.5 bg-secondary border border-input rounded text-xs hover:bg-zinc-700"
+              className="px-3 py-1.5 bg-secondary border border-input rounded text-xs hover:bg-secondary/80"
             >
               {order === "asc" ? "↑" : "↓"}
             </button>
@@ -213,7 +213,7 @@ export function SubjectFilters({ onFilterChange }: SubjectFiltersProps) {
           <button
             type="button"
             onClick={clearFilters}
-            className="px-4 py-1.5 text-xs text-muted-foreground hover:text-zinc-100"
+            className="px-4 py-1.5 text-xs text-muted-foreground hover:text-foreground"
           >
             {t('filters.clear_filters')}
           </button>

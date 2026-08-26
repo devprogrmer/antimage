@@ -64,7 +64,7 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
         <button
           type="button"
           onClick={() => setShowCreate(true)}
-          className="rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-700"
+          className="rounded bg-primary px-3 py-1 text-sm hover:bg-primary/90"
         >
           {t("subjects.create")}
         </button>
@@ -86,9 +86,9 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
 
       <SubjectFilters onFilterChange={setFilters} />
 
-      <table className="w-full border-collapse text-sm text-zinc-200">
+      <table className="w-full border-collapse text-sm text-foreground">
         <thead>
-          <tr className="border-b border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
+          <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
             <th className="py-2 pe-3 text-start">{t("subject.name")}</th>
             <th className="pe-3 text-start">{t("subject.status")}</th>
             <th className="pe-3 text-start">{t("subject.expires")}</th>
@@ -100,7 +100,7 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
           {subjects.data?.subjects.map((subject) => (
             <tr
               key={subject.id}
-              className="cursor-pointer border-b border-zinc-900 hover:bg-zinc-900"
+              className="cursor-pointer border-b border-border hover:bg-accent/50"
             >
               <td
                 onClick={() => onSelect(subject.id)}
@@ -111,10 +111,10 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
               <td className="pe-3">
                 <StatusBadge subject={subject} />
               </td>
-              <td className="pe-3 font-mono text-xs text-zinc-500">
+              <td className="pe-3 font-mono text-xs text-muted-foreground">
                 {formatTimestamp(subject.expires_at)}
               </td>
-              <td className="pe-3 font-mono text-xs text-zinc-500">
+              <td className="pe-3 font-mono text-xs text-muted-foreground">
                 {formatTimestamp(subject.created_at)}
               </td>
               <td>
@@ -145,12 +145,12 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
 
 function StatusBadge({ subject }: { subject: Subject }) {
   if (!subject.enabled) {
-    return <span className="text-zinc-500">{t("subject.disabled")}</span>;
+    return <span className="text-muted-foreground">{t("subject.disabled")}</span>;
   }
   if (subject.expired_at) {
-    return <span className="text-amber-500">{t("subject.expired")}</span>;
+    return <span className="text-warning">{t("subject.expired")}</span>;
   }
-  return <span className="text-green-500">{t("subject.active")}</span>;
+  return <span className="text-success">{t("subject.active")}</span>;
 }
 
 function CreateSubjectForm({ onClose }: { onClose: () => void }) {

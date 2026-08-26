@@ -67,7 +67,7 @@ function MutationError({ error }: { error: unknown }) {
   if (!error) return null;
   const message = error instanceof ApiError ? error.message : String(error);
   return (
-    <p className="mt-1 text-xs text-red-400" role="alert">
+    <p className="mt-1 text-xs text-destructive" role="alert">
       {message}
     </p>
   );
@@ -161,15 +161,15 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
     onSuccess: invalidate,
   });
 
-  if (caps.isLoading) return <p className="text-xs text-zinc-500">{t("loading")}</p>;
+  if (caps.isLoading) return <p className="text-xs text-muted-foreground">{t("loading")}</p>;
 
   // Not an error state. A node whose adapters have no routing engine is a
   // normal node, and saying so is more use than an empty panel.
   if (!caps.data?.supported) {
     return (
       <section>
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-zinc-500">{t("egress.title")}</h3>
-        <p className="text-xs text-zinc-500">{t("egress.unsupported")}</p>
+        <h3 className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">{t("egress.title")}</h3>
+        <p className="text-xs text-muted-foreground">{t("egress.unsupported")}</p>
       </section>
     );
   }
@@ -185,19 +185,19 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
   return (
     <section className="space-y-4">
       <header className="flex items-baseline gap-3">
-        <h3 className="text-xs uppercase tracking-wide text-zinc-500">{t("egress.title")}</h3>
-        <span className="font-mono text-[11px] text-zinc-600">{caps.data.adapter_kind}</span>
+        <h3 className="text-xs uppercase tracking-wide text-muted-foreground">{t("egress.title")}</h3>
+        <span className="font-mono text-[11px] text-muted-foreground">{caps.data.adapter_kind}</span>
       </header>
 
       {/* Outbounds */}
       <div>
-        <h4 className="mb-1 text-xs text-zinc-400">{t("egress.outbounds")}</h4>
+        <h4 className="mb-1 text-xs text-muted-foreground">{t("egress.outbounds")}</h4>
         {(outbounds.data?.outbounds ?? []).length === 0 ? (
-          <p className="text-xs text-zinc-600">{t("egress.noOutbounds")}</p>
+          <p className="text-xs text-muted-foreground">{t("egress.noOutbounds")}</p>
         ) : (
           <table className="w-full border-collapse font-mono text-xs">
             <thead>
-              <tr className="border-b border-zinc-800 text-start text-zinc-500">
+              <tr className="border-b border-border text-start text-muted-foreground">
                 <th className="py-1 pe-3 text-start">{t("egress.tag")}</th>
                 <th className="pe-3 text-start">{t("egress.kind")}</th>
                 <th className="pe-3 text-start">{t("subject.status")}</th>
@@ -206,10 +206,10 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
             </thead>
             <tbody>
               {(outbounds.data?.outbounds ?? []).map((o) => (
-                <tr key={o.id} className="border-b border-zinc-900">
+                <tr key={o.id} className="border-b border-border">
                   <td className="py-1 pe-3">{o.tag}</td>
-                  <td className="pe-3 text-zinc-400">{o.kind}</td>
-                  <td className="pe-3 text-zinc-500">
+                  <td className="pe-3 text-muted-foreground">{o.kind}</td>
+                  <td className="pe-3 text-muted-foreground">
                     {o.enabled ? t("subject.enabled") : t("subject.disabled")}
                   </td>
                   <td>
@@ -242,20 +242,20 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
 
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">{t("egress.tag")}</span>
+            <span className="text-[11px] text-muted-foreground">{t("egress.tag")}</span>
             <input
               value={tag}
               onChange={(e) => setTag(e.target.value)}
-              className="w-32 border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+              className="w-32 border border-input bg-card px-2 py-1 font-mono text-xs"
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">{t("egress.kind")}</span>
+            <span className="text-[11px] text-muted-foreground">{t("egress.kind")}</span>
             {/* The adapter's list, never the frontend's. */}
             <select
               value={kind}
               onChange={(e) => setKind(e.target.value)}
-              className="border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+              className="border border-input bg-card px-2 py-1 font-mono text-xs"
             >
               {caps.data.outbound_kinds.map((k) => (
                 <option key={k} value={k}>
@@ -265,19 +265,19 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
             </select>
           </label>
           <label className="flex flex-1 flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">{t("egress.params")}</span>
+            <span className="text-[11px] text-muted-foreground">{t("egress.params")}</span>
             <input
               value={params}
               onChange={(e) => setParams(e.target.value)}
               placeholder={t("egress.paramsPlaceholder")}
-              className="w-full border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+              className="w-full border border-input bg-card px-2 py-1 font-mono text-xs"
             />
           </label>
           <button
             type="button"
             disabled={tag.trim() === "" || createOutbound.isPending}
             onClick={() => createOutbound.mutate()}
-            className="border border-zinc-700 px-3 py-1 text-xs hover:bg-zinc-800 disabled:opacity-40"
+            className="border border-input px-3 py-1 text-xs hover:bg-accent disabled:opacity-40"
           >
             {createOutbound.isPending ? t("egress.saving") : t("create")}
           </button>
@@ -287,14 +287,14 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
 
       {/* Routing rules */}
       <div>
-        <h4 className="mb-1 text-xs text-zinc-400">{t("egress.rules")}</h4>
-        <p className="mb-1 text-[11px] text-zinc-600">{t("egress.rulesOrderNote")}</p>
+        <h4 className="mb-1 text-xs text-muted-foreground">{t("egress.rules")}</h4>
+        <p className="mb-1 text-[11px] text-muted-foreground">{t("egress.rulesOrderNote")}</p>
         {(rules.data?.rules ?? []).length === 0 ? (
-          <p className="text-xs text-zinc-600">{t("egress.noRules")}</p>
+          <p className="text-xs text-muted-foreground">{t("egress.noRules")}</p>
         ) : (
           <table className="w-full border-collapse font-mono text-xs">
             <thead>
-              <tr className="border-b border-zinc-800 text-start text-zinc-500">
+              <tr className="border-b border-border text-start text-muted-foreground">
                 <th className="py-1 pe-3 text-start">{t("egress.priority")}</th>
                 <th className="pe-3 text-start">{t("egress.match")}</th>
                 <th className="pe-3 text-start">{t("egress.target")}</th>
@@ -303,9 +303,9 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
             </thead>
             <tbody>
               {(rules.data?.rules ?? []).map((r) => (
-                <tr key={r.id} className="border-b border-zinc-900">
-                  <td className="py-1 pe-3 text-zinc-400">{formatNumber(r.priority)}</td>
-                  <td className="pe-3 text-zinc-300">
+                <tr key={r.id} className="border-b border-border">
+                  <td className="py-1 pe-3 text-muted-foreground">{formatNumber(r.priority)}</td>
+                  <td className="pe-3 text-foreground">
                     {[
                       ...(r.domains ?? []),
                       ...(r.geosite ?? []),
@@ -319,7 +319,7 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
                     <button
                       type="button"
                       onClick={() => deleteRule.mutate(r.id)}
-                      className="text-red-400 hover:text-red-300"
+                      className="text-destructive hover:text-destructive"
                     >
                       {t("delete")}
                     </button>
@@ -333,47 +333,47 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
 
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">{t("egress.priority")}</span>
+            <span className="text-[11px] text-muted-foreground">{t("egress.priority")}</span>
             <input
               value={rulePriority}
               onChange={(e) => setRulePriority(e.target.value)}
               inputMode="numeric"
-              className="w-16 border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+              className="w-16 border border-input bg-card px-2 py-1 font-mono text-xs"
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">{t("egress.domains")}</span>
+            <span className="text-[11px] text-muted-foreground">{t("egress.domains")}</span>
             <input
               value={ruleDomains}
               onChange={(e) => setRuleDomains(e.target.value)}
               placeholder={t("egress.commaSeparated")}
-              className="w-44 border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+              className="w-44 border border-input bg-card px-2 py-1 font-mono text-xs"
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">{t("egress.ipCidrs")}</span>
+            <span className="text-[11px] text-muted-foreground">{t("egress.ipCidrs")}</span>
             <input
               value={ruleCIDRs}
               onChange={(e) => setRuleCIDRs(e.target.value)}
               placeholder={t("egress.commaSeparated")}
-              className="w-36 border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+              className="w-36 border border-input bg-card px-2 py-1 font-mono text-xs"
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">{t("egress.ports")}</span>
+            <span className="text-[11px] text-muted-foreground">{t("egress.ports")}</span>
             <input
               value={rulePorts}
               onChange={(e) => setRulePorts(e.target.value)}
               placeholder={t("egress.portsPlaceholder")}
-              className="w-24 border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+              className="w-24 border border-input bg-card px-2 py-1 font-mono text-xs"
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-zinc-500">{t("egress.target")}</span>
+            <span className="text-[11px] text-muted-foreground">{t("egress.target")}</span>
             <select
               value={ruleTarget}
               onChange={(e) => setRuleTarget(e.target.value)}
-              className="border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+              className="border border-input bg-card px-2 py-1 font-mono text-xs"
             >
               <option value="">{t("egress.chooseTarget")}</option>
               {selectableTags.map((tagName) => (
@@ -387,7 +387,7 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
             type="button"
             disabled={ruleTarget === "" || createRule.isPending}
             onClick={() => createRule.mutate()}
-            className="border border-zinc-700 px-3 py-1 text-xs hover:bg-zinc-800 disabled:opacity-40"
+            className="border border-input px-3 py-1 text-xs hover:bg-accent disabled:opacity-40"
           >
             {createRule.isPending ? t("egress.saving") : t("create")}
           </button>
@@ -397,12 +397,12 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
 
       {/* Default outbound */}
       <div>
-        <h4 className="mb-1 text-xs text-zinc-400">{t("egress.default")}</h4>
-        <p className="mb-1 text-[11px] text-zinc-600">{t("egress.defaultNote")}</p>
+        <h4 className="mb-1 text-xs text-muted-foreground">{t("egress.default")}</h4>
+        <p className="mb-1 text-[11px] text-muted-foreground">{t("egress.defaultNote")}</p>
         <select
           value={""}
           onChange={(e) => setDefault.mutate(e.target.value)}
-          className="border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs"
+          className="border border-input bg-card px-2 py-1 font-mono text-xs"
         >
           <option value="">{t("egress.defaultNone")}</option>
           {selectableTags.map((tagName) => (
