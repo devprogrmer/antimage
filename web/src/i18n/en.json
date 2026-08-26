@@ -375,5 +375,17 @@
   "templates.noServices": "No service templates yet.",
   "templates.noPresets": "No user presets yet.",
   "templates.confirmDelete": "Delete this template?",
-  "templates.confirmDeletePreset": "Delete this preset?"
+  "templates.confirmDeletePreset": "Delete this preset?",
+  "health.tab": "Health",
+  "health.controlPlane": "Control plane",
+  "health.host": "Host",
+  "health.reconnects": "Reconnects",
+  "health.reconcileMs": "Last reconcile",
+  "health.rtt": "Average RTT",
+  "health.failedStreak": "Failed in a row",
+  "health.disk": "Disk",
+  "health.connections": "Connections",
+  "health.latency": "Latency",
+  "health.lastSample": "Last sample",
+  "health.noHistory": "No health samples recorded yet."
 }

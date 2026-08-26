@@ -375,5 +375,17 @@
   "templates.noServices": "暂无服务模板。",
   "templates.noPresets": "暂无用户预设。",
   "templates.confirmDelete": "要删除此模板吗？",
-  "templates.confirmDeletePreset": "要删除此预设吗？"
+  "templates.confirmDeletePreset": "要删除此预设吗？",
+  "health.tab": "健康",
+  "health.controlPlane": "控制面",
+  "health.host": "主机",
+  "health.reconnects": "重连次数",
+  "health.reconcileMs": "上次协调",
+  "health.rtt": "平均往返时延",
+  "health.failedStreak": "连续失败",
+  "health.disk": "磁盘",
+  "health.connections": "连接数",
+  "health.latency": "时延",
+  "health.lastSample": "最近采样",
+  "health.noHistory": "尚未记录健康采样。"
 }

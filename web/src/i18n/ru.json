@@ -375,5 +375,17 @@
   "templates.noServices": "Шаблонов сервисов пока нет.",
   "templates.noPresets": "Пресетов пока нет.",
   "templates.confirmDelete": "Удалить этот шаблон?",
-  "templates.confirmDeletePreset": "Удалить этот пресет?"
+  "templates.confirmDeletePreset": "Удалить этот пресет?",
+  "health.tab": "Состояние",
+  "health.controlPlane": "Плоскость управления",
+  "health.host": "Хост",
+  "health.reconnects": "Переподключения",
+  "health.reconcileMs": "Последняя сверка",
+  "health.rtt": "Средний RTT",
+  "health.failedStreak": "Неудач подряд",
+  "health.disk": "Диск",
+  "health.connections": "Соединения",
+  "health.latency": "Задержка",
+  "health.lastSample": "Последний замер",
+  "health.noHistory": "Замеров состояния пока нет."
 }
