@@ -194,17 +194,33 @@ func RollupHourly(ctx context.Context, st *store.Store, _ int64) error {
 		}
 
 		// Hour boundaries are Unix epoch aligned: (created_at / 3600) * 3600.
+		//
+		// Folded per (subject, node, service) since C3, because billable is
+		// raw * node_coef * service_coef * subject_coef * reseller_coef and two
+		// of those factors have nothing to apply to on a row that does not know
+		// its node or its service. Summing the dimensions away here would
+		// discard them permanently: usage_deltas is pruned after seven days, so
+		// the rollup is the only long-term record.
+		//
+		// The conflict target is the COALESCE expression index, not the bare
+		// columns. NULLs compare distinct in SQLite, so targeting the columns
+		// would silently stop merging unattributed rows and insert a duplicate
+		// on every fold instead.
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO usage_rollups_hourly (subject_id, hour_start, uplink_bytes, downlink_bytes)
+			INSERT INTO usage_rollups_hourly
+				(subject_id, node_id, service_id, hour_start, uplink_bytes, downlink_bytes)
 			SELECT
 				subject_id,
+				node_id,
+				service_id,
 				(created_at / 3600) * 3600 AS hour_start,
 				SUM(uplink_bytes) AS uplink_bytes,
 				SUM(downlink_bytes) AS downlink_bytes
 			FROM usage_deltas
 			WHERE id > ? AND id <= ?
-			GROUP BY subject_id, hour_start
-			ON CONFLICT (subject_id, hour_start) DO UPDATE SET
+			GROUP BY subject_id, node_id, service_id, hour_start
+			ON CONFLICT (subject_id, hour_start,
+			             COALESCE(node_id, 0), COALESCE(service_id, 0)) DO UPDATE SET
 				uplink_bytes = usage_rollups_hourly.uplink_bytes + excluded.uplink_bytes,
 				downlink_bytes = usage_rollups_hourly.downlink_bytes + excluded.downlink_bytes`,
 			watermark, ceiling); err != nil {
@@ -237,17 +253,32 @@ func RollupHourly(ctx context.Context, st *store.Store, _ int64) error {
 func RollupDaily(ctx context.Context, st *store.Store, now int64) error {
 	return st.Write(ctx, func(tx *sql.Tx) error {
 		// Day boundaries: day_start = (hour_start / 86400) * 86400.
+		//
+		// Carries the same (node, service) grain as the hourly table: a daily
+		// row that summed the dimensions away would be unbillable at the very
+		// horizon the daily rollup exists to serve.
+		//
+		// This one OVERWRITES rather than adds, because it recomputes each
+		// day's total from the hourly rows every run. That is what makes it
+		// safe to call repeatedly, and it is also why the conflict target has
+		// to be the COALESCE index: an unattributed group that failed to match
+		// would insert a duplicate, and both rows would then hold the full
+		// group total, doubling the day on every read.
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO usage_rollups_daily (subject_id, day_start, uplink_bytes, downlink_bytes)
+			INSERT INTO usage_rollups_daily
+				(subject_id, node_id, service_id, day_start, uplink_bytes, downlink_bytes)
 			SELECT
 				subject_id,
+				node_id,
+				service_id,
 				(hour_start / 86400) * 86400 AS day_start,
 				SUM(uplink_bytes) AS uplink_bytes,
 				SUM(downlink_bytes) AS downlink_bytes
 			FROM usage_rollups_hourly
 			WHERE hour_start < ?
-			GROUP BY subject_id, day_start
-			ON CONFLICT (subject_id, day_start) DO UPDATE SET
+			GROUP BY subject_id, node_id, service_id, day_start
+			ON CONFLICT (subject_id, day_start,
+			             COALESCE(node_id, 0), COALESCE(service_id, 0)) DO UPDATE SET
 				uplink_bytes = excluded.uplink_bytes,
 				downlink_bytes = excluded.downlink_bytes`,
 			now)

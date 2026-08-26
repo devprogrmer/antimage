@@ -164,12 +164,17 @@ func inflate(t *testing.T, st *store.Store, times int) {
 	ctx := context.Background()
 	for i := 0; i < times; i++ {
 		err := st.Write(ctx, func(tx *sql.Tx) error {
+			// Same grain and conflict target as the real fold, so the damage
+			// this reproduces is the damage the real code could have done.
 			_, err := tx.ExecContext(ctx, `
-				INSERT INTO usage_rollups_hourly (subject_id, hour_start, uplink_bytes, downlink_bytes)
-				SELECT subject_id, (created_at / 3600) * 3600, SUM(uplink_bytes), SUM(downlink_bytes)
+				INSERT INTO usage_rollups_hourly
+					(subject_id, node_id, service_id, hour_start, uplink_bytes, downlink_bytes)
+				SELECT subject_id, node_id, service_id,
+				       (created_at / 3600) * 3600, SUM(uplink_bytes), SUM(downlink_bytes)
 				  FROM usage_deltas
-				 GROUP BY subject_id, (created_at / 3600) * 3600
-				ON CONFLICT (subject_id, hour_start) DO UPDATE SET
+				 GROUP BY subject_id, node_id, service_id, (created_at / 3600) * 3600
+				ON CONFLICT (subject_id, hour_start,
+				             COALESCE(node_id, 0), COALESCE(service_id, 0)) DO UPDATE SET
 					uplink_bytes = usage_rollups_hourly.uplink_bytes + excluded.uplink_bytes,
 					downlink_bytes = usage_rollups_hourly.downlink_bytes + excluded.downlink_bytes`)
 			return err
@@ -399,5 +404,57 @@ func TestRepairLeavesUnrecoverableBucketsAlone(t *testing.T) {
 	if got := rollupTotal(t, st); got != inflatedTotal {
 		t.Errorf("rollup total = %d, want %d untouched: an unrecoverable bucket "+
 			"was rewritten with a figure nothing supports", got, inflatedTotal)
+	}
+}
+
+// Repair must work at the grain the rollups are actually kept at.
+//
+// Since C3 a rollup row is per (subject, node, service, hour). A repair that
+// matched rollup rows to deltas on (subject, hour) alone would pair EVERY
+// group's row with the whole subject-hour total and write that into each --
+// repairing an inflation defect by multiplying the traffic by the number of
+// groups the subject used.
+//
+// Every other repair test uses a single group, where the two matches are
+// indistinguishable, so this is the only one that can tell them apart.
+func TestRepairDoesNotInflateAcrossServices(t *testing.T) {
+	st := mustOpen(t)
+	defer st.Close()
+	ctx := context.Background()
+	nodeID, alice, _ := twoSubjects(t, st)
+	svcA := seedService(t, st, nodeID)
+	svcB := seedService(t, st, nodeID)
+
+	const at = 3600
+	if err := IngestUsageReport(ctx, st, nodeID, 1, []UsageDelta{
+		{SubjectID: alice, ServiceID: svcA, UplinkBytes: 100, DownlinkBytes: 0},
+		{SubjectID: alice, ServiceID: svcB, UplinkBytes: 700, DownlinkBytes: 0},
+	}, at); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if err := RollupHourly(ctx, st, at); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+
+	before := hourlyBytes(t, st, alice)
+	if before != 800 {
+		t.Fatalf("rolled up %d bytes, want 800", before)
+	}
+
+	// The rollup is already correct, so repair has nothing to do.
+	report, err := RepairHourlyRollups(ctx, st, false)
+	if err != nil {
+		t.Fatalf("repair: %v", err)
+	}
+	if report.ProjectedDelta() != 0 {
+		t.Errorf("repair projected %+d bytes over a correct rollup, want 0",
+			report.ProjectedDelta())
+	}
+
+	after := hourlyBytes(t, st, alice)
+	if after != before {
+		t.Errorf("repair changed a correct rollup from %d to %d bytes; it matched "+
+			"each service's row against the whole subject-hour total",
+			before, after)
 	}
 }
