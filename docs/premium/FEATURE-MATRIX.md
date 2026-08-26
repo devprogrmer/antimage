@@ -125,8 +125,8 @@ ordinary backend work rather than a change to the control plane's shape.
 
 | Feature | Benchmark | Status |
 |---|---|---|
-| Outbound Studio (§21) | 3X-UI, vpn-ui | **UI-** — document v3, both adapters, tables and API done; no UI |
-| Routing Studio (§28) | 3X-UI | **UI-** — rules, matchers and ordering done end to end; no UI |
+| Outbound Studio (§21) | 3X-UI, vpn-ui | **B** — document v3, both adapters, tables and API done; UI at `web/src/components/EgressPanel.tsx` |
+| Routing Studio (§28) | 3X-UI | **B** — rules, matchers and ordering done end to end; UI at `web/src/components/EgressPanel.tsx` |
 | Provider abstraction (§22) | vpn-ui | **gap-B** — models credentials and locations above an outbound |
 | Multi-location outbound (§23) | vpn-ui | **gap-B** |
 | Outbound pools + selection (§24) | vpn-ui | **gap-B** |
