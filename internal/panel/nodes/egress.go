@@ -14,8 +14,13 @@ import (
 // off is not part of that -- the same reasoning that keeps a disabled subject
 // out of buildSubjects rather than shipping it with enabled=false.
 //
+// Params are stored sealed (encrypted with the master key) and are unsealed here
+// before being placed in the document. If unsealer is nil and outbounds exist,
+// the function returns an error rather than shipping params that may be sealed
+// under a key the caller does not have.
+//
 // Ordered by id so the canonical document is byte-identical across builds.
-func buildOutbounds(ctx context.Context, tx *sql.Tx, nodeID int64) ([]Outbound, error) {
+func buildOutbounds(ctx context.Context, tx *sql.Tx, nodeID int64, unsealer Unsealer) ([]Outbound, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id, tag, kind, params
 		   FROM outbounds
@@ -29,11 +34,24 @@ func buildOutbounds(ctx context.Context, tx *sql.Tx, nodeID int64) ([]Outbound, 
 	var out []Outbound
 	for rows.Next() {
 		var o Outbound
-		var params string
-		if err := rows.Scan(&o.ID, &o.Tag, &o.Kind, &params); err != nil {
+		var paramsSealed string
+		if err := rows.Scan(&o.ID, &o.Tag, &o.Kind, &paramsSealed); err != nil {
 			return nil, fmt.Errorf("scan outbound: %w", err)
 		}
-		o.Params = json.RawMessage(params)
+
+		// If we have outbounds but no unsealer, fail rather than potentially
+		// shipping sealed data or omitting configured egress paths.
+		if unsealer == nil {
+			return nil, fmt.Errorf(
+				"node %d has outbound(s) but no unsealer was supplied: "+
+					"refusing to build a document that would omit them", nodeID)
+		}
+
+		params, err := OpenOutboundParams(unsealer, paramsSealed)
+		if err != nil {
+			return nil, fmt.Errorf("unseal outbound %d params: %w", o.ID, err)
+		}
+		o.Params = params
 		out = append(out, o)
 	}
 	if err := rows.Err(); err != nil {

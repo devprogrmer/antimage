@@ -829,7 +829,7 @@ go test ./...
 
 ### CI/CD
 
-- **GitHub Actions**: Not yet configured
+- **GitHub Actions**: Three workflows configured (go, realruntime, web) at `.github/workflows/ci.yml`
 - **Manual Testing**: All tests passing on Linux, macOS, Windows (build host)
 
 ---

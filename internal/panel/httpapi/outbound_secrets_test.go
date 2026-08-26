@@ -32,6 +32,11 @@ import (
 
 const wgOutboundKey = "aFakePrivateKeyForTestingOnly0000000000000o="
 
+func mustMarshal(v interface{}) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
 // seedWireGuardOutbound creates an outbound whose params contain a secret.
 func seedWireGuardOutbound(t *testing.T, env *testEnv, token string) {
 	t.Helper()
@@ -102,6 +107,11 @@ func TestOutboundRedactionKeepsTheRestOfTheParams(t *testing.T) {
 		t.Fatalf("listed %d outbounds, want 1", len(out.Outbounds))
 	}
 	p := out.Outbounds[0].Params
+
+	// Debug: print what we actually got
+	t.Logf("Received params: %+v", p)
+	t.Logf("Params as JSON: %s", mustMarshal(p))
+
 	if p["endpoint"] != "198.51.100.1:51820" {
 		t.Errorf("endpoint = %v, want it preserved; redaction removed a "+
 			"non-secret field the operator needs to see", p["endpoint"])
@@ -142,16 +152,23 @@ func TestEditingAnOutboundKeepsTheUnchangedSecret(t *testing.T) {
 		`SELECT params FROM outbounds WHERE id = 1`).Scan(&stored); err != nil {
 		t.Fatalf("read stored params: %v", err)
 	}
-	if !strings.Contains(stored, wgOutboundKey) {
-		t.Errorf("the stored private key was overwritten by the round trip; "+
-			"stored params are now %s", stored)
+
+	// Params are now sealed in the database, so unseal them first
+	unsealed, err := nodes.OpenOutboundParams(env.box, stored)
+	if err != nil {
+		t.Fatalf("unseal stored params: %v", err)
 	}
-	if strings.Contains(stored, RedactedValue) {
-		t.Errorf("the literal sentinel was written into storage: %s", stored)
+
+	if !strings.Contains(string(unsealed), wgOutboundKey) {
+		t.Errorf("the stored private key was overwritten by the round trip; "+
+			"stored params are now %s", unsealed)
+	}
+	if strings.Contains(string(unsealed), RedactedValue) {
+		t.Errorf("the literal sentinel was written into storage: %s", unsealed)
 	}
 	// And the edit the operator actually made took effect.
-	if !strings.Contains(stored, "203.0.113.9") {
-		t.Errorf("the endpoint edit was lost: %s", stored)
+	if !strings.Contains(string(unsealed), "203.0.113.9") {
+		t.Errorf("the endpoint edit was lost: %s", unsealed)
 	}
 }
 
@@ -175,12 +192,19 @@ func TestASecretCanStillBeChanged(t *testing.T) {
 		`SELECT params FROM outbounds WHERE id = 1`).Scan(&stored); err != nil {
 		t.Fatalf("read stored params: %v", err)
 	}
-	if !strings.Contains(stored, rotated) {
-		t.Errorf("the rotated key was not stored, so an operator cannot change "+
-			"an upstream credential: %s", stored)
+
+	// Params are now sealed in the database, so unseal them first
+	unsealed, err := nodes.OpenOutboundParams(env.box, stored)
+	if err != nil {
+		t.Fatalf("unseal stored params: %v", err)
 	}
-	if strings.Contains(stored, wgOutboundKey) {
-		t.Errorf("the old key survived a deliberate rotation: %s", stored)
+
+	if !strings.Contains(string(unsealed), rotated) {
+		t.Errorf("the rotated key was not stored, so an operator cannot change "+
+			"an upstream credential: %s", unsealed)
+	}
+	if strings.Contains(string(unsealed), wgOutboundKey) {
+		t.Errorf("the old key survived a deliberate rotation: %s", unsealed)
 	}
 }
 
@@ -197,7 +221,7 @@ func TestTheRealSecretStillReachesTheDesiredDocument(t *testing.T) {
 	var snap *nodes.Snapshot
 	if err := env.store.Write(context.Background(), func(tx *sql.Tx) error {
 		var err error
-		snap, err = nodes.BuildDesiredSnapshot(context.Background(), tx, 1)
+		snap, err = nodes.BuildDesiredSnapshot(context.Background(), tx, 1, nodes.WithUnsealer(env.box))
 		return err
 	}); err != nil {
 		t.Fatalf("build desired snapshot: %v", err)

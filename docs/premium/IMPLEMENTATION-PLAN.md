@@ -3,7 +3,7 @@
 Phases, ordered by dependency rather than by the specification's numbering.
 Each phase is one branch and one PR off `master`, with its own tests.
 
-Nothing here is implemented. This document is the sequence proposed for
+Phases A-E are implemented; Phase F is in progress. This document is the sequence proposed for
 approval after the analysis phase (§86).
 
 ---

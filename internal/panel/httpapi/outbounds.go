@@ -153,9 +153,15 @@ func (d Deps) handleListOutbounds(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusInternalServerError, "internal", "could not read outbounds")
 			return
 		}
+		// Unseal params before redaction
+		unsealed, err := nodes.OpenOutboundParams(d.Box, params)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "internal", "could not unseal outbound params")
+			return
+		}
 		// Credential fields never leave the panel. Which ones they are comes
 		// from the adapter's own schema; see secret_params.go.
-		o.Params = redactParams(outboundSchemaFor(adapterKind), []byte(params))
+		o.Params = redactParams(outboundSchemaFor(adapterKind), unsealed)
 		o.Enabled = enabled == 1
 		out = append(out, o)
 	}
@@ -205,13 +211,21 @@ func (d Deps) handleCreateOutbound(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	var id int64
+
+	// Seal params before storage
+	sealedParams, err := nodes.SealOutboundParams(d.Box, json.RawMessage(outboundParamsOf(req)))
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not seal outbound params")
+		return
+	}
+
 	_, err = nodes.CommitNodeChange(ctx, d.Store, nodeID,
 		d.actorAudit(actor, r), RequestID(ctx), "create outbound",
 		func(tx *sql.Tx) error {
 			res, execErr := tx.ExecContext(ctx,
 				`INSERT INTO outbounds (node_id, tag, kind, params, enabled, created_at, updated_at)
 				 VALUES (?,?,?,?,?,?,?)`,
-				nodeID, req.Tag, req.Kind, outboundParamsOf(req), outboundEnabledOf(req),
+				nodeID, req.Tag, req.Kind, sealedParams, outboundEnabledOf(req),
 				d.now().Unix(), d.now().Unix())
 			if execErr != nil {
 				return execErr
@@ -287,7 +301,15 @@ func (d Deps) handleUpdateOutbound(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "internal", "could not read outbound")
 		return
 	}
-	merged, err := unredactParams(outboundParamsBytes(req), []byte(storedParams))
+
+	// Unseal stored params before merging with the incoming request
+	unsealedStored, err := nodes.OpenOutboundParams(d.Box, storedParams)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not unseal stored params")
+		return
+	}
+
+	merged, err := unredactParams(outboundParamsBytes(req), unsealedStored)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "bad_request", "malformed params")
 		return
@@ -301,6 +323,14 @@ func (d Deps) handleUpdateOutbound(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	var found bool
+
+	// Seal params before storage
+	sealedParams, err := nodes.SealOutboundParams(d.Box, json.RawMessage(outboundParamsOf(req)))
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not seal outbound params")
+		return
+	}
+
 	_, err = nodes.CommitNodeChange(ctx, d.Store, nodeID,
 		d.actorAudit(actor, r), RequestID(ctx), "update outbound",
 		func(tx *sql.Tx) error {
@@ -310,7 +340,7 @@ func (d Deps) handleUpdateOutbound(w http.ResponseWriter, r *http.Request) {
 			res, execErr := tx.ExecContext(ctx,
 				`UPDATE outbounds SET tag = ?, kind = ?, params = ?, enabled = ?, updated_at = ?
 				  WHERE id = ? AND node_id = ?`,
-				req.Tag, req.Kind, outboundParamsOf(req), outboundEnabledOf(req),
+				req.Tag, req.Kind, sealedParams, outboundEnabledOf(req),
 				d.now().Unix(), outboundID, nodeID)
 			if execErr != nil {
 				return execErr

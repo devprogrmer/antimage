@@ -272,9 +272,21 @@ func (d Deps) collectDashboardMetrics(ctx context.Context, sc rbac.Scope) (*Dash
 			nm.Status = "offline"
 		}
 
-		// TODO: Get actual CPU/RAM from node metrics table
-		nm.CPUPercent = 0
-		nm.RAMPercent = 0
+		// Get actual CPU/RAM from node_metrics table
+		var cpuPercent, memUsed, memTotal sql.NullFloat64
+		_ = d.Store.Read().QueryRowContext(ctx, `
+			SELECT cpu_percent, memory_used_bytes, memory_total_bytes
+			FROM node_metrics
+			WHERE node_id = ?
+			ORDER BY timestamp DESC
+			LIMIT 1`, nm.ID).Scan(&cpuPercent, &memUsed, &memTotal)
+
+		if cpuPercent.Valid {
+			nm.CPUPercent = cpuPercent.Float64
+		}
+		if memUsed.Valid && memTotal.Valid && memTotal.Float64 > 0 {
+			nm.RAMPercent = (memUsed.Float64 / memTotal.Float64) * 100.0
+		}
 
 		metrics.Nodes = append(metrics.Nodes, nm)
 	}

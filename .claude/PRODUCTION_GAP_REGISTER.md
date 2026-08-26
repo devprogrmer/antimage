@@ -193,7 +193,7 @@ $ find . -name "*_bench.go"
 - No deployment validation (dry-run, diff, preview)
 - No deployment history tracking (apply_runs table exists but minimal)
 - No health gates or staged rollout
-- No systemd units, Docker Compose, or Kubernetes manifests
+- No systemd units or Kubernetes manifests (docker-compose.yml exists at repo root)
 
 **Evidence:**
 ```bash
@@ -206,7 +206,7 @@ $ grep -r "DryRun\|Preview\|Diff" internal/panel --include="*.go"
 
 **Phase 9 Assessment (M5):**
 > "⚠️ MANUAL (no automation)"
-> "No systemd units provided. No Docker Compose examples. No CI/CD automation."
+> "No systemd units provided. Docker Compose example exists at repo root. CI/CD configured (.github/workflows/ci.yml)."
 > "Verdict: ⚠️ Works but manual, acceptable for MVP"
 
 **Missing Functionality:**
