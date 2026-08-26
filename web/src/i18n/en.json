@@ -297,5 +297,12 @@
   "theme.label": "Theme",
   "theme.light": "Light",
   "theme.dark": "Dark",
-  "theme.system": "System"
+  "theme.system": "System",
+  "close": "Close",
+  "table.columns": "Columns",
+  "node.none": "No nodes yet.",
+  "command.title": "Command palette",
+  "command.placeholder": "Search or jump to…",
+  "command.empty": "Nothing matches.",
+  "command.navigation": "Go to"
 }

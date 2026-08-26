@@ -37,3 +37,21 @@ if (typeof window !== "undefined" && !window.matchMedia) {
       dispatchEvent: () => false,
     }) as MediaQueryList;
 }
+
+// jsdom implements no ResizeObserver either, and cmdk (the command palette)
+// observes its list to keep the active item scrolled into view. Same class of
+// gap as matchMedia above: a missing browser API that surfaces as a component
+// crash rather than as the missing API it is.
+if (typeof window !== "undefined" && !window.ResizeObserver) {
+  window.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
+
+// And jsdom implements no scrollIntoView. cmdk calls it to keep the highlighted
+// command visible as the arrow keys move down the list.
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}

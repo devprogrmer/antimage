@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import { formatNumber, t } from "../i18n";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 /** Egress: the outbounds a node may send traffic through and the rules that
  *  select between them.
@@ -117,9 +118,15 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
 
   const deleteOutbound = useMutation({
     mutationFn: (id: number) => api.del(`/api/v1/nodes/${nodeId}/outbounds/${id}`),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      setPendingOutbound(null);
+    },
   });
 
+  // Which outbound is being removed. Named in the dialog, because a rule that
+  // still selects it is the failure this asks about.
+  const [pendingOutbound, setPendingOutbound] = useState<Outbound | null>(null);
   const [ruleTarget, setRuleTarget] = useState("");
   const [ruleDomains, setRuleDomains] = useState("");
   const [ruleCIDRs, setRuleCIDRs] = useState("");
@@ -208,15 +215,11 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
                   <td>
                     <button
                       type="button"
-                      onClick={() => {
-                        // Removing an outbound a rule still names would make
-                        // the node refuse its whole configuration, so this
-                        // asks first rather than discovering it at convergence.
-                        if (window.confirm(t("egress.confirmDeleteOutbound"))) {
-                          deleteOutbound.mutate(o.id);
-                        }
-                      }}
-                      className="text-red-400 hover:text-red-300"
+                      // Removing an outbound a rule still names would make the
+                      // node refuse its whole configuration, so this asks first
+                      // rather than discovering it at convergence.
+                      onClick={() => setPendingOutbound(o)}
+                      className="text-destructive hover:underline"
                     >
                       {t("delete")}
                     </button>
@@ -226,6 +229,15 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
             </tbody>
           </table>
         )}
+        <ConfirmDialog
+          open={pendingOutbound !== null}
+          onOpenChange={(open) => !open && setPendingOutbound(null)}
+          title={t("egress.confirmDeleteOutbound")}
+          description={pendingOutbound?.tag}
+          confirmLabel={t("delete")}
+          pending={deleteOutbound.isPending}
+          onConfirm={() => pendingOutbound && deleteOutbound.mutate(pendingOutbound.id)}
+        />
         <MutationError error={deleteOutbound.error} />
 
         <div className="mt-2 flex flex-wrap items-end gap-2">

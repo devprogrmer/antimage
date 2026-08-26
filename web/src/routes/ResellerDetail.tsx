@@ -5,6 +5,7 @@ import { can, useSession } from "../lib/session";
 import { Limit, MutationError } from "./Resellers";
 import type { Reseller } from "./Resellers";
 import { formatNumber, formatRelativeTime, formatTimestamp, t } from "../i18n";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 export interface Movement {
   id: number;
@@ -511,6 +512,9 @@ function Ledger({ resellerID }: { resellerID: number }) {
  */
 function DangerZone({ record }: { record: Reseller }) {
   const queryClient = useQueryClient();
+  // Deleting a tenant takes their customers with it, so it is asked rather
+  // than assumed. One record here, so a boolean is the honest state.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const remove = useMutation({
     mutationFn: () => api.del(`/api/v1/resellers/${record.id}`),
@@ -544,15 +548,21 @@ function DangerZone({ record }: { record: Reseller }) {
         )}
         <button
           type="button"
-          onClick={() => {
-            if (confirm(t("reseller.confirmDelete"))) remove.mutate();
-          }}
+          onClick={() => setConfirmingDelete(true)}
           disabled={remove.isPending}
           className="rounded bg-red-700 px-3 py-1 text-sm hover:bg-red-600 disabled:opacity-50"
         >
           {t("delete")}
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title={t("reseller.confirmDelete")}
+        confirmLabel={t("delete")}
+        pending={remove.isPending}
+        onConfirm={() => remove.mutate()}
+      />
       <MutationError error={remove.error} />
       <MutationError error={deactivate.error} />
     </section>

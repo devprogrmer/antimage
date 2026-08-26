@@ -297,5 +297,12 @@
   "theme.label": "主题",
   "theme.light": "浅色",
   "theme.dark": "深色",
-  "theme.system": "跟随系统"
+  "theme.system": "跟随系统",
+  "close": "关闭",
+  "table.columns": "列",
+  "node.none": "暂无节点。",
+  "command.title": "命令面板",
+  "command.placeholder": "搜索或跳转…",
+  "command.empty": "没有匹配项。",
+  "command.navigation": "前往"
 }

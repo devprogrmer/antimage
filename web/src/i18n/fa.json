@@ -297,5 +297,12 @@
   "theme.label": "پوسته",
   "theme.light": "روشن",
   "theme.dark": "تیره",
-  "theme.system": "سیستم"
+  "theme.system": "سیستم",
+  "close": "بستن",
+  "table.columns": "ستون‌ها",
+  "node.none": "هنوز گره‌ای وجود ندارد.",
+  "command.title": "پنل فرمان",
+  "command.placeholder": "جست‌وجو یا پرش به…",
+  "command.empty": "چیزی مطابقت ندارد.",
+  "command.navigation": "برو به"
 }

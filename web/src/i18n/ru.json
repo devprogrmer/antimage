@@ -297,5 +297,12 @@
   "theme.label": "Тема",
   "theme.light": "Светлая",
   "theme.dark": "Тёмная",
-  "theme.system": "Системная"
+  "theme.system": "Системная",
+  "close": "Закрыть",
+  "table.columns": "Столбцы",
+  "node.none": "Узлов пока нет.",
+  "command.title": "Командная палитра",
+  "command.placeholder": "Найти или перейти…",
+  "command.empty": "Ничего не найдено.",
+  "command.navigation": "Перейти к"
 }
