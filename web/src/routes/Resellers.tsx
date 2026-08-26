@@ -2,7 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError, api } from "../lib/api";
 import { can, useSession } from "../lib/session";
+import { Link } from "react-router-dom";
 import { formatNumber, formatTimestamp, t } from "../i18n";
+import { DataTable } from "../components/DataTable";
+import type { Column } from "../components/DataTable";
 
 export interface Reseller {
   id: number;
@@ -50,6 +53,59 @@ export function Resellers({ onSelect }: { onSelect: (id: number) => void }) {
     return <MutationError error={resellers.error} />;
   }
 
+  const columns: Column<Reseller>[] = [
+    {
+      id: "displayName",
+      header: t("reseller.displayName"),
+      sortValue: (r) => r.display_name,
+      hideable: false,
+      cell: (r) => (
+        <Link
+          to={`/resellers/${r.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="font-mono hover:underline"
+        >
+          {r.display_name}
+        </Link>
+      ),
+    },
+    {
+      id: "status",
+      header: t("reseller.status"),
+      // Disabled first when ascending: a suspended tenant is what an
+      // operator sorts this column to find.
+      sortValue: (r) => (r.enabled ? 1 : 0),
+      cell: (r) =>
+        r.enabled ? (
+          <span className="text-success">{t("reseller.enabled")}</span>
+        ) : (
+          <span className="text-muted-foreground">{t("reseller.disabled")}</span>
+        ),
+    },
+    {
+      id: "maxSubjects",
+      header: t("reseller.maxSubjects"),
+      // null means unlimited, which is the largest allowance rather than a
+      // missing one -- so it sorts above every number instead of last.
+      sortValue: (r) => (r.max_subjects === null ? Number.MAX_SAFE_INTEGER : r.max_subjects),
+      cell: (r) => <Limit value={r.max_subjects} />,
+    },
+    {
+      id: "creditFloor",
+      header: t("reseller.creditFloor"),
+      sortValue: (r) => r.credit_floor,
+      className: "font-mono text-xs",
+      cell: (r) => formatNumber(r.credit_floor),
+    },
+    {
+      id: "created",
+      header: t("reseller.created"),
+      sortValue: (r) => r.created_at,
+      className: "font-mono text-xs text-muted-foreground",
+      cell: (r) => formatTimestamp(r.created_at),
+    },
+  ];
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
@@ -71,42 +127,15 @@ export function Resellers({ onSelect }: { onSelect: (id: number) => void }) {
         <p className="text-sm text-muted-foreground">{t("resellers.empty")}</p>
       )}
 
-      <table className="w-full border-collapse text-sm text-foreground">
-        <thead>
-          <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
-            <th className="py-2 pe-3 text-start">{t("reseller.displayName")}</th>
-            <th className="pe-3 text-start">{t("reseller.status")}</th>
-            <th className="pe-3 text-start">{t("reseller.maxSubjects")}</th>
-            <th className="pe-3 text-start">{t("reseller.creditFloor")}</th>
-            <th className="text-start">{t("reseller.created")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {resellers.data?.resellers.map((reseller) => (
-            <tr
-              key={reseller.id}
-              onClick={() => onSelect(reseller.id)}
-              className="cursor-pointer border-b border-border hover:bg-accent/50"
-            >
-              <td className="py-1.5 pe-3 font-mono">{reseller.display_name}</td>
-              <td className="pe-3">
-                {reseller.enabled ? (
-                  <span className="text-success">{t("reseller.enabled")}</span>
-                ) : (
-                  <span className="text-muted-foreground">{t("reseller.disabled")}</span>
-                )}
-              </td>
-              <td className="pe-3">
-                <Limit value={reseller.max_subjects} />
-              </td>
-              <td className="pe-3 font-mono text-xs">{formatNumber(reseller.credit_floor)}</td>
-              <td className="font-mono text-xs text-muted-foreground">
-                {formatTimestamp(reseller.created_at)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        rows={resellers.data?.resellers ?? []}
+        columns={columns}
+        rowKey={(r) => r.id}
+        onRowActivate={(r) => onSelect(r.id)}
+        storageKey="resellers"
+        empty={t("reseller.none")}
+        caption={t("nav.resellers")}
+      />
     </div>
   );
 }

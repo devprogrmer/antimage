@@ -304,5 +304,7 @@
   "command.title": "Command palette",
   "command.placeholder": "Search or jump to…",
   "command.empty": "Nothing matches.",
-  "command.navigation": "Go to"
+  "command.navigation": "Go to",
+  "subjects.none": "No users yet.",
+  "reseller.none": "No tenants yet."
 }

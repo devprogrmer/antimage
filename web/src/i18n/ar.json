@@ -304,5 +304,7 @@
   "command.title": "لوحة الأوامر",
   "command.placeholder": "ابحث أو انتقل إلى…",
   "command.empty": "لا توجد نتائج مطابقة.",
-  "command.navigation": "الانتقال إلى"
+  "command.navigation": "الانتقال إلى",
+  "subjects.none": "لا يوجد مستخدمون بعد.",
+  "reseller.none": "لا يوجد مستأجرون بعد."
 }

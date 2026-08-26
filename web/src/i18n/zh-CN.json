@@ -304,5 +304,7 @@
   "command.title": "命令面板",
   "command.placeholder": "搜索或跳转…",
   "command.empty": "没有匹配项。",
-  "command.navigation": "前往"
+  "command.navigation": "前往",
+  "subjects.none": "暂无用户。",
+  "reseller.none": "暂无租户。"
 }
