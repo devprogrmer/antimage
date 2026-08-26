@@ -300,5 +300,9 @@
   "theme.system": "النظام",
   "close": "إغلاق",
   "table.columns": "الأعمدة",
-  "node.none": "لا توجد عقد بعد."
+  "node.none": "لا توجد عقد بعد.",
+  "command.title": "لوحة الأوامر",
+  "command.placeholder": "ابحث أو انتقل إلى…",
+  "command.empty": "لا توجد نتائج مطابقة.",
+  "command.navigation": "الانتقال إلى"
 }

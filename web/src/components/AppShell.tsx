@@ -13,6 +13,7 @@ import {
 import type { ComponentType } from "react";
 
 import { Button } from "@/components/ui/button";
+import { CommandPalette } from "@/components/CommandPalette";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
 import type { Theme } from "@/lib/theme";
@@ -143,6 +144,18 @@ export function AppShell({
           <Outlet />
         </main>
       </div>
+
+      {/* One list, two surfaces. The palette takes the ALREADY permission-
+          filtered destinations, so it cannot offer a screen the sidebar hides
+          -- a palette with its own copy of the routes would drift, and the
+          first thing to drift would be the gate. */}
+      <CommandPalette
+        targets={visible.map((item) => ({
+          to: item.to,
+          label: t(item.label as Parameters<typeof t>[0]),
+          icon: item.icon,
+        }))}
+      />
     </div>
   );
 }

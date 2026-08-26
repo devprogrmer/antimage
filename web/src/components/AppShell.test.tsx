@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -165,5 +165,68 @@ describe("localisation", () => {
     // rather than merely flipped.
     expect(screen.getAllByRole("link", { name: "گره‌ها" }).length).toBeGreaterThan(0);
     setLocale("en");
+  });
+});
+
+describe("command palette", () => {
+  it("opens on Ctrl+K and closes on Escape", async () => {
+    const user = userEvent.setup();
+    renderShell(superAdmin);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await user.keyboard("{Control>}k{/Control}");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("navigates to the chosen destination", async () => {
+    const user = userEvent.setup();
+    renderShell(superAdmin, "/");
+    expect(screen.getByText("overview-screen")).toBeInTheDocument();
+
+    await user.keyboard("{Control>}k{/Control}");
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: /Nodes/ }));
+
+    expect(await screen.findByText("nodes-screen")).toBeInTheDocument();
+    // The palette must not sit over the screen it just opened.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("filters as the operator types", async () => {
+    const user = userEvent.setup();
+    renderShell(superAdmin);
+    await user.keyboard("{Control>}k{/Control}");
+    const dialog = await screen.findByRole("dialog");
+
+    await user.type(within(dialog).getByRole("combobox"), "node");
+    expect(within(dialog).getByRole("option", { name: /Nodes/ })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("option", { name: /Profile/ })).toBeNull();
+  });
+
+  // The gate that matters: one permission-filtered list feeds both surfaces, so
+  // the palette cannot offer a screen the sidebar hides.
+  it("does not offer a destination the actor may not reach", async () => {
+    const user = userEvent.setup();
+    renderShell(tenant);
+    await user.keyboard("{Control>}k{/Control}");
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).queryByRole("option", { name: /Tenants/ })).toBeNull();
+    expect(within(dialog).getByRole("option", { name: /Nodes/ })).toBeInTheDocument();
+  });
+
+  it("switches the theme from the palette", async () => {
+    const user = userEvent.setup();
+    renderShell(superAdmin);
+    await user.keyboard("{Control>}k{/Control}");
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByRole("option", { name: "Dark" }));
+    await waitFor(() =>
+      expect(document.documentElement.classList.contains("dark")).toBe(true),
+    );
   });
 });

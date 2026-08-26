@@ -300,5 +300,9 @@
   "theme.system": "System",
   "close": "Close",
   "table.columns": "Columns",
-  "node.none": "No nodes yet."
+  "node.none": "No nodes yet.",
+  "command.title": "Command palette",
+  "command.placeholder": "Search or jump to…",
+  "command.empty": "Nothing matches.",
+  "command.navigation": "Go to"
 }
