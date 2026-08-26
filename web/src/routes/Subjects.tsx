@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { formatTimestamp, t } from "../i18n";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 interface Subject {
   id: number;
@@ -16,6 +17,9 @@ interface Subject {
 export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
+  // The subject the operator is being asked about. Named in the dialog,
+  // because deleting the wrong customer is not recoverable from the UI.
+  const [pendingDelete, setPendingDelete] = useState<Subject | null>(null);
 
   const subjects = useQuery({
     queryKey: ["subjects"],
@@ -26,6 +30,7 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
     mutationFn: (id: number) => api.del(`/api/v1/subjects/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["subjects"] });
+      setPendingDelete(null);
     },
   });
 
@@ -80,12 +85,8 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
               <td>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm(t("subject.confirmDelete"))) {
-                      deleteSubject.mutate(subject.id);
-                    }
-                  }}
-                  className="text-xs text-red-500 hover:text-red-400"
+                  onClick={() => setPendingDelete(subject)}
+                  className="text-xs text-destructive hover:underline"
                 >
                   {t("delete")}
                 </button>
@@ -94,6 +95,15 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
           ))}
         </tbody>
       </table>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+        title={t("subject.confirmDelete")}
+        description={pendingDelete?.name}
+        confirmLabel={t("delete")}
+        pending={deleteSubject.isPending}
+        onConfirm={() => pendingDelete && deleteSubject.mutate(pendingDelete.id)}
+      />
     </div>
   );
 }

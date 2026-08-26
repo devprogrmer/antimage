@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../lib/api";
 import { MutationError } from "../routes/Resellers";
 import { SchemaForm } from "./SchemaForm";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type { JSONSchema, Params } from "./SchemaForm";
 import { formatTimestamp, t } from "../i18n";
 
@@ -98,10 +99,16 @@ export function InboundStudio({ nodeId }: { nodeId: number }) {
 
 function ServiceList({ nodeId, services }: { nodeId: number; services: Service[] }) {
   const queryClient = useQueryClient();
+  // Which inbound the operator is being asked about. An id rather than a
+  // boolean: the dialog names the protocol it is about to remove, and a bare
+  // "are you sure" beside a table of six inbounds is a question nobody can
+  // answer safely.
+  const [pending, setPending] = useState<Service | null>(null);
   const remove = useMutation({
     mutationFn: (id: number) => api.del(`/api/v1/services/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["node", nodeId] });
+      setPending(null);
     },
   });
 
@@ -143,10 +150,8 @@ function ServiceList({ nodeId, services }: { nodeId: number; services: Service[]
               <td>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm(t("studio.confirmDelete"))) remove.mutate(svc.id);
-                  }}
-                  className="text-xs text-red-500 hover:text-red-400"
+                  onClick={() => setPending(svc)}
+                  className="text-xs text-destructive hover:underline"
                 >
                   {t("delete")}
                 </button>
@@ -156,6 +161,18 @@ function ServiceList({ nodeId, services }: { nodeId: number; services: Service[]
         </tbody>
       </table>
       <MutationError error={remove.error} />
+      <ConfirmDialog
+        open={pending !== null}
+        onOpenChange={(open) => !open && setPending(null)}
+        title={t("studio.confirmDelete")}
+        // The title already states the disruption ('Everyone connected through
+        // it is disconnected'), so the description names WHICH inbound --
+        // the question the yes/no box could not answer beside a table of six.
+        description={pending?.adapter_kind}
+        confirmLabel={t("delete")}
+        pending={remove.isPending}
+        onConfirm={() => pending && remove.mutate(pending.id)}
+      />
     </>
   );
 }

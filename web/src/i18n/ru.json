@@ -297,5 +297,6 @@
   "theme.label": "Тема",
   "theme.light": "Светлая",
   "theme.dark": "Тёмная",
-  "theme.system": "Системная"
+  "theme.system": "Системная",
+  "close": "Закрыть"
 }

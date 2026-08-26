@@ -297,5 +297,6 @@
   "theme.label": "پوسته",
   "theme.light": "روشن",
   "theme.dark": "تیره",
-  "theme.system": "سیستم"
+  "theme.system": "سیستم",
+  "close": "بستن"
 }

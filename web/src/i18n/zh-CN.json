@@ -297,5 +297,6 @@
   "theme.label": "主题",
   "theme.light": "浅色",
   "theme.dark": "深色",
-  "theme.system": "跟随系统"
+  "theme.system": "跟随系统",
+  "close": "关闭"
 }

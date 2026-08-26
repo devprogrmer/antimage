@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -304,4 +304,98 @@ describe("progressive disclosure", () => {
     });
     expect(groups).toEqual(["basic", "transport", "security"]);
   });
+});
+
+// ------------------------------------------------ deleting an inbound (A2)
+
+// window.confirm could not be tested at all without stubbing a global, and its
+// buttons were the browser's -- so an Arabic panel showed an English "OK".
+// These cover what replaced it.
+
+function oneService() {
+  routes["/api/v1/nodes/1/service-schemas"] = schemas({
+    kind: "wireguard", version: "1", schema: wgSchema, offerable: true,
+    hot_user_add: false, requires_pki: false,
+  });
+  routes["/api/v1/nodes/1/services"] = {
+    body: {
+      services: [
+        { id: 7, node_id: 1, adapter_kind: "wireguard", params: {}, enabled: true, created_at: 1 },
+      ],
+    },
+  };
+  routes["DELETE /api/v1/services/7"] = { status: 204, body: {} };
+}
+
+it("asks before deleting an inbound, and sends nothing until confirmed", async () => {
+  oneService();
+  const user = userEvent.setup();
+  renderWithQuery(<InboundStudio nodeId={1} />);
+
+  await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+  // The question is a dialog, and it names what is about to be removed rather
+  // than asking a bare "are you sure" next to a table.
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog).toHaveTextContent("wireguard");
+  // §77: the disruption is stated BEFORE the click, not discovered after it.
+  expect(dialog).toHaveTextContent(/is disconnected/i);
+  expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+});
+
+it("deletes only after the operator confirms", async () => {
+  oneService();
+  const user = userEvent.setup();
+  renderWithQuery(<InboundStudio nodeId={1} />);
+
+  await user.click(await screen.findByRole("button", { name: "Delete" }));
+  const dialog = await screen.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+  await waitFor(() =>
+    expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/services/7")).toBe(true),
+  );
+});
+
+it("sends nothing when the operator cancels", async () => {
+  oneService();
+  const user = userEvent.setup();
+  renderWithQuery(<InboundStudio nodeId={1} />);
+
+  await user.click(await screen.findByRole("button", { name: "Delete" }));
+  const dialog = await screen.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+});
+
+// Escape must dismiss it. A modal that traps an operator with no keyboard way
+// out is the accessibility failure §65 is about, and it is the one thing the
+// browser dialog did get right.
+it("closes on Escape without deleting", async () => {
+  oneService();
+  const user = userEvent.setup();
+  renderWithQuery(<InboundStudio nodeId={1} />);
+
+  await user.click(await screen.findByRole("button", { name: "Delete" }));
+  await screen.findByRole("dialog");
+  await user.keyboard("{Escape}");
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+});
+
+// The property window.confirm could never have: the buttons are in the
+// operator's language.
+it("asks in the operator's language", async () => {
+  setLocale("fa");
+  oneService();
+  const user = userEvent.setup();
+  renderWithQuery(<InboundStudio nodeId={1} />);
+
+  await user.click(await screen.findByRole("button", { name: "حذف" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByRole("button", { name: "لغو" })).toBeInTheDocument();
+  setLocale("en");
 });

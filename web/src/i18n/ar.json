@@ -297,5 +297,6 @@
   "theme.label": "المظهر",
   "theme.light": "فاتح",
   "theme.dark": "داكن",
-  "theme.system": "النظام"
+  "theme.system": "النظام",
+  "close": "إغلاق"
 }
