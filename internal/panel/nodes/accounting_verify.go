@@ -224,31 +224,48 @@ func RepairHourlyRollups(ctx context.Context, st *store.Store, dryRun bool) (Rep
 		// Buckets that surviving deltas can account for, and what they should
 		// hold. Bucketing here must match RollupHourly exactly or repair would
 		// invent a difference where there is none.
+		//
+		// Grouped by (subject, node, service, hour) since C3, and that is not
+		// cosmetic: a rollup row is now per node and service, so matching on
+		// (subject, hour) alone would pair EVERY group's row with the whole
+		// subject-hour total and set each one to it. Repairing an inflation
+		// defect by multiplying the traffic by the number of groups is a
+		// spectacular way to make it worse.
 		const recomputed = `
 			SELECT subject_id,
+			       node_id,
+			       service_id,
 			       (created_at / 3600) * 3600 AS hour_start,
 			       SUM(uplink_bytes)   AS up,
 			       SUM(downlink_bytes) AS down
 			  FROM usage_deltas
-			 GROUP BY subject_id, hour_start`
+			 GROUP BY subject_id, node_id, service_id, hour_start`
 
 		if err := tx.QueryRowContext(ctx, `
 			SELECT COUNT(*), COALESCE(SUM(h.uplink_bytes + h.downlink_bytes), 0),
 			       COALESCE(SUM(r.up + r.down), 0)
 			  FROM usage_rollups_hourly h
 			  JOIN (`+recomputed+`) r
-			    ON r.subject_id = h.subject_id AND r.hour_start = h.hour_start`,
+			    ON r.subject_id = h.subject_id AND r.hour_start = h.hour_start
+			   AND COALESCE(r.node_id, 0)    = COALESCE(h.node_id, 0)
+			   AND COALESCE(r.service_id, 0) = COALESCE(h.service_id, 0)`,
 		).Scan(&report.RecoverableHours, &report.BytesBefore, &report.BytesAfter); err != nil {
 			return fmt.Errorf("project repair: %w", err)
 		}
 
+		// COALESCE on both sides throughout: NULL = NULL is false in SQL, so
+		// without it an unattributed bucket would never match its own deltas
+		// and would be reported unrecoverable while sitting next to the rows
+		// that account for it.
 		if err := tx.QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			  FROM usage_rollups_hourly h
 			 WHERE NOT EXISTS (
 			       SELECT 1 FROM usage_deltas d
 			        WHERE d.subject_id = h.subject_id
-			          AND (d.created_at / 3600) * 3600 = h.hour_start)`,
+			          AND (d.created_at / 3600) * 3600 = h.hour_start
+			          AND COALESCE(d.node_id, 0)    = COALESCE(h.node_id, 0)
+			          AND COALESCE(d.service_id, 0) = COALESCE(h.service_id, 0))`,
 		).Scan(&report.UnrecoverableHours); err != nil {
 			return fmt.Errorf("count unrecoverable: %w", err)
 		}
@@ -264,15 +281,21 @@ func RepairHourlyRollups(ctx context.Context, st *store.Store, dryRun bool) (Rep
 			   SET uplink_bytes = (
 			         SELECT SUM(d.uplink_bytes) FROM usage_deltas d
 			          WHERE d.subject_id = h.subject_id
-			            AND (d.created_at / 3600) * 3600 = h.hour_start),
+			            AND (d.created_at / 3600) * 3600 = h.hour_start
+			            AND COALESCE(d.node_id, 0)    = COALESCE(h.node_id, 0)
+			            AND COALESCE(d.service_id, 0) = COALESCE(h.service_id, 0)),
 			       downlink_bytes = (
 			         SELECT SUM(d.downlink_bytes) FROM usage_deltas d
 			          WHERE d.subject_id = h.subject_id
-			            AND (d.created_at / 3600) * 3600 = h.hour_start)
+			            AND (d.created_at / 3600) * 3600 = h.hour_start
+			            AND COALESCE(d.node_id, 0)    = COALESCE(h.node_id, 0)
+			            AND COALESCE(d.service_id, 0) = COALESCE(h.service_id, 0))
 			 WHERE EXISTS (
 			       SELECT 1 FROM usage_deltas d
 			        WHERE d.subject_id = h.subject_id
-			          AND (d.created_at / 3600) * 3600 = h.hour_start)`); err != nil {
+			          AND (d.created_at / 3600) * 3600 = h.hour_start
+			          AND COALESCE(d.node_id, 0)    = COALESCE(h.node_id, 0)
+			          AND COALESCE(d.service_id, 0) = COALESCE(h.service_id, 0))`); err != nil {
 			return fmt.Errorf("repair hourly rollups: %w", err)
 		}
 		return nil
