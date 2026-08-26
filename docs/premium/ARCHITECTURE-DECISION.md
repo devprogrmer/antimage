@@ -2,7 +2,7 @@
 
 Three architecture gaps block whole families of the Premium specification. Each
 is recorded here with the constraint it runs into, the options considered, and a
-recommendation. Nothing here is implemented yet.
+recommendation. Phases A-E are complete and merged to master. Phase F (outbounds and routing) is partially complete.
 
 ---
 

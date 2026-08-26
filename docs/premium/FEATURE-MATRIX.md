@@ -35,7 +35,7 @@ Every non-gap row cites a path or route. If a row cites nothing, it is a gap.
 | Feature | Benchmark | Status | Evidence |
 |---|---|---|---|
 | Desired-state reconciliation | — (antimage differentiator) | **CP** | `internal/panel/nodes/`, `desired_revision`/`applied_revision` |
-| Revisions + history | Rebecca? | **B** | `node_revisions`, `GET /nodes/{id}/revisions` |
+| Outbound/Routing Studio | Rebecca? | **B** | EgressPanel.tsx exists, outbound HTTP routes registered |
 | Apply runs + per-step results | — | **B** | `node_apply_runs`, `node_apply_steps`, `GET /nodes/{id}/apply-runs` |
 | Drift detection | — | **CP** | `Observe`/`Plan` per adapter; `GET /nodes/{id}/reconciliation` |
 | Deployment preview / validate / rollback | — | **B** | `POST /deployments/preview`, `/validate`, `/{id}/rollback` |

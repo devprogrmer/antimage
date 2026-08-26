@@ -233,7 +233,7 @@ the operator changed the price — but it will surprise someone.
 
 `usage_rollups_hourly` and `_daily` were extended with node_id and service_id
 dimensions in migration 00030. The original statement that rollups remain
-unchanged was superseded by this implementation.
+unchanged was superseded: rollups were extended with node_id and service_id dimensions in migration 00030.
 Billable is computed at read time from the rollup plus the coefficients in force.
 No migration touches them.
 
