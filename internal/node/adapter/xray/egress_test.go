@@ -35,7 +35,7 @@ func rulesOf(t *testing.T, doc map[string]any) []any {
 // An empty routing block is not inert in Xray, and a file that exists with no
 // rules is harder to reason about during an incident than no file at all.
 func TestNoEgressProducesNoDocument(t *testing.T) {
-	raw, err := GenerateEgressConfig(nil, nil)
+	raw, err := GenerateEgressConfig(nil, nil, nil)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestAccountingRuleIsEvaluatedFirst(t *testing.T) {
 		&adapter.Routing{Rules: []adapter.RoutingRule{
 			// No inboundTag: matches every inbound, including api-inbound.
 			{ID: 1, Priority: 1, Domains: []string{"example.com"}, OutboundTag: "warp"},
-		}},
+		}}, nil,
 	)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -89,7 +89,7 @@ func TestReservedTagsAreRefused(t *testing.T) {
 	for _, tag := range []string{tagDirect, tagAPI} {
 		t.Run(tag, func(t *testing.T) {
 			_, err := GenerateEgressConfig(
-				[]adapter.Outbound{{ID: 1, Tag: tag, Kind: "direct"}}, nil)
+				[]adapter.Outbound{{ID: 1, Tag: tag, Kind: "direct"}}, nil, nil)
 			if err == nil {
 				t.Errorf("accepted reserved tag %q; it would be silently shadowed "+
 					"by the accounting document's outbound", tag)
@@ -106,7 +106,7 @@ func TestDirectMayBeReferencedByARule(t *testing.T) {
 		Rules: []adapter.RoutingRule{
 			{ID: 1, GeoIP: []string{"private"}, OutboundTag: tagDirect},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("refused a rule targeting the pre-existing direct outbound: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestDuplicateTagsAreRefused(t *testing.T) {
 	_, err := GenerateEgressConfig([]adapter.Outbound{
 		{ID: 1, Tag: "same", Kind: "direct"},
 		{ID: 2, Tag: "same", Kind: "block"},
-	}, nil)
+	}, nil, nil)
 	if err == nil {
 		t.Error("accepted two outbounds sharing a tag; Xray resolves duplicates " +
 			"by first match, so one would silently never be used")
@@ -132,7 +132,7 @@ func TestDuplicateTagsAreRefused(t *testing.T) {
 func TestRuleReferencingUnknownOutboundIsRefused(t *testing.T) {
 	_, err := GenerateEgressConfig(nil, &adapter.Routing{
 		Rules: []adapter.RoutingRule{{ID: 1, Domains: []string{"x.com"}, OutboundTag: "nope"}},
-	})
+	}, nil)
 	if err == nil {
 		t.Error("accepted a rule selecting an undefined outbound")
 	}
@@ -143,7 +143,7 @@ func TestRuleReferencingUnknownOutboundIsRefused(t *testing.T) {
 func TestRuleWithoutMatchersIsRefused(t *testing.T) {
 	_, err := GenerateEgressConfig(
 		[]adapter.Outbound{{ID: 1, Tag: "t", Kind: "block"}},
-		&adapter.Routing{Rules: []adapter.RoutingRule{{ID: 1, OutboundTag: "t"}}},
+		&adapter.Routing{Rules: []adapter.RoutingRule{{ID: 1, OutboundTag: "t"}}}, nil,
 	)
 	if err == nil {
 		t.Error("accepted a rule with no matchers; Xray would apply it to all traffic")
@@ -154,7 +154,7 @@ func TestRuleWithoutMatchersIsRefused(t *testing.T) {
 // start, which takes down every inbound on the node, not just this outbound.
 func TestUnknownOutboundKindIsRefused(t *testing.T) {
 	_, err := GenerateEgressConfig(
-		[]adapter.Outbound{{ID: 1, Tag: "t", Kind: "quantum-tunnel"}}, nil)
+		[]adapter.Outbound{{ID: 1, Tag: "t", Kind: "quantum-tunnel"}}, nil, nil)
 	if err == nil {
 		t.Error("accepted an unsupported outbound kind")
 	}
@@ -178,7 +178,7 @@ func TestOutboundKindsRender(t *testing.T) {
 			if tc.params != "" {
 				o.Params = json.RawMessage(tc.params)
 			}
-			raw, err := GenerateEgressConfig([]adapter.Outbound{o}, nil)
+			raw, err := GenerateEgressConfig([]adapter.Outbound{o}, nil, nil)
 			if err != nil {
 				t.Fatalf("generate: %v", err)
 			}
@@ -200,7 +200,7 @@ func TestOutboundsRequireTheirParams(t *testing.T) {
 	for _, kind := range []string{"socks", "http", "wireguard"} {
 		t.Run(kind, func(t *testing.T) {
 			_, err := GenerateEgressConfig(
-				[]adapter.Outbound{{ID: 1, Tag: "t", Kind: kind}}, nil)
+				[]adapter.Outbound{{ID: 1, Tag: "t", Kind: kind}}, nil, nil)
 			if err == nil {
 				t.Errorf("%s rendered with no params", kind)
 			}
@@ -222,7 +222,7 @@ func TestRulesFollowPriorityThenID(t *testing.T) {
 			{ID: 30, Priority: 20, Domains: []string{"c.com"}, OutboundTag: "c"},
 			{ID: 20, Priority: 10, Domains: []string{"b.com"}, OutboundTag: "b"},
 			{ID: 10, Priority: 10, Domains: []string{"a.com"}, OutboundTag: "a"},
-		}},
+		}}, nil,
 	)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -245,12 +245,12 @@ func TestGenerationIsDeterministic(t *testing.T) {
 	routing := &adapter.Routing{Rules: []adapter.RoutingRule{
 		{ID: 1, Domains: []string{"a.com", "b.com"}, SubjectIDs: []int64{9, 3, 5}, OutboundTag: "t"},
 	}}
-	first, err := GenerateEgressConfig(outs, routing)
+	first, err := GenerateEgressConfig(outs, routing, nil)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	for i := 0; i < 20; i++ {
-		again, err := GenerateEgressConfig(outs, routing)
+		again, err := GenerateEgressConfig(outs, routing, nil)
 		if err != nil {
 			t.Fatalf("generate: %v", err)
 		}
@@ -266,7 +266,7 @@ func TestGenerationIsDeterministic(t *testing.T) {
 func TestDefaultOutboundBecomesATrailingRule(t *testing.T) {
 	raw, err := GenerateEgressConfig(
 		[]adapter.Outbound{{ID: 1, Tag: "fallback", Kind: "block"}},
-		&adapter.Routing{DefaultOutboundTag: "fallback"},
+		&adapter.Routing{DefaultOutboundTag: "fallback"}, nil,
 	)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -282,7 +282,7 @@ func TestDefaultOutboundBecomesATrailingRule(t *testing.T) {
 }
 
 func TestUnknownDefaultOutboundIsRefused(t *testing.T) {
-	_, err := GenerateEgressConfig(nil, &adapter.Routing{DefaultOutboundTag: "missing"})
+	_, err := GenerateEgressConfig(nil, &adapter.Routing{DefaultOutboundTag: "missing"}, nil)
 	if err == nil {
 		t.Error("accepted a default outbound this node does not define")
 	}
@@ -290,17 +290,50 @@ func TestUnknownDefaultOutboundIsRefused(t *testing.T) {
 
 // Subject ids become the same email tags accounting aggregates by, so a rule
 // and a usage report cannot disagree about who they refer to.
+//
+// Since C2 that tag is per-service, so a rule naming one subject has to name
+// them once per inbound they are on. Listing only one would leave a rule that
+// matches nothing on every other inbound: the operator's policy would sit in
+// the config looking correct and silently never fire.
 func TestSubjectRulesUseAccountingEmails(t *testing.T) {
 	raw, err := GenerateEgressConfig(
 		[]adapter.Outbound{{ID: 1, Tag: "t", Kind: "block"}},
 		&adapter.Routing{Rules: []adapter.RoutingRule{
 			{ID: 1, SubjectIDs: []int64{42}, OutboundTag: "t"},
-		}},
+		}}, []int64{7, 9},
 	)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if !strings.Contains(string(raw), subjectEmail(42)) {
-		t.Errorf("rule does not use the accounting email for subject 42: %s", raw)
+	for _, svc := range []int64{7, 9} {
+		want := subjectEmail(42, svc)
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("rule does not name %s, so it would not match subject 42 "+
+				"on service %d: %s", want, svc, raw)
+		}
+	}
+	// The node-wide form matches no user since C2, so emitting it would be a
+	// rule that silently does nothing.
+	if strings.Contains(string(raw), `"subject-42@antimage"`) {
+		t.Errorf("rule still uses the legacy node-wide tag, which now matches "+
+			"no user at all: %s", raw)
+	}
+}
+
+// A node with no inbounds has nothing for a rule to match. The document still
+// has to be well formed, because an invalid egress config is a process that
+// will not start.
+func TestSubjectRulesWithNoServicesStayWellFormed(t *testing.T) {
+	raw, err := GenerateEgressConfig(
+		[]adapter.Outbound{{ID: 1, Tag: "t", Kind: "block"}},
+		&adapter.Routing{Rules: []adapter.RoutingRule{
+			{ID: 1, SubjectIDs: []int64{42}, OutboundTag: "t"},
+		}}, nil,
+	)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !strings.Contains(string(raw), subjectEmail(42, 0)) {
+		t.Errorf("no user matcher was emitted at all: %s", raw)
 	}
 }

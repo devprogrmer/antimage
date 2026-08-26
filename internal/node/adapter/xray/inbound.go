@@ -178,8 +178,12 @@ func (in Inbound) CredentialKind() string {
 // User is one subject as it appears inside a generated inbound.
 type User struct {
 	SubjectID int64
-	// Email is Xray's per-user tag. SP3 aggregates traffic by it, so it must
-	// be stable across config regenerations and unique within an inbound.
+	// ServiceID is the inbound this user entry belongs to. The same subject
+	// appears once per service they are entitled to, each with its own Email,
+	// because Xray counts traffic per email and C2 needs that grain.
+	ServiceID int64
+	// Email is Xray's per-user tag. Accounting aggregates traffic by it, so it
+	// must be stable across config regenerations and unique within an inbound.
 	Email      string
 	Credential string
 }

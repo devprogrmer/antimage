@@ -637,7 +637,9 @@ func TestAppliedStateRecordsTheUserSet(t *testing.T) {
 	if st.Checksum == "" {
 		t.Error("applied sidecar records no checksum")
 	}
-	want := []string{"subject-1@antimage", "subject-2@antimage"}
+	// Service-scoped tags since C2: Xray counts per email, so the same subject
+	// on another inbound must not share this one's counter.
+	want := []string{subjectEmail(1, 10), subjectEmail(2, 10)}
 	if !reflect.DeepEqual(st.Users, want) {
 		t.Errorf("applied users = %v, want %v; Plan cannot detect a removal without them",
 			st.Users, want)
@@ -794,7 +796,7 @@ func TestRevocationDoesNotConvergeUntilTheRestartSucceeds(t *testing.T) {
 	// IS still serving them. Recording the revocation here on the strength of a
 	// restart that failed is what would make the next Plan believe nobody was
 	// removed, quietly downgrading the retry to the hot path.
-	if got := a.applied(10); !slices.Contains(got.Users, "subject-2@antimage") {
+	if got := a.applied(10); !slices.Contains(got.Users, subjectEmail(2, 10)) {
 		t.Errorf("applied state = %v; it dropped the revoked user after a FAILED "+
 			"restart, so the next Plan would no longer see a removal", got.Users)
 	}
@@ -819,7 +821,7 @@ func TestRevocationDoesNotConvergeUntilTheRestartSucceeds(t *testing.T) {
 
 	// Applied state now reflects the smaller set.
 	final := a.applied(10)
-	want := []string{"subject-1@antimage"}
+	want := []string{subjectEmail(1, 10)}
 	if !reflect.DeepEqual(final.Users, want) {
 		t.Errorf("applied users = %v, want %v", final.Users, want)
 	}

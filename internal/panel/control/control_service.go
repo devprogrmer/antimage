@@ -218,7 +218,11 @@ func (s *ControlService) onUsageReport(ctx context.Context, nodeID int64, r *pb.
 	samples := make([]nodes.UsageDelta, 0, len(r.Samples))
 	for _, sample := range r.Samples {
 		samples = append(samples, nodes.UsageDelta{
-			SubjectID:     sample.SubjectId,
+			SubjectID: sample.SubjectId,
+			// C2: 0 means the adapter could not attribute the traffic. It is
+			// carried in as-is and resolved during ingest, where the services
+			// table is in scope to say whether the id is real.
+			ServiceID:     sample.ServiceId,
 			UplinkBytes:   sample.UplinkBytes,
 			DownlinkBytes: sample.DownlinkBytes,
 		})

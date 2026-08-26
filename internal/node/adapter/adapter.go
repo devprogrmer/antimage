@@ -325,7 +325,15 @@ type Adapter interface {
 // design decision 1: the agent computes deltas; the panel never sees raw
 // cumulative counters.
 type UsageSample struct {
-	SubjectID     int64
+	SubjectID int64
+	// ServiceID is which service the traffic went through, or 0 when the
+	// adapter cannot attribute it (C2).
+	//
+	// Zero is a real answer, not a failure. An adapter whose counters are
+	// per-interface rather than per-inbound genuinely does not know, and
+	// forcing it to guess would put a confident wrong number into a bill. The
+	// panel stores 0 as NULL and the traffic still counts against the subject.
+	ServiceID     int64
 	UplinkBytes   uint64
 	DownlinkBytes uint64
 }

@@ -9,9 +9,14 @@ import (
 	"github.com/amyrm/antimage/internal/panel/store"
 )
 
-// UsageDelta is one subject's traffic delta since the last report.
+// UsageDelta is one subject's traffic delta on one service since the last
+// report.
 type UsageDelta struct {
-	SubjectID     int64
+	SubjectID int64
+	// ServiceID is which service earned the traffic, or 0 when the reporting
+	// adapter could not attribute it (C2). Resolved against this node's
+	// services at ingest; anything that does not resolve is stored as NULL.
+	ServiceID     int64
 	UplinkBytes   uint64
 	DownlinkBytes uint64
 }
@@ -40,11 +45,24 @@ func IngestUsageReport(
 
 		// Apply each delta.
 		for _, sample := range samples {
+			// C2: resolve the reported service before storing it.
+			//
+			// An id arriving from a node is not evidence the service exists,
+			// or that it belongs to this node. Storing it unchecked would
+			// either violate the foreign key -- failing the whole report -- or,
+			// worse, attribute one node's traffic to another node's inbound.
+			serviceID, err := resolveService(ctx, tx, nodeID, sample.ServiceID)
+			if err != nil {
+				return err
+			}
+
 			// Insert raw delta.
-			_, err := tx.ExecContext(ctx, `
-				INSERT INTO usage_deltas (node_id, subject_id, sequence, uplink_bytes, downlink_bytes, created_at)
-				VALUES (?, ?, ?, ?, ?, ?)`,
-				nodeID, sample.SubjectID, sequence, sample.UplinkBytes, sample.DownlinkBytes, now)
+			_, err = tx.ExecContext(ctx, `
+				INSERT INTO usage_deltas (node_id, subject_id, service_id, sequence,
+				                          uplink_bytes, downlink_bytes, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				nodeID, sample.SubjectID, serviceID, sequence,
+				sample.UplinkBytes, sample.DownlinkBytes, now)
 			if err != nil {
 				return fmt.Errorf("insert usage delta: %w", err)
 			}
@@ -62,6 +80,39 @@ func IngestUsageReport(
 
 		return nil
 	})
+}
+
+// resolveService turns a service id reported by a node into one that can be
+// stored, or NULL.
+//
+// Unresolvable ids write NULL rather than failing the report. A tag can outlive
+// the service it named -- an inbound removed while a report was in flight is
+// the ordinary case, not a pathological one -- and losing an entire node's
+// accounting because one id no longer resolves trades a small attribution gap
+// for a large data loss. The subject and the bytes are the parts a bill is
+// built from, and both survive.
+//
+// The node_id check is the security half. Service ids are global, so a node
+// that reported someone else's id would otherwise have its traffic recorded
+// against another node's inbound -- and since a service belongs to a node,
+// that is another tenant's inbound. A node may only attribute to its own.
+func resolveService(ctx context.Context, tx *sql.Tx, nodeID, reported int64) (any, error) {
+	if reported == 0 {
+		// The adapter said it could not attribute. Not an error.
+		return nil, nil
+	}
+	var id int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT id FROM services WHERE id = ? AND node_id = ?`, reported, nodeID).Scan(&id)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		// A storage failure is not an unresolvable tag. Silently writing NULL
+		// here would turn a broken database into quietly unattributed traffic.
+		return nil, fmt.Errorf("resolve service %d: %w", reported, err)
+	}
+	return id, nil
 }
 
 // PruneUsageDeltas removes raw deltas older than retentionSeconds.

@@ -1146,12 +1146,22 @@ func (x *UsageReport) GetSamples() []*UsageSample {
 	return nil
 }
 
-// UsageSample is one subject's traffic delta since the last report.
+// UsageSample is one subject's traffic delta on one service since the last
+// report.
 type UsageSample struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SubjectId     int64                  `protobuf:"varint,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	UplinkBytes   uint64                 `protobuf:"varint,2,opt,name=uplink_bytes,json=uplinkBytes,proto3" json:"uplink_bytes,omitempty"`
 	DownlinkBytes uint64                 `protobuf:"varint,3,opt,name=downlink_bytes,json=downlinkBytes,proto3" json:"downlink_bytes,omitempty"`
+	// Which service the traffic went through, when the adapter can attribute it
+	// (C2). Zero means "not attributed", which the panel stores as NULL rather
+	// than guessing: a node running one adapter that cannot attribute, or an
+	// agent older than this field, both send zero and must keep accounting.
+	//
+	// Deliberately not optional. Proto3 scalar presence would distinguish "the
+	// agent said zero" from "the agent said nothing", and there is nothing the
+	// panel would do differently: both mean the same NULL.
+	ServiceId     int64 `protobuf:"varint,4,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1203,6 +1213,13 @@ func (x *UsageSample) GetUplinkBytes() uint64 {
 func (x *UsageSample) GetDownlinkBytes() uint64 {
 	if x != nil {
 		return x.DownlinkBytes
+	}
+	return 0
+}
+
+func (x *UsageSample) GetServiceId() int64 {
+	if x != nil {
+		return x.ServiceId
 	}
 	return 0
 }
@@ -1293,12 +1310,14 @@ const file_antimage_v1_control_proto_rawDesc = "" +
 	"\vUsageReport\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x03R\x06nodeId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x03R\bsequence\x122\n" +
-	"\asamples\x18\x03 \x03(\v2\x18.antimage.v1.UsageSampleR\asamples\"v\n" +
+	"\asamples\x18\x03 \x03(\v2\x18.antimage.v1.UsageSampleR\asamples\"\x95\x01\n" +
 	"\vUsageSample\x12\x1d\n" +
 	"\n" +
 	"subject_id\x18\x01 \x01(\x03R\tsubjectId\x12!\n" +
 	"\fuplink_bytes\x18\x02 \x01(\x04R\vuplinkBytes\x12%\n" +
-	"\x0edownlink_bytes\x18\x03 \x01(\x04R\rdownlinkBytes2O\n" +
+	"\x0edownlink_bytes\x18\x03 \x01(\x04R\rdownlinkBytes\x12\x1d\n" +
+	"\n" +
+	"service_id\x18\x04 \x01(\x03R\tserviceId2O\n" +
 	"\n" +
 	"Enrollment\x12A\n" +
 	"\x06Enroll\x12\x1a.antimage.v1.EnrollRequest\x1a\x1b.antimage.v1.EnrollResponse2\xa0\x01\n" +
