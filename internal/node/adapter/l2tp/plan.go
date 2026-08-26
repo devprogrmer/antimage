@@ -69,8 +69,26 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 		return adapter.Plan{Steps: steps}, nil
 	}
 
-	// Case 3: Service present and desired → check for changes.
-	if l2tpService != nil && observedService != nil && observedService.Managed {
+	// Case 3: Service present and desired → check for changes or drift.
+	if l2tpService != nil && observedService != nil && observedService.Present {
+		// Drift detection: service present but not managed (files edited by hand).
+		if !observedService.Managed {
+			// Config drift detected → restore with full restart.
+			payload, err := a.buildInstallPayload(l2tpService.ID, l2tpService.Params, desired.Subjects)
+			if err != nil {
+				return adapter.Plan{}, err
+			}
+			steps = append(steps, adapter.Step{
+				Seq:        1,
+				Kind:       StepUpdateConfigs,
+				Disruption: adapter.DisruptRestart,
+				ServiceID:  l2tpService.ID,
+				Payload:    payload,
+			})
+			return adapter.Plan{Steps: steps}, nil
+		}
+
+		// Service is managed → check for changes.
 		params, err := parseServiceParams(l2tpService.Params)
 		if err != nil {
 			return adapter.Plan{}, err
@@ -121,10 +139,6 @@ func (a *Adapter) Plan(ctx context.Context, desired adapter.Desired, observed ad
 			}
 		}
 	}
-
-	// Case 4: Service present but not managed (drift).
-	// Drift is reported via Probe, not Plan.
-	// Plan returns empty to avoid overwriting unmanaged files without operator approval.
 
 	return adapter.Plan{Steps: steps}, nil
 }

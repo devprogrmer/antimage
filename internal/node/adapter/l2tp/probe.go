@@ -2,6 +2,9 @@ package l2tp
 
 import (
 	"context"
+	"fmt"
+	"net"
+	"time"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
 )
@@ -24,12 +27,56 @@ func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
 		}, nil
 	}
 
-	// TODO: Check listening ports (UDP 500, 4500, 1701).
-	// This requires parsing netstat/ss output or using a network library.
-	// For Phase C, service status is sufficient.
+	// Check listening ports for strongSwan and xl2tpd.
+	// UDP 500: IKE (Internet Key Exchange)
+	// UDP 4500: NAT-T (NAT Traversal)
+	// UDP 1701: L2TP
+	requiredPorts := []int{500, 4500, 1701}
+	for _, port := range requiredPorts {
+		if !isPortListening(port) {
+			return adapter.Health{
+				OK:     false,
+				Detail: fmt.Sprintf("UDP port %d not listening", port),
+			}, nil
+		}
+	}
 
 	return adapter.Health{
 		OK:     true,
-		Detail: "strongswan and xl2tpd running",
+		Detail: "strongswan and xl2tpd running, ports 500/4500/1701 listening",
 	}, nil
+}
+
+// isPortListening checks if a UDP port is listening.
+// It attempts to bind to the port; if the bind fails with "address already in use",
+// the port is listening. Any other error or successful bind means it's not in use.
+func isPortListening(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	conn, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		// If we get "address already in use", the port is listening.
+		if opErr, ok := err.(*net.OpError); ok {
+			// Check if it's an "address already in use" error.
+			// This is the expected case when the port is in use.
+			return opErr.Err.Error() == "bind: address already in use"
+		}
+		// Other errors mean we couldn't verify the port.
+		return false
+	}
+	// If we successfully bound to the port, it's NOT in use.
+	// Close it and return false.
+	conn.Close()
+	return false
+}
+
+// isPortReachable is an alternative approach that attempts to dial the port.
+// This is less reliable for UDP but can be used as a fallback.
+func isPortReachable(port int) bool {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	conn, err := net.DialTimeout("udp", addr, 2*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
