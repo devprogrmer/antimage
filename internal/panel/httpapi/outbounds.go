@@ -93,6 +93,11 @@ func validateOutbound(adapterKind string, req outboundRequest) error {
 	return nodes.ValidateServiceParams(desc.Caps.OutboundSchema, params)
 }
 
+// outboundParamsBytes is outboundParamsOf as bytes, for the redaction merge.
+func outboundParamsBytes(req outboundRequest) []byte {
+	return []byte(outboundParamsOf(req))
+}
+
 func outboundParamsOf(req outboundRequest) string {
 	if len(req.Params) == 0 {
 		return "{}"
@@ -124,6 +129,12 @@ func (d Deps) handleListOutbounds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Which fields are credentials comes from the adapter's schema. The error
+	// is deliberately ignored: a node with no egress-capable adapter has no
+	// outbounds to list, and if the kind cannot be resolved the empty schema
+	// makes redactParams fail CLOSED rather than disclose.
+	adapterKind, _ := d.egressCapableAdapter(r.Context(), nodeID)
+
 	rows, err := d.Store.Read().QueryContext(r.Context(),
 		`SELECT id, node_id, tag, kind, params, enabled
 		   FROM outbounds WHERE node_id = ? ORDER BY id`, nodeID)
@@ -142,7 +153,9 @@ func (d Deps) handleListOutbounds(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusInternalServerError, "internal", "could not read outbounds")
 			return
 		}
-		o.Params = json.RawMessage(params)
+		// Credential fields never leave the panel. Which ones they are comes
+		// from the adapter's own schema; see secret_params.go.
+		o.Params = redactParams(outboundSchemaFor(adapterKind), []byte(params))
 		o.Enabled = enabled == 1
 		out = append(out, o)
 	}
@@ -261,6 +274,26 @@ func (d Deps) handleUpdateOutbound(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusUnprocessableEntity, "unsupported", err.Error())
 		return
 	}
+
+	// A client that read this outbound saw its credentials as the sentinel, so
+	// an unmodified round trip sends the sentinel back. Restore the stored
+	// value BEFORE validating: without this an ordinary "change the port" edit
+	// overwrites a working upstream key with the literal "__redacted__", the
+	// outbound stops connecting, and the real key is gone.
+	var storedParams string
+	if err := d.Store.Read().QueryRowContext(r.Context(),
+		`SELECT params FROM outbounds WHERE id = ? AND node_id = ?`,
+		outboundID, nodeID).Scan(&storedParams); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not read outbound")
+		return
+	}
+	merged, err := unredactParams(outboundParamsBytes(req), []byte(storedParams))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "malformed params")
+		return
+	}
+	req.Params = merged
+
 	if err := validateOutbound(adapterKind, req); err != nil {
 		WriteError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 		return
