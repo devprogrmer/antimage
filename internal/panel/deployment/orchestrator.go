@@ -89,10 +89,13 @@ func (o *Orchestrator) CreateDeployment(ctx context.Context, nodeID int64, strat
 
 	var deploymentID int64
 	err = o.store.Write(ctx, func(tx *sql.Tx) error {
+		// node_id as well as revision_id. A revision number is per node, so
+		// revision_id alone identifies nothing: it is the node that makes the
+		// row scopeable, and every authorization check downstream reads it.
 		result, err := tx.ExecContext(ctx,
-			`INSERT INTO deployments (revision_id, strategy, status, created_by, created_at)
-			 VALUES (?, ?, ?, ?, ?)`,
-			currentRevision, strategy, StatusPending, adminID, time.Now().Unix())
+			`INSERT INTO deployments (node_id, revision_id, strategy, status, created_by, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			nodeID, currentRevision, strategy, StatusPending, adminID, time.Now().Unix())
 		if err != nil {
 			return err
 		}

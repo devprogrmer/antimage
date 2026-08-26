@@ -150,8 +150,8 @@ func TestDeploymentList(t *testing.T) {
 	ctx := context.Background()
 	err := env.store.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO deployments (revision_id, strategy, status, created_by, created_at)
-			 VALUES (1, 'all_at_once', 'completed', ?, ?)`,
+			`INSERT INTO deployments (node_id, revision_id, strategy, status, created_by, created_at)
+			 VALUES (1, 1, 'all_at_once', 'completed', ?, ?)`,
 			adminID, time.Now().Unix())
 		return err
 	})
@@ -187,8 +187,8 @@ func TestDeploymentGet(t *testing.T) {
 	var deploymentID int64
 	err := env.store.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx,
-			`INSERT INTO deployments (revision_id, strategy, status, created_by, created_at)
-			 VALUES (1, 'canary', 'pending', ?, ?)`,
+			`INSERT INTO deployments (node_id, revision_id, strategy, status, created_by, created_at)
+			 VALUES (1, 1, 'canary', 'pending', ?, ?)`,
 			adminID, time.Now().Unix())
 		if err != nil {
 			return err
@@ -275,8 +275,8 @@ func TestDeploymentRollbackAPI(t *testing.T) {
 	var deploymentID int64
 	err = env.store.Write(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx,
-			`INSERT INTO deployments (revision_id, strategy, status, created_by, created_at)
-			 VALUES (2, 'all_at_once', 'completed', ?, ?)`,
+			`INSERT INTO deployments (node_id, revision_id, strategy, status, created_by, created_at)
+			 VALUES (1, 2, 'all_at_once', 'completed', ?, ?)`,
 			adminID, time.Now().Unix())
 		if err != nil {
 			return err

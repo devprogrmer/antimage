@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,8 +10,26 @@ import (
 
 	"github.com/amyrm/antimage/internal/panel/deployment"
 	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/go-chi/chi/v5"
 )
+
+// nodeOfDeployment resolves the node a deployment changed, so the caller can
+// be checked against it.
+//
+// A deployment with no node -- one recorded before 00032 added the column, on a
+// panel with more than one node -- resolves to nothing and is refused. That is
+// the fail-closed reading: "we cannot tell which node this touched" is not a
+// reason to let anyone touch it.
+func (d Deps) nodeOfDeployment(r *http.Request, deploymentID int64) (int64, bool) {
+	var nodeID sql.NullInt64
+	err := d.Store.Read().QueryRowContext(r.Context(),
+		`SELECT node_id FROM deployments WHERE id = ?`, deploymentID).Scan(&nodeID)
+	if err != nil || !nodeID.Valid {
+		return 0, false
+	}
+	return nodeID.Int64, true
+}
 
 func (d Deps) handleDeploymentValidate(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireActor(w, r)
@@ -24,6 +43,13 @@ func (d Deps) handleDeploymentValidate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Scoped to the node in the body. Validating a revision reads that node's
+	// desired state, so it is a node read and is gated like one.
+	if !d.requirePermission(w, r, rbac.PermNodeRead,
+		rbac.Target{Kind: rbac.TargetNode, ID: req.NodeID}) {
 		return
 	}
 
@@ -51,6 +77,13 @@ func (d Deps) handleDeploymentPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Preview returns the node's revision numbers and document hashes, so it
+	// is a node read and is scoped to that node.
+	if !d.requirePermission(w, r, rbac.PermNodeRead,
+		rbac.Target{Kind: rbac.TargetNode, ID: req.NodeID}) {
 		return
 	}
 
@@ -105,8 +138,11 @@ func (d Deps) handleDeploymentCreate(w http.ResponseWriter, r *http.Request) {
 		req.Strategy = deployment.StrategyAllAtOnce
 	}
 
-	// Check authorization before creating deployment
-	if !d.requirePermission(w, r, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNone}) {
+	// Scoped to the node being deployed. TargetNone here was a permission gate
+	// with no scope: an admin holding node:write for their own nodes could
+	// deploy somebody else's.
+	if !d.requirePermission(w, r, rbac.PermNodeWrite,
+		rbac.Target{Kind: rbac.TargetNode, ID: req.NodeID}) {
 		return
 	}
 
@@ -162,6 +198,26 @@ func (d Deps) handleDeploymentGet(w http.ResponseWriter, r *http.Request) {
 	deploymentID, err := strconv.ParseInt(deploymentIDStr, 10, 64)
 	if err != nil {
 		http.Error(w, "invalid deployment id", http.StatusBadRequest)
+		return
+	}
+
+	// Two checks, in this order, and the order is the point.
+	//
+	// First: does this actor hold PermNodeRead AT ALL? An actor who does not is
+	// refused before the deployment is looked up, so they cannot tell an id
+	// that exists from one that does not by comparing 403 against 404.
+	//
+	// Then: the node the deployment changed, and whether it is in scope.
+	if !d.requirePermission(w, r, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	nodeID, ok := d.nodeOfDeployment(r, deploymentID)
+	if !ok {
+		WriteError(w, http.StatusNotFound, "not_found", "deployment not found")
+		return
+	}
+	if !d.requirePermission(w, r, rbac.PermNodeRead,
+		rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 
@@ -232,14 +288,29 @@ func (d Deps) handleDeploymentGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleDeploymentList(w http.ResponseWriter, r *http.Request) {
-	_, ok := requireActor(w, r)
+	actor, ok := requireActor(w, r)
 	if !ok {
 		return
 	}
+	// This route had no permission check and no filter: it returned every
+	// deployment on the platform -- which node changed, when, by which admin,
+	// and the text of any failure -- to anyone holding a session.
+	if !d.requirePermission(w, r, rbac.PermNodeRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
 
+	// Joined to nodes so the shared scope predicate applies. A deployment whose
+	// node is NULL -- recorded before 00032, on a panel with more than one node
+	// -- is dropped by the join rather than shown to everyone, which is the
+	// fail-closed direction for a row nobody can attribute.
 	rows, err := d.Store.Read().QueryContext(r.Context(),
-		`SELECT id, revision_id, strategy, status, created_by, created_at, started_at, completed_at, error
-		 FROM deployments ORDER BY created_at DESC LIMIT 100`)
+		`SELECT d.id, d.revision_id, d.strategy, d.status, d.created_by,
+		        d.created_at, d.started_at, d.completed_at, d.error
+		   FROM deployments d
+		   JOIN nodes ON nodes.id = d.node_id
+		  WHERE `+store.NodeScopeSQL+`
+		  ORDER BY d.created_at DESC LIMIT 100`,
+		store.ScopeArgs(rbac.ScopeOf(actor))...)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "list deployments", "error", err)
 		http.Error(w, "failed to list deployments", http.StatusInternalServerError)
@@ -299,8 +370,23 @@ func (d Deps) handleDeploymentRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check authorization before rollback
+	// Two checks, in this order, and the order is the point.
+	//
+	// First: does this actor hold PermNodeWrite AT ALL? An actor who does not is
+	// refused before the deployment is looked up, so they cannot tell an id
+	// that exists from one that does not by comparing 403 against 404.
+	//
+	// Then: the node the deployment changed, and whether it is in scope.
 	if !d.requirePermission(w, r, rbac.PermNodeWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	nodeID, ok := d.nodeOfDeployment(r, deploymentID)
+	if !ok {
+		WriteError(w, http.StatusNotFound, "not_found", "deployment not found")
+		return
+	}
+	if !d.requirePermission(w, r, rbac.PermNodeWrite,
+		rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
 		return
 	}
 
