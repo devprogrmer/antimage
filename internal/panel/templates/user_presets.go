@@ -13,18 +13,25 @@ import (
 	"github.com/amyrm/antimage/internal/panel/store"
 )
 
+// UserPreset is a saved set of defaults for creating a subject.
+//
+// The json tags are not decoration. Without them this marshals with Go field
+// names -- ID, QuotaBytes, AutoAssignServicesJSON -- while every other
+// endpoint in the panel is snake_case, so a client would have to know which
+// convention each route happened to use. Nothing consumed these endpoints when
+// the tags were added, which is the only cheap moment to fix a wire format.
 type UserPreset struct {
-	ID                     int64
-	Name                   string
-	Description            string
-	QuotaBytes             *int64
-	ValidityDays           *int
-	AutoAssignServicesJSON json.RawMessage
-	AutoAssignNodeTagsJSON json.RawMessage
-	IsPublic               bool
-	CreatedBy              *int64
-	CreatedAt              int64
-	UpdatedAt              int64
+	ID                     int64           `json:"id"`
+	Name                   string          `json:"name"`
+	Description            string          `json:"description"`
+	QuotaBytes             *int64          `json:"quota_bytes"`
+	ValidityDays           *int            `json:"validity_days"`
+	AutoAssignServicesJSON json.RawMessage `json:"auto_assign_services"`
+	AutoAssignNodeTagsJSON json.RawMessage `json:"auto_assign_node_tags"`
+	IsPublic               bool            `json:"is_public"`
+	CreatedBy              *int64          `json:"created_by"`
+	CreatedAt              int64           `json:"created_at"`
+	UpdatedAt              int64           `json:"updated_at"`
 }
 
 type CreatePresetInput struct {

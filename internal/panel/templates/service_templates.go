@@ -15,17 +15,21 @@ import (
 	"github.com/amyrm/antimage/internal/panel/store"
 )
 
+// ServiceTemplate is a saved inbound configuration.
+//
+// Tagged for the same reason UserPreset is: these marshalled with Go field
+// names while the rest of the API is snake_case, and nothing consumed them yet.
 type ServiceTemplate struct {
-	ID          int64
-	Name        string
-	AdapterKind string
-	ParamsJSON  string
-	Description string
-	Tags        []string
-	IsPublic    bool
-	CreatedBy   *int64
-	CreatedAt   int64
-	UpdatedAt   int64
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	AdapterKind string   `json:"adapter_kind"`
+	ParamsJSON  string   `json:"params_json"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
+	IsPublic    bool     `json:"is_public"`
+	CreatedBy   *int64   `json:"created_by"`
+	CreatedAt   int64    `json:"created_at"`
+	UpdatedAt   int64    `json:"updated_at"`
 }
 
 type TemplateFilters struct {

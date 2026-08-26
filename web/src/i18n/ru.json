@@ -363,5 +363,17 @@
   "audit.before": "До",
   "audit.after": "После",
   "audit.none": "Ничего не найдено.",
-  "filters.clear": "Очистить"
+  "filters.clear": "Очистить",
+  "templates.title": "Шаблоны",
+  "templates.services": "Шаблоны сервисов",
+  "templates.presets": "Пресеты пользователей",
+  "templates.newService": "Новый шаблон",
+  "templates.name": "Название",
+  "templates.description": "Описание",
+  "templates.public": "Общий",
+  "templates.validity": "Срок (дней)",
+  "templates.noServices": "Шаблонов сервисов пока нет.",
+  "templates.noPresets": "Пресетов пока нет.",
+  "templates.confirmDelete": "Удалить этот шаблон?",
+  "templates.confirmDeletePreset": "Удалить этот пресет?"
 }

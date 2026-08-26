@@ -363,5 +363,17 @@
   "audit.before": "Before",
   "audit.after": "After",
   "audit.none": "No entries match.",
-  "filters.clear": "Clear"
+  "filters.clear": "Clear",
+  "templates.title": "Templates",
+  "templates.services": "Service templates",
+  "templates.presets": "User presets",
+  "templates.newService": "New template",
+  "templates.name": "Name",
+  "templates.description": "Description",
+  "templates.public": "Shared",
+  "templates.validity": "Validity (days)",
+  "templates.noServices": "No service templates yet.",
+  "templates.noPresets": "No user presets yet.",
+  "templates.confirmDelete": "Delete this template?",
+  "templates.confirmDeletePreset": "Delete this preset?"
 }
