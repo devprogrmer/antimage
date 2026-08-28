@@ -285,7 +285,10 @@ func TestReadCommandsRequireLinking(t *testing.T) {
 	f := newReadFixture(t)
 	const stranger = 9999
 
-	for _, cmd := range []string{"/users", "/user alice-customer", "/balance", "/config alice-customer"} {
+	for _, cmd := range []string{
+		"/users", "/user alice-customer", "/balance", "/config alice-customer",
+		"/create x", "/enable alice-customer", "/disable alice-customer", "/extend alice-customer 7",
+	} {
 		got := f.send(stranger, cmd)
 		if !strings.Contains(got, "not linked") {
 			t.Errorf("%s from an unlinked chat replied %q", cmd, got)
