@@ -250,6 +250,7 @@ func (d Deps) unsealSubjectCreds(ctx context.Context, subjectID int64) (uuid, pa
 			password = string(plain)
 		}
 	}
+	_ = rows.Err()
 	return uuid, password
 }
 
