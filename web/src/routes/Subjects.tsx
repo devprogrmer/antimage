@@ -10,6 +10,7 @@ import { MutationError } from "./Resellers";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { SubjectFilters, searchParamsFor } from "../components/SubjectFilters";
+import { BulkActions } from "../components/BulkActions";
 import {
   Sheet,
   SheetContent,
@@ -26,6 +27,9 @@ interface Subject {
   expired_at: number | null;
   created_at: number;
   note: string;
+  quota_bytes: number | null;
+  quota_used_bytes: number;
+  frozen: boolean;
 }
 
 export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
@@ -34,6 +38,7 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
   // The subject the operator is being asked about. Named in the dialog,
   // because deleting the wrong customer is not recoverable from the UI.
   const [pendingDelete, setPendingDelete] = useState<Subject | null>(null);
+  const [selected, setSelected] = useState<number[]>([]);
 
   // The filter state the bar reports. Kept here rather than inside the bar so
   // it is part of the query key: the list refetches when a filter changes,
@@ -62,6 +67,25 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
 
   const columns: Column<Subject>[] = [
     {
+      id: "select",
+      header: t("subject.selected"),
+      hideable: false,
+      cell: (s) => (
+        <input
+          type="checkbox"
+          checked={selected.includes(s.id)}
+          aria-label={s.name}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            e.stopPropagation();
+            setSelected((cur) =>
+              e.target.checked ? [...cur, s.id] : cur.filter((id) => id !== s.id),
+            );
+          }}
+        />
+      ),
+    },
+    {
       id: "name",
       header: t("subject.name"),
       sortValue: (s) => s.name,
@@ -85,6 +109,16 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
       // its label -- which would order it differently in every language.
       sortValue: (s) => (!s.enabled ? 2 : s.expired_at ? 1 : 0),
       cell: (s) => <StatusBadge subject={s} />,
+    },
+    {
+      id: "quota",
+      header: t("subject.quota"),
+      sortValue: (s) => s.quota_used_bytes,
+      className: "font-mono text-xs",
+      cell: (s) =>
+        s.quota_bytes
+          ? `${Math.round(s.quota_used_bytes / 1_048_576)} / ${Math.round(s.quota_bytes / 1_048_576)} MB`
+          : t("filters.unlimited"),
     },
     {
       id: "expires",
@@ -147,6 +181,23 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
         </SheetContent>
       </Sheet>
 
+      <BulkActions
+        selectedIds={selected}
+        onClearSelection={() => setSelected([])}
+        onAction={async (action, params) => {
+          const body = { subject_ids: selected, ...(params ?? {}) };
+          if (action === "enable") await api.post("/api/v1/subjects/bulk/enable", body);
+          else if (action === "disable") await api.post("/api/v1/subjects/bulk/disable", body);
+          else if (action === "delete") await api.post("/api/v1/subjects/bulk/delete", body);
+          else if (action === "extend") await api.post("/api/v1/subjects/bulk/extend", body);
+          else if (action === "reset-traffic")
+            await api.post("/api/v1/subjects/bulk/reset-traffic", body);
+          else if (action === "set-quota")
+            await api.post("/api/v1/subjects/bulk/set-quota", body);
+          await queryClient.invalidateQueries({ queryKey: ["subjects"] });
+          setSelected([]);
+        }}
+      />
       <SubjectFilters onFilterChange={setFilters} />
 
       <DataTable
@@ -185,10 +236,32 @@ function CreateSubjectForm({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
+  const [expireDays, setExpireDays] = useState("");
+  const [quotaGB, setQuotaGB] = useState("");
+  const [serviceIDs, setServiceIDs] = useState<number[]>([]);
+
+  const services = useQuery({
+    queryKey: ["services-catalog"],
+    queryFn: () =>
+      api.get<{
+        services: Array<{
+          id: number;
+          node_name: string;
+          adapter_kind: string;
+          params: { protocol?: string; port?: number };
+        }>;
+      }>("/api/v1/services"),
+  });
 
   const create = useMutation({
-    mutationFn: (data: { name: string; note: string; service_ids: number[] }) =>
-      api.post("/api/v1/subjects", data),
+    mutationFn: () =>
+      api.post("/api/v1/subjects", {
+        name,
+        note,
+        service_ids: serviceIDs,
+        expire_days: expireDays ? Number(expireDays) : undefined,
+        quota_bytes: quotaGB ? Number(quotaGB) * 1024 * 1024 * 1024 : undefined,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["subjects"] });
       onClose();
@@ -223,11 +296,62 @@ function CreateSubjectForm({ onClose }: { onClose: () => void }) {
             onChange={(e) => setNote(e.target.value)}
           />
         </div>
+        <div>
+          <label className="block text-xs text-muted-foreground" htmlFor="subject-expire">
+            {t("subject.expireDays")}
+          </label>
+          <Input
+            id="subject-expire"
+            type="number"
+            min={0}
+            value={expireDays}
+            onChange={(e) => setExpireDays(e.target.value)}
+            placeholder={t("filters.unlimited")}
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-muted-foreground" htmlFor="subject-quota">
+            {t("subject.quotaGB")}
+          </label>
+          <Input
+            id="subject-quota"
+            type="number"
+            min={0}
+            value={quotaGB}
+            onChange={(e) => setQuotaGB(e.target.value)}
+            placeholder={t("filters.unlimited")}
+          />
+        </div>
+        <fieldset>
+          <legend className="mb-1 block text-xs text-muted-foreground">{t("subject.inbounds")}</legend>
+          <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+            {(services.data?.services ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("subject.noInbounds")}</p>
+            ) : (
+              (services.data?.services ?? []).map((s) => (
+                <label key={s.id} className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={serviceIDs.includes(s.id)}
+                    onChange={(e) =>
+                      setServiceIDs((cur) =>
+                        e.target.checked ? [...cur, s.id] : cur.filter((id) => id !== s.id),
+                      )
+                    }
+                  />
+                  {s.node_name} · {s.adapter_kind}
+                  {s.params?.protocol ? `/${s.params.protocol}` : ""}
+                  {s.params?.port ? `:${s.params.port}` : ""}
+                </label>
+              ))
+            )}
+          </div>
+        </fieldset>
         <MutationError error={create.error} />
         <div className="flex gap-2">
           <Button
             size="sm"
-            onClick={() => create.mutate({ name, note, service_ids: [] })}
+            onClick={() => create.mutate()}
             disabled={!name || create.isPending}
           >
             {t("create")}

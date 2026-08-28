@@ -23,19 +23,28 @@ import (
 // captures response bodies, and in every browser cache. They are fetched one
 // at a time through an explicitly authorized, audited reveal.
 type subjectDTO struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Enabled   bool   `json:"enabled"`
-	ExpiresAt *int64 `json:"expires_at"`
-	ExpiredAt *int64 `json:"expired_at"`
-	CreatedAt int64  `json:"created_at"`
-	Note      string `json:"note"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	ExpiresAt      *int64 `json:"expires_at"`
+	ExpiredAt      *int64 `json:"expired_at"`
+	CreatedAt      int64  `json:"created_at"`
+	Note           string `json:"note"`
+	QuotaBytes     *int64 `json:"quota_bytes"`
+	QuotaUsedBytes int64  `json:"quota_used_bytes"`
+	Frozen         bool   `json:"frozen"`
+	MaxDevices     *int64 `json:"max_devices"`
+	MaxIPs         *int64 `json:"max_ips"`
+	MaxConnections *int64 `json:"max_connections"`
 }
 
 func toSubjectDTO(s subjects.Subject) subjectDTO {
 	dto := subjectDTO{
 		ID: s.ID, Name: s.Name, Enabled: s.Enabled,
 		CreatedAt: s.CreatedAt.Unix(), Note: s.Note,
+		QuotaBytes: s.QuotaBytes, QuotaUsedBytes: s.QuotaUsedBytes,
+		Frozen: s.FrozenAt != nil,
+		MaxDevices: s.MaxDevices, MaxIPs: s.MaxIPs, MaxConnections: s.MaxConnections,
 	}
 	if s.ExpiresAt != nil {
 		v := s.ExpiresAt.Unix()
@@ -199,6 +208,13 @@ type createSubjectRequest struct {
 	Note string `json:"note"`
 	// ExpiresAt is a unix timestamp. Null means the subject never expires.
 	ExpiresAt *int64 `json:"expires_at"`
+	// ExpireDays is a convenience for the UI: N days from now.
+	ExpireDays *int `json:"expire_days"`
+	// QuotaBytes is nil/0 for unlimited.
+	QuotaBytes     *int64 `json:"quota_bytes"`
+	MaxDevices     *int64 `json:"max_devices"`
+	MaxIPs         *int64 `json:"max_ips"`
+	MaxConnections *int64 `json:"max_connections"`
 	// ServiceIDs the subject may use. Each one's node has its revision bumped.
 	ServiceIDs []int64 `json:"service_ids"`
 	// Credentials to import from an existing deployment, keyed by kind.
@@ -229,11 +245,19 @@ func (d Deps) handleCreateSubject(w http.ResponseWriter, r *http.Request) {
 
 	in := subjects.CreateInput{
 		Name: req.Name, Note: req.Note,
-		ServiceIDs:  req.ServiceIDs,
-		Credentials: map[subjects.CredentialKind]string{},
+		ServiceIDs:     req.ServiceIDs,
+		Credentials:    map[subjects.CredentialKind]string{},
+		QuotaBytes:     nilIfZero(req.QuotaBytes),
+		MaxDevices:     nilIfZero(req.MaxDevices),
+		MaxIPs:         nilIfZero(req.MaxIPs),
+		MaxConnections: nilIfZero(req.MaxConnections),
 	}
-	if req.ExpiresAt != nil {
+	switch {
+	case req.ExpiresAt != nil:
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
+		in.ExpiresAt = &t
+	case req.ExpireDays != nil && *req.ExpireDays > 0:
+		t := d.now().Add(time.Duration(*req.ExpireDays) * 24 * time.Hour)
 		in.ExpiresAt = &t
 	}
 	for kind, value := range req.Credentials {
@@ -403,4 +427,74 @@ func (d Deps) rejectSubject(
 		After: map[string]any{"reason": cause.Error()},
 	})
 	WriteError(w, http.StatusUnprocessableEntity, "validation", cause.Error())
+}
+
+func nilIfZero(v *int64) *int64 {
+	if v == nil || *v == 0 {
+		return nil
+	}
+	return v
+}
+
+func (d Deps) handleSubjectSubscription(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathInt64(r, "subjectID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
+	token, err := subjects.EnsureToken(r.Context(), d.Store, id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not issue subscription")
+		return
+	}
+	base := d.publicBaseURL(r)
+	url := base + "/api/v1/subscribe/" + token
+	audit.BestEffort(r.Context(), d.Store, RequestID(r.Context()), d.actorAudit(actor, r), audit.Record{
+		Action: "subject.subscription", TargetType: "subject",
+		TargetID: sql.NullInt64{Int64: id, Valid: true}, Result: "ok",
+	})
+	w.Header().Set("Cache-Control", "no-store")
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"url":         url,
+		"clash_url":   url + "?format=clash",
+		"singbox_url": url + "?format=singbox",
+		"qr_url":      "/api/v1/subscribe/" + token + "/qr",
+	})
+}
+
+func (d Deps) handleRevokeSubjectSubscription(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathInt64(r, "subjectID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
+	if _, err := subjects.RevokeToken(r.Context(), d.Store, id); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not rotate subscription")
+		return
+	}
+	audit.BestEffort(r.Context(), d.Store, RequestID(r.Context()), d.actorAudit(actor, r), audit.Record{
+		Action: "subject.subscription_revoke", TargetType: "subject",
+		TargetID: sql.NullInt64{Int64: id, Valid: true}, Result: "ok",
+	})
+	w.WriteHeader(http.StatusNoContent)
 }

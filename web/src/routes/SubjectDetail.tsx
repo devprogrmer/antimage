@@ -11,6 +11,9 @@ interface Subject {
   expired_at: number | null;
   created_at: number;
   note: string;
+  quota_bytes: number | null;
+  quota_used_bytes: number;
+  frozen: boolean;
 }
 
 interface Device {
@@ -29,6 +32,21 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
     queryKey: ["subject", subjectId],
     queryFn: () => api.get<Subject>(`/api/v1/subjects/${subjectId}`),
   });
+
+  const subscription = useQuery({
+    queryKey: ["subject-sub", subjectId],
+    queryFn: () =>
+      api.get<{ url: string; clash_url: string; singbox_url: string; qr_url: string }>(
+        `/api/v1/subjects/${subjectId}/subscription`,
+      ),
+  });
+
+  const revokeSub = useMutation({
+    mutationFn: () => api.post(`/api/v1/subjects/${subjectId}/subscription/revoke`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["subject-sub", subjectId] }),
+  });
+
+  const [copied, setCopied] = useState(false);
 
   const devices = useQuery({
     queryKey: ["devices", subjectId],
@@ -143,7 +161,52 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
               <dd>{s.note}</dd>
             </div>
           )}
+          <div>
+            <dt className="text-muted-foreground">{t("subject.quota")}</dt>
+            <dd className="font-mono text-xs">
+              {s.quota_bytes
+                ? `${Math.round(s.quota_used_bytes / 1_048_576)} / ${Math.round(s.quota_bytes / 1_048_576)} MB`
+                : t("filters.unlimited")}
+            </dd>
+          </div>
         </dl>
+      </div>
+
+      <div className="rounded border border-border bg-card p-4">
+        <h3 className="mb-3 text-sm font-semibold">{t("subject.subscription")}</h3>
+        {subscription.data?.url ? (
+          <div className="space-y-2">
+            <p className="break-all select-all font-mono text-xs">{subscription.data.url}</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(subscription.data!.url);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? t("common.saved") : t("common.copy")}
+              </button>
+              <a
+                href={subscription.data.qr_url}
+                className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
+              >
+                {t("subject.qr")}
+              </a>
+              <button
+                type="button"
+                className="rounded bg-destructive px-3 py-1 text-sm hover:bg-destructive/90"
+                onClick={() => revokeSub.mutate()}
+              >
+                {t("subject.revokeSub")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
+        )}
       </div>
 
       <div className="rounded border border-border bg-card p-4">

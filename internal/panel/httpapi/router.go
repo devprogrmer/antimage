@@ -203,6 +203,7 @@ func NewRouter(d Deps) http.Handler {
 			// nothing could show what a node is already serving.
 			private.Get("/nodes/{nodeID}/services", d.handleListServices)
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
+			private.Get("/services", d.handleListAllServices)
 
 			// Egress. Node-scoped, because an outbound is a path off one host
 			// and a routing rule selects between the outbounds that host has.
@@ -261,10 +262,13 @@ func NewRouter(d Deps) http.Handler {
 			private.Delete("/subjects/{subjectID}", d.handleDeleteSubject)
 			private.Get("/subjects/{subjectID}/credentials/{kind}", d.handleRevealCredential)
 			private.Post("/subjects/{subjectID}/credentials/{kind}/rotate", d.handleRotateCredential)
+			private.Get("/subjects/{subjectID}/subscription", d.handleSubjectSubscription)
+			private.Post("/subjects/{subjectID}/subscription/revoke", d.handleRevokeSubjectSubscription)
 			private.Get("/subjects/export", d.handleExportSubjects)
 			private.Post("/subjects/import", d.handleImportSubjects)
 			private.Post("/subjects/bulk/delete", d.handleBulkDeleteSubjects)
 			private.Post("/subjects/bulk/enable", d.handleBulkEnableSubjects)
+			private.Post("/subjects/bulk/disable", d.handleBulkDisableSubjects)
 			private.Post("/subjects/bulk/extend", d.handleBulkExtendSubjects)
 			private.Post("/subjects/bulk/reset-traffic", d.handleBulkResetTraffic)
 			private.Post("/subjects/bulk/set-quota", d.handleBulkSetQuota)
@@ -294,6 +298,19 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/deployments/{id}/rollback", d.handleDeploymentRollback)
 
 			private.Get("/events", d.handleEvents)
+
+			private.Get("/hosts", d.handleListHosts)
+			private.Post("/hosts", d.handleCreateHost)
+			private.Put("/hosts/{hostID}", d.handleUpdateHost)
+			private.Delete("/hosts/{hostID}", d.handleDeleteHost)
+
+			private.Get("/settings", d.handleGetSettings)
+			private.Put("/settings", d.handlePutSettings)
+			private.Get("/backup", d.handleDownloadBackup)
+
+			private.Get("/admins", d.handleListAdmins)
+			private.Post("/admins", d.handleCreateAdmin)
+			private.Delete("/admins/{adminID}", d.handleDeleteAdmin)
 		})
 	})
 

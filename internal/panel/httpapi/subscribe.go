@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -25,29 +27,26 @@ func (d Deps) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rate limiting (10 req/min per token)
 	if !subscriptionRateLimiter.Allow(token) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
-	// Lookup subject by token.
 	subjectID, err := subjects.LookupByToken(ctx, d.Store, token)
 	if err != nil {
-		// Token not found or subject disabled - always return 404 for security.
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
-	// Check subject eligibility (not expired, not frozen).
 	var (
 		expiresAt sql.NullInt64
 		frozenAt  sql.NullInt64
+		name      string
 	)
 	row := d.Store.Read().QueryRowContext(ctx,
-		`SELECT expires_at, frozen_at FROM subjects WHERE id = ?`, subjectID)
-	if err := row.Scan(&expiresAt, &frozenAt); err != nil {
+		`SELECT name, expires_at, frozen_at FROM subjects WHERE id = ?`, subjectID)
+	if err := row.Scan(&name, &expiresAt, &frozenAt); err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -62,8 +61,7 @@ func (d Deps) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query all nodes serving this subject.
-	servers, err := d.gatherServers(ctx, subjectID)
+	servers, err := d.gatherServers(ctx, subjectID, name)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -74,11 +72,18 @@ func (d Deps) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect format from User-Agent.
-	userAgent := r.Header.Get("User-Agent")
-	format := subscriptions.DetectFormat(userAgent)
+	format := subscriptions.DetectFormat(r.Header.Get("User-Agent"))
+	if q := strings.TrimSpace(r.URL.Query().Get("format")); q != "" {
+		switch strings.ToLower(q) {
+		case "v2ray", "v2rayn", "links":
+			format = subscriptions.FormatV2Ray
+		case "clash", "meta", "clashmeta":
+			format = subscriptions.FormatClash
+		case "singbox", "sing-box", "sb":
+			format = subscriptions.FormatSingBox
+		}
+	}
 
-	// Render config.
 	var content []byte
 	var contentType string
 	switch format {
@@ -96,144 +101,272 @@ func (d Deps) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Audit log (token redacted for security).
-	// TODO: wire audit logging when available.
-
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Profile-Update-Interval", "6")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }
 
-// gatherServers queries all nodes and credentials for a subject.
-// This is a simplified implementation - in production, this would parse service params
-// and properly extract inbound configurations.
-func (d Deps) gatherServers(ctx context.Context, subjectID int64) ([]subscriptions.Server, error) {
-	// Query nodes serving this subject via subject_services.
+type hostRow struct {
+	ServiceID     int64
+	Remark        string
+	Address       string
+	Port          sql.NullInt64
+	SNI           string
+	Host          string
+	Path          string
+	Security      string
+	Fingerprint   string
+	ALPN          string
+	AllowInsecure int
+	PublicKey     string
+	ShortID       string
+	SpiderX       string
+	Flow          string
+	Priority      int
+}
+
+func (d Deps) gatherServers(ctx context.Context, subjectID int64, subjectName string) ([]subscriptions.Server, error) {
 	query := `
 		SELECT
 			n.id, n.name, n.address,
-			s.id, s.adapter_kind, s.params,
-			sc.kind, sc.value_enc
-		FROM subjects sub
-		JOIN subject_services ss ON ss.subject_id = sub.id
+			s.id, s.adapter_kind, s.params
+		FROM subject_services ss
 		JOIN services s ON s.id = ss.service_id
 		JOIN nodes n ON n.id = s.node_id
-		LEFT JOIN subject_credentials sc ON sc.subject_id = sub.id
-		WHERE sub.id = ?
-		  AND sub.enabled = 1
-		  AND n.status = 'online'
+		WHERE ss.subject_id = ?
 		  AND s.enabled = 1
+		  AND n.status != 'disabled'
+		ORDER BY n.name, s.id
 	`
 
 	rows, err := d.Store.Read().QueryContext(ctx, query, subjectID)
 	if err != nil {
 		return nil, fmt.Errorf("query servers: %w", err)
 	}
-	defer func() {
-		_ = rows.Close()
-	}()
+	defer func() { _ = rows.Close() }()
 
-	var servers []subscriptions.Server
-	credsByKind := make(map[string][]byte)
-
+	type serviceRow struct {
+		nodeID      int64
+		nodeName    string
+		nodeAddress string
+		serviceID   int64
+		adapterKind string
+		paramsJSON  string
+	}
+	var services []serviceRow
+	serviceIDs := make([]int64, 0)
 	for rows.Next() {
-		var (
-			nodeID      int64
-			nodeName    string
-			nodeAddress string
-			serviceID   int64
-			adapterKind string
-			paramsJSON  string
-			credKind    sql.NullString
-			credEnc     []byte
-		)
-
-		err := rows.Scan(&nodeID, &nodeName, &nodeAddress,
-			&serviceID, &adapterKind, &paramsJSON,
-			&credKind, &credEnc)
-		if err != nil {
+		var row serviceRow
+		if err := rows.Scan(&row.nodeID, &row.nodeName, &row.nodeAddress,
+			&row.serviceID, &row.adapterKind, &row.paramsJSON); err != nil {
 			return nil, fmt.Errorf("scan server: %w", err)
 		}
-
-		// Collect credentials (unsealing deferred).
-		if credKind.Valid && len(credEnc) > 0 {
-			credsByKind[credKind.String] = credEnc
-		}
-
-		// Parse service params to extract protocol config.
-		var params map[string]interface{}
-		if err := json.Unmarshal([]byte(paramsJSON), &params); err != nil {
-			continue // Skip malformed params
-		}
-
-		// Extract inbound configuration (simplified - real implementation would
-		// parse the adapter-specific params structure).
-		protocol, port := d.extractInboundConfig(params)
-		if protocol == "" {
-			continue
-		}
-
-		// Unseal credentials.
-		var uuid, password string
-		if d.Box != nil {
-			if encUUID, ok := credsByKind["uuid"]; ok {
-				if plain, err := d.Box.Open(encUUID); err == nil {
-					uuid = string(plain)
-				}
-			}
-			if encPass, ok := credsByKind["password"]; ok {
-				if plain, err := d.Box.Open(encPass); err == nil {
-					password = string(plain)
-				}
-			}
-		}
-
-		servers = append(servers, subscriptions.Server{
-			NodeID:      nodeID,
-			NodeName:    nodeName,
-			NodeAddress: nodeAddress,
-			ServiceID:   serviceID,
-			Protocol:    protocol,
-			Port:        port,
-			UUID:        uuid,
-			Password:    password,
-			TLS:         true, // Assume TLS for now
-			Network:     "tcp",
-		})
+		services = append(services, row)
+		serviceIDs = append(serviceIDs, row.serviceID)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(services) == 0 {
+		return nil, nil
+	}
 
+	uuidVal, passVal := d.unsealSubjectCreds(ctx, subjectID)
+
+	hostsByService, err := d.hostsForServices(ctx, serviceIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	settings, _ := d.loadPanelSettings(ctx)
+	template := settings["remark_template"]
+
+	var servers []subscriptions.Server
+	for _, svc := range services {
+		in := subscriptions.ParseInbound([]byte(svc.paramsJSON))
+		base := subscriptions.Server{
+			NodeID:      svc.nodeID,
+			NodeName:    svc.nodeName,
+			NodeAddress: svc.nodeAddress,
+			ServiceID:   svc.serviceID,
+			Protocol:    in.Protocol,
+			Port:        in.Port,
+			UUID:        uuidVal,
+			Password:    passVal,
+			TLS:         in.Security == "tls" || in.Security == "reality",
+			Security:    in.Security,
+			SNI:         in.SNI,
+			Network:     in.Network,
+			Path:        in.Path,
+			Host:        in.Host,
+			PublicKey:   in.PublicKey,
+			Flow:        in.Flow,
+		}
+		if len(in.ShortIDs) > 0 {
+			base.ShortID = in.ShortIDs[0]
+		}
+
+		hosts := hostsByService[svc.serviceID]
+		if len(hosts) == 0 {
+			base.Remark = applyRemarkTemplate(template, subjectName, base)
+			servers = append(servers, base)
+			continue
+		}
+		for _, h := range hosts {
+			srv := overlayHost(base, h)
+			if srv.Remark == "" {
+				srv.Remark = applyRemarkTemplate(template, subjectName, srv)
+			}
+			servers = append(servers, srv)
+		}
+	}
 	return servers, nil
 }
 
-// extractInboundConfig parses service params to extract protocol and port.
-// This is a simplified implementation - production would properly parse
-// adapter-specific schemas.
-func (d Deps) extractInboundConfig(params map[string]interface{}) (protocol string, port int) {
-	// Try to extract protocol and port from params.
-	// This is adapter-specific, so we use heuristics.
-
-	if proto, ok := params["protocol"].(string); ok {
-		protocol = proto
+func (d Deps) unsealSubjectCreds(ctx context.Context, subjectID int64) (uuid, password string) {
+	if d.Box == nil {
+		return "", ""
 	}
-	if p, ok := params["port"].(float64); ok {
-		port = int(p)
+	rows, err := d.Store.Read().QueryContext(ctx,
+		`SELECT kind, value_enc FROM subject_credentials WHERE subject_id = ?`, subjectID)
+	if err != nil {
+		return "", ""
 	}
-
-	// Fallback defaults
-	if protocol == "" {
-		protocol = "vless"
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var kind string
+		var enc []byte
+		if err := rows.Scan(&kind, &enc); err != nil {
+			continue
+		}
+		plain, err := d.Box.Open(enc)
+		if err != nil {
+			continue
+		}
+		switch kind {
+		case "uuid":
+			uuid = string(plain)
+		case "password":
+			password = string(plain)
+		}
 	}
-	if port == 0 {
-		port = 443
-	}
-
-	return protocol, port
+	return uuid, password
 }
 
-// subscriptionRateLimiter is a global rate limiter for subscription endpoints.
-// In production, this would be injected via Deps.
+func (d Deps) hostsForServices(ctx context.Context, serviceIDs []int64) (map[int64][]hostRow, error) {
+	out := make(map[int64][]hostRow)
+	if len(serviceIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(serviceIDs))
+	args := make([]any, len(serviceIDs))
+	for i, id := range serviceIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := `SELECT service_id, remark, address, port, sni, host, path, security,
+	             fingerprint, alpn, allow_insecure, public_key, short_id, spider_x, flow, priority
+	        FROM subscription_hosts
+	       WHERE enabled = 1 AND service_id IN (` + strings.Join(placeholders, ",") + `)
+	       ORDER BY priority, id`
+	rows, err := d.Store.Read().QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query hosts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var h hostRow
+		if err := rows.Scan(&h.ServiceID, &h.Remark, &h.Address, &h.Port, &h.SNI, &h.Host, &h.Path,
+			&h.Security, &h.Fingerprint, &h.ALPN, &h.AllowInsecure, &h.PublicKey, &h.ShortID,
+			&h.SpiderX, &h.Flow, &h.Priority); err != nil {
+			return nil, fmt.Errorf("scan host: %w", err)
+		}
+		out[h.ServiceID] = append(out[h.ServiceID], h)
+	}
+	return out, rows.Err()
+}
+
+func overlayHost(base subscriptions.Server, h hostRow) subscriptions.Server {
+	srv := base
+	if h.Remark != "" {
+		srv.Remark = h.Remark
+	}
+	if h.Address != "" {
+		srv.NodeAddress = h.Address
+	}
+	if h.Port.Valid && h.Port.Int64 > 0 {
+		srv.Port = int(h.Port.Int64)
+	}
+	if h.SNI != "" {
+		srv.SNI = h.SNI
+	}
+	if h.Host != "" {
+		srv.Host = h.Host
+	}
+	if h.Path != "" {
+		srv.Path = h.Path
+	}
+	if h.Security != "" {
+		srv.Security = h.Security
+		srv.TLS = h.Security == "tls" || h.Security == "reality"
+	}
+	if h.Fingerprint != "" {
+		srv.Fingerprint = h.Fingerprint
+	}
+	if h.ALPN != "" {
+		srv.ALPN = splitCSV(h.ALPN)
+	}
+	srv.AllowInsecure = h.AllowInsecure == 1
+	if h.PublicKey != "" {
+		srv.PublicKey = h.PublicKey
+	}
+	if h.ShortID != "" {
+		srv.ShortID = h.ShortID
+	}
+	if h.SpiderX != "" {
+		srv.SpiderX = h.SpiderX
+	}
+	if h.Flow != "" {
+		srv.Flow = h.Flow
+	}
+	return srv
+}
+
+func applyRemarkTemplate(template, subjectName string, srv subscriptions.Server) string {
+	if strings.TrimSpace(template) == "" {
+		if srv.Remark != "" {
+			return srv.Remark
+		}
+		return srv.NodeName
+	}
+	repl := strings.NewReplacer(
+		"{name}", subjectName,
+		"{node}", srv.NodeName,
+		"{protocol}", srv.Protocol,
+		"{port}", strconv.Itoa(srv.Port),
+		"{address}", srv.NodeAddress,
+	)
+	return repl.Replace(template)
+}
+
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// extractInboundConfig is kept for older tests that still call it.
+func (d Deps) extractInboundConfig(params map[string]interface{}) (protocol string, port int) {
+	raw, _ := json.Marshal(params)
+	in := subscriptions.ParseInbound(raw)
+	return in.Protocol, in.Port
+}
+
 var subscriptionRateLimiter = subscriptions.NewSlidingWindowLimiter(10, time.Minute)

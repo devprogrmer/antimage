@@ -31,6 +31,7 @@ func TestBulkEndpointsRequireSubjectWrite(t *testing.T) {
 
 	for _, tc := range []struct{ name, path, body string }{
 		{"bulk/enable", "/api/v1/subjects/bulk/enable", `{"subject_ids":[` + own + `]}`},
+		{"bulk/disable", "/api/v1/subjects/bulk/disable", `{"subject_ids":[` + own + `]}`},
 		{"bulk/delete", "/api/v1/subjects/bulk/delete", `{"subject_ids":[` + own + `]}`},
 		{"bulk/extend", "/api/v1/subjects/bulk/extend", `{"subject_ids":[` + own + `],"days":30}`},
 		{"bulk/reset-traffic", "/api/v1/subjects/bulk/reset-traffic", `{"subject_ids":[` + own + `]}`},
