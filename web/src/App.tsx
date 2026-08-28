@@ -98,6 +98,23 @@ export default function App() {
         {/* Ownership-scoped in the service layer rather than behind a
             permission, so every signed-in operator has their own. */}
         <Route path="templates" element={<Templates />} />
+        <Route
+          path="hosts"
+          element={
+            <RequirePermission session={session.data} permission="service:read">
+              <Hosts />
+            </RequirePermission>
+          }
+        />
+        <Route path="settings" element={<Settings />} />
+        <Route
+          path="admins"
+          element={
+            <RequirePermission session={session.data} permission="admin:manage">
+              <Admins />
+            </RequirePermission>
+          }
+        />
         <Route path="profile" element={<Profile />} />
         {/* An unknown path is an operator's typo or a stale bookmark, not an
             error worth a screen of its own. */}

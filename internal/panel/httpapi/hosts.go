@@ -139,8 +139,8 @@ func (d Deps) handleCreateHost(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusUnprocessableEntity, "validation", "service_id is required")
 		return
 	}
-	if err := validateHostSecurity(req.Security); err != "" {
-		WriteError(w, http.StatusUnprocessableEntity, "validation", err)
+	if msg := validateHostSecurity(req.Security); msg != "" {
+		WriteError(w, http.StatusUnprocessableEntity, "validation", msg)
 		return
 	}
 	nodeID, found := d.lookupServiceNode(r, req.ServiceID)
@@ -213,10 +213,10 @@ func (d Deps) handleUpdateHost(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusUnprocessableEntity, "validation", errMsg)
 		return
 	}
-	var nodeID, serviceID int64
+	var nodeID int64
 	scanErr := d.Store.Read().QueryRowContext(r.Context(),
-		`SELECT s.node_id, h.service_id FROM subscription_hosts h
-		   JOIN services s ON s.id = h.service_id WHERE h.id = ?`, id).Scan(&nodeID, &serviceID)
+		`SELECT s.node_id FROM subscription_hosts h
+		   JOIN services s ON s.id = h.service_id WHERE h.id = ?`, id).Scan(&nodeID)
 	if scanErr != nil {
 		WriteError(w, http.StatusNotFound, "not_found", "host not found")
 		return

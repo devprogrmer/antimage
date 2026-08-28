@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -360,13 +359,6 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
-}
-
-// extractInboundConfig is kept for older tests that still call it.
-func (d Deps) extractInboundConfig(params map[string]interface{}) (protocol string, port int) {
-	raw, _ := json.Marshal(params)
-	in := subscriptions.ParseInbound(raw)
-	return in.Protocol, in.Port
 }
 
 var subscriptionRateLimiter = subscriptions.NewSlidingWindowLimiter(10, time.Minute)

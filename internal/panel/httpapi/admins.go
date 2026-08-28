@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -172,7 +173,7 @@ func (d Deps) handleDeleteAdmin(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			WriteError(w, http.StatusNotFound, "not_found", "admin not found")
 			return
 		}
