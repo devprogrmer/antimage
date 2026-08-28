@@ -15,6 +15,9 @@ import { SubjectDetail } from "@/routes/SubjectDetail";
 import { Profile } from "@/routes/Profile";
 import { Resellers } from "@/routes/Resellers";
 import { ResellerDetail } from "@/routes/ResellerDetail";
+import { Hosts } from "@/routes/Hosts";
+import { Settings } from "@/routes/Settings";
+import { Admins } from "@/routes/Admins";
 import { api } from "@/lib/api";
 import { can, useSession } from "@/lib/session";
 import type { Session } from "@/lib/session";
@@ -95,6 +98,23 @@ export default function App() {
         {/* Ownership-scoped in the service layer rather than behind a
             permission, so every signed-in operator has their own. */}
         <Route path="templates" element={<Templates />} />
+        <Route
+          path="hosts"
+          element={
+            <RequirePermission session={session.data} permission="service:read">
+              <Hosts />
+            </RequirePermission>
+          }
+        />
+        <Route path="settings" element={<Settings />} />
+        <Route
+          path="admins"
+          element={
+            <RequirePermission session={session.data} permission="admin:manage">
+              <Admins />
+            </RequirePermission>
+          }
+        />
         <Route path="profile" element={<Profile />} />
         {/* An unknown path is an operator's typo or a stale bookmark, not an
             error worth a screen of its own. */}

@@ -50,13 +50,19 @@ const passwordBytes = 32
 // deliberately absent: they are fetched separately so a list can never leak
 // them.
 type Subject struct {
-	ID        int64
-	Name      string
-	Enabled   bool
-	ExpiresAt *time.Time
-	ExpiredAt *time.Time
-	CreatedAt time.Time
-	Note      string
+	ID             int64
+	Name           string
+	Enabled        bool
+	ExpiresAt      *time.Time
+	ExpiredAt      *time.Time
+	CreatedAt      time.Time
+	Note           string
+	QuotaBytes     *int64
+	QuotaUsedBytes int64
+	FrozenAt       *time.Time
+	MaxDevices     *int64
+	MaxIPs         *int64
+	MaxConnections *int64
 }
 
 // Expired reports whether the subject has passed its expiry at the given time.
@@ -140,6 +146,11 @@ type CreateInput struct {
 	ServiceIDs []int64
 	// Credentials to import. Absent kinds are generated.
 	Credentials map[CredentialKind]string
+	// QuotaBytes is nil for unlimited.
+	QuotaBytes     *int64
+	MaxDevices     *int64
+	MaxIPs         *int64
+	MaxConnections *int64
 }
 
 // Create inserts a subject, seals its credentials, and grants its services in
@@ -163,10 +174,16 @@ func (s *Store) Create(ctx context.Context, tx *sql.Tx, in CreateInput) (int64, 
 		expires = in.ExpiresAt.UTC().Unix()
 	}
 
+	token, err := GenerateToken()
+	if err != nil {
+		return 0, err
+	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO subjects (name, enabled, expires_at, created_at, note)
-		 VALUES (?, 1, ?, ?, ?)`,
-		name, expires, now.Unix(), in.Note)
+		`INSERT INTO subjects (name, enabled, expires_at, created_at, note,
+		                       quota_bytes, max_devices, max_ips, max_connections, subscription_token)
+		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, expires, now.Unix(), in.Note,
+		in.QuotaBytes, in.MaxDevices, in.MaxIPs, in.MaxConnections, token)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, fmt.Errorf("%w: %q", ErrNameTaken, name)
@@ -277,7 +294,8 @@ func (s *Store) Credential(ctx context.Context, subjectID int64, kind Credential
 func (s *Store) Get(ctx context.Context, sc rbac.Scope, id int64) (*Subject, error) {
 	args := append([]any{id}, store.ScopeArgs(sc)...)
 	row := s.db.Read().QueryRowContext(ctx,
-		`SELECT id, name, enabled, expires_at, expired_at, created_at, note
+		`SELECT id, name, enabled, expires_at, expired_at, created_at, note,
+		        quota_bytes, quota_used_bytes, frozen_at, max_devices, max_ips, max_connections
 		   FROM subjects
 		  WHERE subjects.id = ? AND `+store.SubjectScopeSQL, args...)
 	return scanSubject(row)
@@ -289,7 +307,8 @@ func (s *Store) Get(ctx context.Context, sc rbac.Scope, id int64) (*Subject, err
 // to leak them. Scope is required for the same reason as on Get.
 func (s *Store) List(ctx context.Context, sc rbac.Scope) ([]Subject, error) {
 	rows, err := s.db.Read().QueryContext(ctx,
-		`SELECT id, name, enabled, expires_at, expired_at, created_at, note
+		`SELECT id, name, enabled, expires_at, expired_at, created_at, note,
+		        quota_bytes, quota_used_bytes, frozen_at, max_devices, max_ips, max_connections
 		   FROM subjects
 		  WHERE `+store.SubjectScopeSQL+`
 		  ORDER BY id DESC`, store.ScopeArgs(sc)...)
@@ -300,27 +319,11 @@ func (s *Store) List(ctx context.Context, sc rbac.Scope) ([]Subject, error) {
 
 	var out []Subject
 	for rows.Next() {
-		var (
-			s         Subject
-			enabled   int
-			expiresAt sql.NullInt64
-			expiredAt sql.NullInt64
-			createdAt int64
-		)
-		if err := rows.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note); err != nil {
+		s, err := scanSubject(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan subject: %w", err)
 		}
-		s.Enabled = enabled == 1
-		s.CreatedAt = time.Unix(createdAt, 0).UTC()
-		if expiresAt.Valid {
-			t := time.Unix(expiresAt.Int64, 0).UTC()
-			s.ExpiresAt = &t
-		}
-		if expiredAt.Valid {
-			t := time.Unix(expiredAt.Int64, 0).UTC()
-			s.ExpiredAt = &t
-		}
-		out = append(out, s)
+		out = append(out, *s)
 	}
 	// Without this a mid-iteration failure is served as a complete list.
 	return out, rows.Err()
@@ -332,13 +335,20 @@ type rowScanner interface {
 
 func scanSubject(row rowScanner) (*Subject, error) {
 	var (
-		s         Subject
-		enabled   int
-		expiresAt sql.NullInt64
-		expiredAt sql.NullInt64
-		createdAt int64
+		s              Subject
+		enabled        int
+		expiresAt      sql.NullInt64
+		expiredAt      sql.NullInt64
+		createdAt      int64
+		quotaBytes     sql.NullInt64
+		quotaUsed      int64
+		frozenAt       sql.NullInt64
+		maxDevices     sql.NullInt64
+		maxIPs         sql.NullInt64
+		maxConnections sql.NullInt64
 	)
-	err := row.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note)
+	err := row.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note,
+		&quotaBytes, &quotaUsed, &frozenAt, &maxDevices, &maxIPs, &maxConnections)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -347,6 +357,7 @@ func scanSubject(row rowScanner) (*Subject, error) {
 	}
 	s.Enabled = enabled == 1
 	s.CreatedAt = time.Unix(createdAt, 0).UTC()
+	s.QuotaUsedBytes = quotaUsed
 	if expiresAt.Valid {
 		t := time.Unix(expiresAt.Int64, 0).UTC()
 		s.ExpiresAt = &t
@@ -354,6 +365,26 @@ func scanSubject(row rowScanner) (*Subject, error) {
 	if expiredAt.Valid {
 		t := time.Unix(expiredAt.Int64, 0).UTC()
 		s.ExpiredAt = &t
+	}
+	if quotaBytes.Valid {
+		v := quotaBytes.Int64
+		s.QuotaBytes = &v
+	}
+	if frozenAt.Valid {
+		t := time.Unix(frozenAt.Int64, 0).UTC()
+		s.FrozenAt = &t
+	}
+	if maxDevices.Valid {
+		v := maxDevices.Int64
+		s.MaxDevices = &v
+	}
+	if maxIPs.Valid {
+		v := maxIPs.Int64
+		s.MaxIPs = &v
+	}
+	if maxConnections.Valid {
+		v := maxConnections.Int64
+		s.MaxConnections = &v
 	}
 	return &s, nil
 }

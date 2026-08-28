@@ -97,6 +97,56 @@ func (d Deps) handleBulkEnableSubjects(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// handleBulkDisableSubjects disables multiple subjects.
+// POST /api/v1/subjects/bulk/disable
+func (d Deps) handleBulkDisableSubjects(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
+	var req BulkEnableRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.SubjectIDs) == 0 {
+		http.Error(w, "subject_ids required", http.StatusBadRequest)
+		return
+	}
+	if len(req.SubjectIDs) > 1000 {
+		http.Error(w, "maximum 1000 subjects per request", http.StatusBadRequest)
+		return
+	}
+	scoped, scopeErr := d.scopeFilterSubjectIDs(r, req.SubjectIDs)
+	if scopeErr != nil {
+		http.Error(w, "could not check subject scope", http.StatusInternalServerError)
+		return
+	}
+	req.SubjectIDs = scoped
+
+	disabled := 0
+	failed := 0
+	errMsgs := []string{}
+	svc := d.subjectService()
+	sa := d.svcActor(r, actor)
+	ctx := r.Context()
+	for _, subjectID := range req.SubjectIDs {
+		if err := svc.SetEnabled(ctx, sa, subjectID, false); err != nil {
+			errMsgs = append(errMsgs, err.Error())
+			failed++
+			continue
+		}
+		disabled++
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"disabled": disabled, "failed": failed, "errors": errMsgs,
+	})
+}
+
 // BulkExtendRequest specifies subjects and extension period.
 type BulkExtendRequest struct {
 	SubjectIDs []int64 `json:"subject_ids"`
