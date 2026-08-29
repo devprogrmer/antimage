@@ -155,9 +155,11 @@ antimage uses a **desired-state reconciliation** model. The panel publishes what
 
 - **V2Ray Format**: Base64-encoded vmess:// links with automatic configuration generation
 - **Clash Format**: YAML configuration with proxy groups and rules
+- **sing-box Format**: Native sing-box outbound configuration
 - **Multi-Protocol**: Supports Xray (VLESS/VMess/Trojan), WireGuard, Hysteria2
 - **Dynamic Updates**: Subscriptions reflect current user state and active nodes
-- **Traffic Display**: Shows remaining quota and bandwidth usage in subscription
+- **Usage Header**: Standard `Subscription-Userinfo` header (`upload/download/total/expire`) so clients like v2rayNG, Streisand, Hiddify and Clash show usage and expiry in-app
+- **Subscription Info Page**: Opening the subscription link in a browser serves a self-contained, multilingual (English/Farsi/Russian/Arabic/Chinese, RTL-aware, dark-mode) information page with a usage ring, days remaining, copy-in-every-format links, a QR code and recommended client apps — instead of a wall of base64. Proxy clients are detected by User-Agent and keep receiving raw payloads; `?format=` always wins over sniffing.
 
 ---
 

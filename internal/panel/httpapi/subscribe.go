@@ -39,13 +39,16 @@ func (d Deps) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		expiresAt sql.NullInt64
-		frozenAt  sql.NullInt64
-		name      string
+		expiresAt  sql.NullInt64
+		frozenAt   sql.NullInt64
+		name       string
+		quotaBytes sql.NullInt64
+		quotaUsed  int64
 	)
 	row := d.Store.Read().QueryRowContext(ctx,
-		`SELECT name, expires_at, frozen_at FROM subjects WHERE id = ?`, subjectID)
-	if err := row.Scan(&name, &expiresAt, &frozenAt); err != nil {
+		`SELECT name, expires_at, frozen_at, quota_bytes, quota_used_bytes
+		 FROM subjects WHERE id = ?`, subjectID)
+	if err := row.Scan(&name, &expiresAt, &frozenAt, &quotaBytes, &quotaUsed); err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -72,7 +75,12 @@ func (d Deps) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	format := subscriptions.DetectFormat(r.Header.Get("User-Agent"))
+	wantPage := false
+	// An explicit ?format= is the caller saying what they want, so it wins
+	// over User-Agent sniffing -- a browser asking for clash gets clash.
+	formatExplicit := false
 	if q := strings.TrimSpace(r.URL.Query().Get("format")); q != "" {
+		formatExplicit = true
 		switch strings.ToLower(q) {
 		case "v2ray", "v2rayn", "links":
 			format = subscriptions.FormatV2Ray
@@ -80,7 +88,44 @@ func (d Deps) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 			format = subscriptions.FormatClash
 		case "singbox", "sing-box", "sb":
 			format = subscriptions.FormatSingBox
+		case "html", "page", "web":
+			wantPage = true
+		default:
+			formatExplicit = false
 		}
+	}
+	// A browser gets the information page rather than a payload: the link is
+	// meant to be pasted into a client, and a human who opens it directly
+	// used to get a wall of base64. Known proxy clients are excluded by name
+	// because several of them identify as Mozilla too (their UA, or the
+	// WebView they render in).
+	if !formatExplicit && !wantPage && isBrowserUA(r.Header.Get("User-Agent")) {
+		wantPage = true
+	}
+
+	// The standard subscription metadata header (see the v2ray
+	// subscription-userinfo convention, sent by Marzban-family panels and
+	// consumed by v2rayNG, Streisand, Hiddify, Clash clients and more). It is
+	// how a client shows usage and expiry in-app without fetching anything
+	// else. antimage accounts combined up+down per subject, so the split is
+	// upload=0; download=<total used>. total=0 and expire=0 mean unlimited
+	// and no expiry respectively.
+	total := int64(0)
+	if quotaBytes.Valid {
+		total = quotaBytes.Int64
+	}
+	expire := int64(0)
+	if expiresAt.Valid {
+		expire = expiresAt.Int64
+	}
+	w.Header().Set("Subscription-Userinfo",
+		fmt.Sprintf("upload=0; download=%d; total=%d; expire=%d", quotaUsed, total, expire))
+
+	if wantPage {
+		pageURL := d.publicBaseURL(r) + "/api/v1/subscribe/" + token
+		renderSubscriptionPage(w, r, buildSubscriptionPageData(
+			name, total, quotaUsed, expire, d.now().Unix(), pageURL))
+		return
 	}
 
 	var content []byte
