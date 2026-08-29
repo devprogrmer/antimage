@@ -50,19 +50,32 @@ const passwordBytes = 32
 // deliberately absent: they are fetched separately so a list can never leak
 // them.
 type Subject struct {
-	ID             int64
-	Name           string
-	Enabled        bool
-	ExpiresAt      *time.Time
-	ExpiredAt      *time.Time
-	CreatedAt      time.Time
-	Note           string
-	QuotaBytes     *int64
-	QuotaUsedBytes int64
-	FrozenAt       *time.Time
-	MaxDevices     *int64
-	MaxIPs         *int64
-	MaxConnections *int64
+	ID                     int64
+	Name                   string
+	Enabled                bool
+	ExpiresAt              *time.Time
+	ExpiredAt              *time.Time
+	CreatedAt              time.Time
+	Note                   string
+	QuotaBytes             *int64
+	QuotaUsedBytes         int64
+	FrozenAt               *time.Time
+	MaxDevices             *int64
+	MaxIPs                 *int64
+	MaxConnections         *int64
+	// Extended fields for production user management
+	AutoDeleteInDays       *int64
+	DataLimitResetStrategy string
+	OnHoldExpireDuration   *int64
+	OnHoldExpiresAt        *time.Time
+	Status                 *string
+	LifetimeUsedBytes      int64
+	TelegramID             *string
+	ContactNumber          *string
+	LastOnlineAt           *time.Time
+	IsOnline               bool
+	OwnerAdminID           *int64
+	PrimaryServiceID       *int64
 }
 
 // Expired reports whether the subject has passed its expiry at the given time.
@@ -147,10 +160,17 @@ type CreateInput struct {
 	// Credentials to import. Absent kinds are generated.
 	Credentials map[CredentialKind]string
 	// QuotaBytes is nil for unlimited.
-	QuotaBytes     *int64
-	MaxDevices     *int64
-	MaxIPs         *int64
-	MaxConnections *int64
+	QuotaBytes             *int64
+	MaxDevices             *int64
+	MaxIPs                 *int64
+	MaxConnections         *int64
+	AutoDeleteInDays       *int64
+	DataLimitResetStrategy *string
+	OnHoldExpireDuration   *int64
+	TelegramID             *string
+	ContactNumber          *string
+	OwnerAdminID           *int64
+	PrimaryServiceID       *int64
 }
 
 // Create inserts a subject, seals its credentials, and grants its services in
@@ -178,12 +198,21 @@ func (s *Store) Create(ctx context.Context, tx *sql.Tx, in CreateInput) (int64, 
 	if err != nil {
 		return 0, err
 	}
+	// Default reset strategy
+	resetStrategy := "no_reset"
+	if in.DataLimitResetStrategy != nil && *in.DataLimitResetStrategy != "" {
+		resetStrategy = *in.DataLimitResetStrategy
+	}
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO subjects (name, enabled, expires_at, created_at, note,
-		                       quota_bytes, max_devices, max_ips, max_connections, subscription_token)
-		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                       quota_bytes, max_devices, max_ips, max_connections, subscription_token,
+		                       auto_delete_in_days, data_limit_reset_strategy, on_hold_expire_duration,
+		                       telegram_id, contact_number, owner_admin_id, primary_service_id)
+		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		name, expires, now.Unix(), in.Note,
-		in.QuotaBytes, in.MaxDevices, in.MaxIPs, in.MaxConnections, token)
+		in.QuotaBytes, in.MaxDevices, in.MaxIPs, in.MaxConnections, token,
+		in.AutoDeleteInDays, resetStrategy, in.OnHoldExpireDuration,
+		in.TelegramID, in.ContactNumber, in.OwnerAdminID, in.PrimaryServiceID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, fmt.Errorf("%w: %q", ErrNameTaken, name)
@@ -295,7 +324,10 @@ func (s *Store) Get(ctx context.Context, sc rbac.Scope, id int64) (*Subject, err
 	args := append([]any{id}, store.ScopeArgs(sc)...)
 	row := s.db.Read().QueryRowContext(ctx,
 		`SELECT id, name, enabled, expires_at, expired_at, created_at, note,
-		        quota_bytes, quota_used_bytes, frozen_at, max_devices, max_ips, max_connections
+		        quota_bytes, quota_used_bytes, frozen_at, max_devices, max_ips, max_connections,
+		        auto_delete_in_days, data_limit_reset_strategy, on_hold_expire_duration, on_hold_expires_at,
+		        status, lifetime_used_bytes, telegram_id, contact_number, last_online_at, is_online,
+		        owner_admin_id, primary_service_id
 		   FROM subjects
 		  WHERE subjects.id = ? AND `+store.SubjectScopeSQL, args...)
 	return scanSubject(row)
@@ -308,7 +340,10 @@ func (s *Store) Get(ctx context.Context, sc rbac.Scope, id int64) (*Subject, err
 func (s *Store) List(ctx context.Context, sc rbac.Scope) ([]Subject, error) {
 	rows, err := s.db.Read().QueryContext(ctx,
 		`SELECT id, name, enabled, expires_at, expired_at, created_at, note,
-		        quota_bytes, quota_used_bytes, frozen_at, max_devices, max_ips, max_connections
+		        quota_bytes, quota_used_bytes, frozen_at, max_devices, max_ips, max_connections,
+		        auto_delete_in_days, data_limit_reset_strategy, on_hold_expire_duration, on_hold_expires_at,
+		        status, lifetime_used_bytes, telegram_id, contact_number, last_online_at, is_online,
+		        owner_admin_id, primary_service_id
 		   FROM subjects
 		  WHERE `+store.SubjectScopeSQL+`
 		  ORDER BY id DESC`, store.ScopeArgs(sc)...)
@@ -335,20 +370,35 @@ type rowScanner interface {
 
 func scanSubject(row rowScanner) (*Subject, error) {
 	var (
-		s              Subject
-		enabled        int
-		expiresAt      sql.NullInt64
-		expiredAt      sql.NullInt64
-		createdAt      int64
-		quotaBytes     sql.NullInt64
-		quotaUsed      int64
-		frozenAt       sql.NullInt64
-		maxDevices     sql.NullInt64
-		maxIPs         sql.NullInt64
-		maxConnections sql.NullInt64
+		s                    Subject
+		enabled              int
+		expiresAt            sql.NullInt64
+		expiredAt            sql.NullInt64
+		createdAt            int64
+		quotaBytes           sql.NullInt64
+		quotaUsed            int64
+		frozenAt             sql.NullInt64
+		maxDevices           sql.NullInt64
+		maxIPs               sql.NullInt64
+		maxConnections       sql.NullInt64
+		autoDelete           sql.NullInt64
+		resetStrategy        sql.NullString
+		onHoldDuration       sql.NullInt64
+		onHoldExpiresAt      sql.NullInt64
+		status               sql.NullString
+		lifetimeUsed         sql.NullInt64
+		telegramID           sql.NullString
+		contactNumber        sql.NullString
+		lastOnlineAt         sql.NullInt64
+		isOnline             sql.NullInt64
+		ownerAdminID         sql.NullInt64
+		primaryServiceID     sql.NullInt64
 	)
 	err := row.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note,
-		&quotaBytes, &quotaUsed, &frozenAt, &maxDevices, &maxIPs, &maxConnections)
+		&quotaBytes, &quotaUsed, &frozenAt, &maxDevices, &maxIPs, &maxConnections,
+		&autoDelete, &resetStrategy, &onHoldDuration, &onHoldExpiresAt,
+		&status, &lifetimeUsed, &telegramID, &contactNumber, &lastOnlineAt, &isOnline,
+		&ownerAdminID, &primaryServiceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -386,6 +436,53 @@ func scanSubject(row rowScanner) (*Subject, error) {
 		v := maxConnections.Int64
 		s.MaxConnections = &v
 	}
+	if autoDelete.Valid {
+		v := autoDelete.Int64
+		s.AutoDeleteInDays = &v
+	}
+	if resetStrategy.Valid {
+		s.DataLimitResetStrategy = resetStrategy.String
+	} else {
+		s.DataLimitResetStrategy = "no_reset"
+	}
+	if onHoldDuration.Valid {
+		v := onHoldDuration.Int64
+		s.OnHoldExpireDuration = &v
+	}
+	if onHoldExpiresAt.Valid {
+		t := time.Unix(onHoldExpiresAt.Int64, 0).UTC()
+		s.OnHoldExpiresAt = &t
+	}
+	if status.Valid {
+		v := status.String
+		s.Status = &v
+	}
+	if lifetimeUsed.Valid {
+		s.LifetimeUsedBytes = lifetimeUsed.Int64
+	}
+	if telegramID.Valid {
+		v := telegramID.String
+		s.TelegramID = &v
+	}
+	if contactNumber.Valid {
+		v := contactNumber.String
+		s.ContactNumber = &v
+	}
+	if lastOnlineAt.Valid {
+		t := time.Unix(lastOnlineAt.Int64, 0).UTC()
+		s.LastOnlineAt = &t
+	}
+	if isOnline.Valid {
+		s.IsOnline = isOnline.Int64 == 1
+	}
+	if ownerAdminID.Valid {
+		v := ownerAdminID.Int64
+		s.OwnerAdminID = &v
+	}
+	if primaryServiceID.Valid {
+		v := primaryServiceID.Int64
+		s.PrimaryServiceID = &v
+	}
 	return &s, nil
 }
 
@@ -421,12 +518,27 @@ func isUniqueViolation(err error) bool {
 // UpdateInput describes a partial change. Nil fields are left alone, which is
 // what lets a caller toggle `enabled` without resending the whole subject.
 type UpdateInput struct {
-	Name        *string
-	Note        *string
-	Enabled     *bool
-	ExpiresAt   *time.Time
-	ClearExpiry bool
-	ServiceIDs  *[]int64
+	Name                   *string
+	Note                   *string
+	Enabled                *bool
+	ExpiresAt              *time.Time
+	ClearExpiry            bool
+	ServiceIDs             *[]int64
+	QuotaBytes             *int64
+	ClearQuota             bool
+	MaxIPs                 *int64
+	MaxDevices             *int64
+	MaxConnections         *int64
+	AutoDeleteInDays       *int64
+	ClearAutoDelete        bool
+	DataLimitResetStrategy *string
+	OnHoldExpireDuration   *int64
+	TelegramID             *string
+	ContactNumber          *string
+	OwnerAdminID           *int64
+	PrimaryServiceID       *int64
+	Status                 *string
+	ClearStatus            bool
 }
 
 // Update applies a partial change.
@@ -488,6 +600,96 @@ func (s *Store) Update(ctx context.Context, tx *sql.Tx, id int64, in UpdateInput
 			return fmt.Errorf("set expiry: %w", err)
 		}
 	}
+	if in.QuotaBytes != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET quota_bytes = ? WHERE id = ?`, *in.QuotaBytes, id); err != nil {
+			return fmt.Errorf("set quota: %w", err)
+		}
+	}
+	if in.ClearQuota {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET quota_bytes = NULL WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("clear quota: %w", err)
+		}
+	}
+	if in.MaxIPs != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET max_ips = ? WHERE id = ?`, *in.MaxIPs, id); err != nil {
+			return fmt.Errorf("set max_ips: %w", err)
+		}
+	}
+	if in.MaxDevices != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET max_devices = ? WHERE id = ?`, *in.MaxDevices, id); err != nil {
+			return fmt.Errorf("set max_devices: %w", err)
+		}
+	}
+	if in.MaxConnections != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET max_connections = ? WHERE id = ?`, *in.MaxConnections, id); err != nil {
+			return fmt.Errorf("set max_connections: %w", err)
+		}
+	}
+	if in.AutoDeleteInDays != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET auto_delete_in_days = ? WHERE id = ?`, *in.AutoDeleteInDays, id); err != nil {
+			return fmt.Errorf("set auto_delete: %w", err)
+		}
+	}
+	if in.ClearAutoDelete {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET auto_delete_in_days = NULL WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("clear auto_delete: %w", err)
+		}
+	}
+	if in.DataLimitResetStrategy != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET data_limit_reset_strategy = ? WHERE id = ?`, *in.DataLimitResetStrategy, id); err != nil {
+			return fmt.Errorf("set reset strategy: %w", err)
+		}
+	}
+	if in.OnHoldExpireDuration != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET on_hold_expire_duration = ? WHERE id = ?`, *in.OnHoldExpireDuration, id); err != nil {
+			return fmt.Errorf("set on_hold duration: %w", err)
+		}
+	}
+	if in.TelegramID != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET telegram_id = ? WHERE id = ?`, *in.TelegramID, id); err != nil {
+			return fmt.Errorf("set telegram_id: %w", err)
+		}
+	}
+	if in.ContactNumber != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET contact_number = ? WHERE id = ?`, *in.ContactNumber, id); err != nil {
+			return fmt.Errorf("set contact: %w", err)
+		}
+	}
+	if in.OwnerAdminID != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET owner_admin_id = ? WHERE id = ?`, *in.OwnerAdminID, id); err != nil {
+			return fmt.Errorf("set owner: %w", err)
+		}
+	}
+	if in.PrimaryServiceID != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET primary_service_id = ? WHERE id = ?`, *in.PrimaryServiceID, id); err != nil {
+			return fmt.Errorf("set primary service: %w", err)
+		}
+	}
+	if in.Status != nil {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET status = ? WHERE id = ?`, *in.Status, id); err != nil {
+			return fmt.Errorf("set status: %w", err)
+		}
+	}
+	if in.ClearStatus {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET status = NULL WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("clear status: %w", err)
+		}
+	}
 	if in.ServiceIDs != nil {
 		// Replace wholesale: computing a delta would leave a window where the
 		// subject is granted neither the old nor the new set.
@@ -502,6 +704,76 @@ func (s *Store) Update(ctx context.Context, tx *sql.Tx, id int64, in UpdateInput
 				return fmt.Errorf("grant service %d: %w", svcID, err)
 			}
 		}
+		// Update primary_service_id cache
+		if len(*in.ServiceIDs) > 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE subjects SET primary_service_id = ? WHERE id = ?`, (*in.ServiceIDs)[0], id); err != nil {
+				return fmt.Errorf("update primary service cache: %w", err)
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE subjects SET primary_service_id = NULL WHERE id = ?`, id); err != nil {
+				return fmt.Errorf("clear primary service cache: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// AddTraffic adds (or removes if negative) quota bytes.
+func (s *Store) AddTraffic(ctx context.Context, tx *sql.Tx, id int64, delta int64) error {
+	if delta == 0 {
+		return nil
+	}
+	// If quota_bytes is NULL (unlimited), adding traffic means setting a limit.
+	// We treat it as: unlimited + delta = delta (if positive) else keep unlimited? Simpler: if NULL, set to delta when positive.
+	var current sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT quota_bytes FROM subjects WHERE id = ?`, id).Scan(&current); err != nil {
+		return err
+	}
+	if !current.Valid {
+		if delta < 0 {
+			return nil // can't remove from unlimited
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE subjects SET quota_bytes = ? WHERE id = ?`, delta, id); err != nil {
+			return fmt.Errorf("set quota from unlimited: %w", err)
+		}
+		return nil
+	}
+	newVal := current.Int64 + delta
+	if newVal < 0 {
+		newVal = 0
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE subjects SET quota_bytes = ? WHERE id = ?`, newVal, id); err != nil {
+		return fmt.Errorf("add traffic: %w", err)
+	}
+	return nil
+}
+
+// AddDays adds (or removes) days to expiry.
+func (s *Store) AddDays(ctx context.Context, tx *sql.Tx, id int64, days int) error {
+	if days == 0 {
+		return nil
+	}
+	var current sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM subjects WHERE id = ?`, id).Scan(&current); err != nil {
+		return err
+	}
+	base := s.now().UTC()
+	if current.Valid && current.Int64 > base.Unix() {
+		base = time.Unix(current.Int64, 0).UTC()
+	}
+	newExpiry := base.Add(time.Duration(days) * 24 * time.Hour)
+	if _, err := tx.ExecContext(ctx, `UPDATE subjects SET expires_at = ?, expired_at = NULL WHERE id = ?`, newExpiry.Unix(), id); err != nil {
+		return fmt.Errorf("add days: %w", err)
+	}
+	return nil
+}
+
+// ResetTraffic resets quota_used_bytes and lifetime remains.
+func (s *Store) ResetTraffic(ctx context.Context, tx *sql.Tx, id int64) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE subjects SET quota_used_bytes = 0 WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("reset traffic: %w", err)
 	}
 	return nil
 }

@@ -1,5 +1,11 @@
-import { useEffect, useState } from 'react';
-import { t } from '../i18n';
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { t } from "../i18n";
+import { api } from "../lib/api";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import { formatTraffic } from "../components/QuotaBar";
+import { Link } from "react-router-dom";
 
 interface DashboardMetrics {
   timestamp: number;
@@ -23,208 +29,202 @@ interface NodeMetric {
   user_count: number;
 }
 
+interface SubjectStats {
+  total: number;
+  active: number;
+  online: number;
+  expired: number;
+  disabled: number;
+  limited: number;
+  expiring_soon: number;
+  traffic_used: number;
+  traffic_remaining: number;
+}
+
 export function Dashboard() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const eventSource = new EventSource('/api/v1/dashboard/stream');
-
-    eventSource.addEventListener('metrics', (event) => {
+    const es = new EventSource("/api/v1/dashboard/stream");
+    es.addEventListener("metrics", (ev) => {
       try {
-        const data = JSON.parse(event.data);
+        const data = JSON.parse(ev.data);
         setMetrics(data);
         setConnected(true);
-        setError(null);
-      } catch (err) {
-        console.error('Failed to parse metrics:', err);
-        setError('Failed to parse metrics data');
-      }
+      } catch {}
     });
-
-    eventSource.addEventListener('heartbeat', () => {
-      setConnected(true);
-    });
-
-    eventSource.onerror = () => {
-      setConnected(false);
-      setError('Connection lost. Reconnecting...');
-    };
-
-    eventSource.onopen = () => {
-      setConnected(true);
-      setError(null);
-    };
-
-    return () => {
-      eventSource.close();
-    };
+    es.addEventListener("heartbeat", () => setConnected(true));
+    es.onerror = () => setConnected(false);
+    es.onopen = () => setConnected(true);
+    return () => es.close();
   }, []);
 
-  if (error && !metrics) {
-    return (
-      <div className="p-8">
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4">
-          <p className="text-destructive">{error}</p>
-        </div>
-      </div>
-    );
-  }
+  const subjectsStats = useQuery({
+    queryKey: ["dashboard-subjects"],
+    queryFn: async () => {
+      const all = await api.get<{ total: number; subjects: any[] }>("/api/v2/subjects?page=1&page_size=1");
+      const active = await api.get<{ total: number }>("/api/v2/subjects?status=active&page=1&page_size=1");
+      const expired = await api.get<{ total: number }>("/api/v2/subjects?status=expired&page=1&page_size=1");
+      const disabled = await api.get<{ total: number }>("/api/v2/subjects?status=disabled&page=1&page_size=1");
+      const online = await api.get<{ total: number }>("/api/v2/subjects?status=online&page=1&page_size=1");
+      const limited = await api.get<{ total: number }>("/api/v2/subjects?status=limited&page=1&page_size=1");
+      const expiring = await api.get<{ total: number }>("/api/v2/subjects?status=expiring_soon&page=1&page_size=1");
+      return {
+        total: all.total,
+        active: active.total,
+        expired: expired.total,
+        disabled: disabled.total,
+        online: online.total,
+        limited: limited.total,
+        expiring_soon: expiring.total,
+      } as SubjectStats;
+    },
+  });
 
-  if (!metrics) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse">
-          <div className="h-8 bg-muted rounded w-1/4 mb-8"></div>
-          <div className="grid grid-cols-4 gap-4 mb-8">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-muted rounded-lg h-32"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const trafficDaily = useQuery({
+    queryKey: ["dashboard-traffic-daily"],
+    queryFn: () => api.get<{ points: { ts: number; total: number }[]; daily: { date: string; total: number }[] }>("/api/v1/dashboard/traffic-chart?days=7"),
+  });
+
+  const auditRecent = useQuery({
+    queryKey: ["dashboard-audit-recent"],
+    queryFn: () => api.get<{ entries: any[] }>("/api/v1/audit?limit=10"),
+  });
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold">{t('dashboard.title')}</h1>
-        <div className="flex items-center space-x-2">
-          <div
-            className={`w-3 h-3 rounded-full ${
-              connected ? 'bg-success' : 'bg-destructive'
-            }`}
-          ></div>
-          <span className="text-sm text-muted-foreground">
-            {connected ? t('dashboard.live') : t('dashboard.disconnected')}
-          </span>
+    <div className="space-y-6 p-1">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">{t("dashboard.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("dashboard.subtitle")}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
+          <span className="text-xs text-muted-foreground">{connected ? t("dashboard.live") : t("dashboard.disconnected")}</span>
         </div>
       </div>
 
-      {/* Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <MetricCard
-          title={t('dashboard.active_users')}
-          value={metrics.active_users}
-          total={metrics.total_subjects}
-          icon="👥"
-          color="blue"
-        />
-        <MetricCard
-          title={t('dashboard.nodes_online')}
-          value={metrics.nodes_online}
-          total={metrics.nodes_total}
-          icon="🖥️"
-          color="green"
-        />
-        <MetricCard
-          title={t('dashboard.traffic_today')}
-          value={`${metrics.traffic_today_gb.toFixed(2)} GB`}
-          subtitle={`${metrics.bandwidth_mbps.toFixed(1)} Mbps`}
-          icon="📊"
-          color="purple"
-        />
-        <MetricCard
-          title={t('dashboard.alerts')}
-          value={metrics.alerts_count}
-          subtitle={metrics.frozen_count + ' ' + t('dashboard.frozen')}
-          icon="⚠️"
-          color={metrics.alerts_count > 0 ? 'red' : 'gray'}
-        />
+      {/* User-oriented KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <KpiCard title={t("dashboard.totalUsers")} value={subjectsStats.data?.total ?? "—"} to="/subjects" color="primary" />
+        <KpiCard title={t("dashboard.activeUsers")} value={subjectsStats.data?.active ?? "—"} to="/subjects?status=active" color="green" />
+        <KpiCard title={t("dashboard.onlineUsers")} value={subjectsStats.data?.online ?? metrics?.active_users ?? "—"} to="/subjects?status=online" color="green" />
+        <KpiCard title={t("dashboard.expiringSoon")} value={subjectsStats.data?.expiring_soon ?? "—"} to="/subjects?status=expiring_soon" color="yellow" />
+        <KpiCard title={t("dashboard.expiredUsers")} value={subjectsStats.data?.expired ?? "—"} to="/subjects?status=expired" color="red" />
+        <KpiCard title={t("dashboard.disabledUsers")} value={subjectsStats.data?.disabled ?? "—"} to="/subjects?status=disabled" color="gray" />
+        <KpiCard title={t("dashboard.limitedUsers")} value={subjectsStats.data?.limited ?? "—"} to="/subjects?status=limited" color="orange" />
       </div>
 
-      {/* Nodes Grid */}
-      <div className="bg-card rounded-lg shadow-sm border border-border p-6">
-        <h2 className="text-xl font-semibold mb-4">{t('dashboard.nodes')}</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {metrics.nodes.map((node) => (
-            <NodeCard key={node.id} node={node} />
-          ))}
-        </div>
+      <div className="grid md:grid-cols-4 gap-4">
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">{t("dashboard.trafficToday")}</div><div className="text-xl font-bold">{metrics ? `${metrics.traffic_today_gb.toFixed(2)} GB` : "—"}</div><div className="text-xs text-muted-foreground">{metrics ? `${metrics.bandwidth_mbps.toFixed(1)} Mbps` : ""}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">{t("dashboard.activeNodes")}</div><div className="text-xl font-bold">{metrics ? `${metrics.nodes_online} / ${metrics.nodes_total}` : "—"}</div><div className="text-xs">{metrics && metrics.nodes_total - metrics.nodes_online > 0 ? <span className="text-red-500">{metrics.nodes_total - metrics.nodes_online} offline</span> : <span className="text-green-600">All healthy</span>}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">{t("dashboard.alerts")}</div><div className="text-xl font-bold">{metrics?.alerts_count ?? "—"}</div><div className="text-xs text-muted-foreground">{metrics ? `${metrics.frozen_count} frozen` : ""}</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-xs text-muted-foreground">{t("dashboard.trafficUsed")}</div><div className="text-xl font-bold">{trafficDaily.data?.daily ? formatTraffic(trafficDaily.data.daily.reduce((a: any, b: any) => a + (b.total||0), 0)) : trafficDaily.data?.points ? formatTraffic(trafficDaily.data.points.reduce((a: any, b: any) => a + (b.total||0), 0)) : "—"}</div><div className="text-xs text-muted-foreground">Last 7 days</div></CardContent></Card>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Nodes */}
+        <Card className="lg:col-span-2">
+          <CardHeader><CardTitle className="text-sm">{t("dashboard.nodes")}</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid md:grid-cols-2 gap-3">
+              {(metrics?.nodes ?? []).map((node) => (
+                <div key={node.id} className="border rounded p-3 flex justify-between items-center">
+                  <div>
+                    <div className="font-medium text-sm">{node.name}</div>
+                    <div className="text-xs text-muted-foreground">{node.user_count} users • {node.cpu_percent.toFixed(1)}% CPU • {node.ram_percent.toFixed(1)}% RAM</div>
+                  </div>
+                  <Badge variant={node.status === "online" ? "default" : node.status === "degraded" ? "outline" : "destructive"}>{node.status}</Badge>
+                </div>
+              ))}
+              {!metrics && <div className="text-sm text-muted-foreground">{t("loading")}</div>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Daily Traffic */}
+        <Card>
+          <CardHeader><CardTitle className="text-sm">{t("dashboard.dailyTraffic")}</CardTitle></CardHeader>
+          <CardContent>
+            {!trafficDaily.data || trafficDaily.data.daily.length === 0 ? (
+              <div className="text-sm text-muted-foreground">{t("dashboard.noTraffic")}</div>
+            ) : (
+              <div className="space-y-2">
+                {trafficDaily.data.daily.map((d, i) => {
+                  const max = Math.max(...trafficDaily.data!.daily.map((x) => x.total), 1);
+                  const pct = Math.round((d.total / max) * 100);
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-xs">
+                      <span className="w-20 font-mono">{d.date}</span>
+                      <div className="flex-1 h-2 bg-muted rounded overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
+                      <span className="w-16 font-mono text-right">{formatTraffic(d.total)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Recent Activity */}
+        <Card>
+          <CardHeader><CardTitle className="text-sm">{t("dashboard.recentActivity")}</CardTitle></CardHeader>
+          <CardContent>
+            {!auditRecent.data || auditRecent.data.entries.length === 0 ? (
+              <div className="text-sm text-muted-foreground">{t("dashboard.noActivity")}</div>
+            ) : (
+              <div className="space-y-2">
+                {auditRecent.data.entries.slice(0, 8).map((a: any, i: number) => (
+                  <div key={i} className="flex items-center gap-2 text-xs border-b py-1">
+                    <Badge variant="outline" className="text-xs">{a.action}</Badge>
+                    <span className="font-mono">{a.target_type}#{a.target_id}</span>
+                    <span className="text-muted-foreground">{a.actor_type}#{a.actor_id}</span>
+                    <span className="text-muted-foreground">{new Date(a.created_at * 1000).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-3">
+              <Link to="/audit" className="text-xs text-primary hover:underline">{t("dashboard.viewAllAudit")}</Link>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Quick Actions */}
+        <Card>
+          <CardHeader><CardTitle className="text-sm">{t("dashboard.quickActions")}</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-2 gap-2">
+            <Link to="/subjects" className="p-3 border rounded hover:bg-muted text-sm font-medium">{t("subjects.create")} →</Link>
+            <Link to="/services" className="p-3 border rounded hover:bg-muted text-sm font-medium">{t("services.title")} →</Link>
+            <Link to="/nodes" className="p-3 border rounded hover:bg-muted text-sm font-medium">{t("nodes.title")} →</Link>
+            <Link to="/traffic" className="p-3 border rounded hover:bg-muted text-sm font-medium">{t("traffic.title")} →</Link>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 }
 
-interface MetricCardProps {
-  title: string;
-  value: string | number;
-  total?: number;
-  subtitle?: string;
-  icon: string;
-  color: 'blue' | 'green' | 'purple' | 'red' | 'gray';
-}
-
-function MetricCard({ title, value, total, subtitle, icon, color }: MetricCardProps) {
-  const colorClasses = {
-    blue: 'border-primary/30 bg-primary/10 text-primary',
-    green: 'border-success/30 bg-success/10 text-success',
-    purple: 'border-primary/30 bg-primary/10 text-primary',
-    red: 'border-destructive/30 bg-destructive/10 text-destructive',
-    gray: 'border-border bg-muted text-muted-foreground',
+function KpiCard({ title, value, to, color }: { title: string; value: string | number; to: string; color: string }) {
+  const colorMap: Record<string, string> = {
+    primary: "border-primary/30 bg-primary/5",
+    green: "border-green-500/30 bg-green-500/5",
+    yellow: "border-yellow-500/30 bg-yellow-500/5",
+    red: "border-red-500/30 bg-red-500/5",
+    gray: "border-border bg-muted/50",
+    orange: "border-orange-500/30 bg-orange-500/5",
   };
-
   return (
-    <div className={`rounded-lg border p-6 ${colorClasses[color]}`}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium opacity-75">{title}</span>
-        <span className="text-2xl">{icon}</span>
-      </div>
-      <div className="text-3xl font-bold mb-1">
-        {value}
-        {total !== undefined && (
-          <span className="text-lg font-normal opacity-75"> / {total}</span>
-        )}
-      </div>
-      {subtitle && <div className="text-sm opacity-75">{subtitle}</div>}
-    </div>
-  );
-}
-
-interface NodeCardProps {
-  node: NodeMetric;
-}
-
-function NodeCard({ node }: NodeCardProps) {
-  const statusColors = {
-    online: 'border-success/30 bg-success/10 text-success',
-    degraded: 'border-warning/30 bg-warning/10 text-warning',
-    offline: 'border-destructive/30 bg-destructive/10 text-destructive',
-  };
-
-  const statusColor = statusColors[node.status as keyof typeof statusColors] || statusColors.offline;
-
-  return (
-    <div className="bg-muted rounded-lg border border-border p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-foreground">{node.name}</h3>
-        <span
-          className={`px-2 py-1 rounded-full text-xs font-medium border ${statusColor}`}
-        >
-          {node.status}
-        </span>
-      </div>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">{t('dashboard.users')}</span>
-          <span className="font-medium">{node.user_count}</span>
-        </div>
-        {node.cpu_percent > 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">{t('dashboard.cpu')}</span>
-            <span className="font-medium">{node.cpu_percent.toFixed(1)}%</span>
-          </div>
-        )}
-        {node.ram_percent > 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">{t('dashboard.ram')}</span>
-            <span className="font-medium">{node.ram_percent.toFixed(1)}%</span>
-          </div>
-        )}
-      </div>
-    </div>
+    <Link to={to}>
+      <Card className={`${colorMap[color] ?? colorMap.gray} hover:opacity-80 transition-opacity`}>
+        <CardContent className="p-3">
+          <div className="text-xs text-muted-foreground truncate">{title}</div>
+          <div className="text-xl font-bold">{value}</div>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }

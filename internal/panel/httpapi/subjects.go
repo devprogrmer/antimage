@@ -23,19 +23,36 @@ import (
 // captures response bodies, and in every browser cache. They are fetched one
 // at a time through an explicitly authorized, audited reveal.
 type subjectDTO struct {
-	ID             int64  `json:"id"`
-	Name           string `json:"name"`
-	Enabled        bool   `json:"enabled"`
-	ExpiresAt      *int64 `json:"expires_at"`
-	ExpiredAt      *int64 `json:"expired_at"`
-	CreatedAt      int64  `json:"created_at"`
-	Note           string `json:"note"`
-	QuotaBytes     *int64 `json:"quota_bytes"`
-	QuotaUsedBytes int64  `json:"quota_used_bytes"`
-	Frozen         bool   `json:"frozen"`
-	MaxDevices     *int64 `json:"max_devices"`
-	MaxIPs         *int64 `json:"max_ips"`
-	MaxConnections *int64 `json:"max_connections"`
+	ID                     int64   `json:"id"`
+	Name                   string  `json:"name"`
+	Enabled                bool    `json:"enabled"`
+	ExpiresAt              *int64  `json:"expires_at"`
+	ExpiredAt              *int64  `json:"expired_at"`
+	CreatedAt              int64   `json:"created_at"`
+	Note                   string  `json:"note"`
+	QuotaBytes             *int64  `json:"quota_bytes"`
+	QuotaUsedBytes         int64   `json:"quota_used_bytes"`
+	Frozen                 bool    `json:"frozen"`
+	MaxDevices             *int64  `json:"max_devices"`
+	MaxIPs                 *int64  `json:"max_ips"`
+	MaxConnections         *int64  `json:"max_connections"`
+	AutoDeleteInDays       *int64  `json:"auto_delete_in_days"`
+	DataLimitResetStrategy string  `json:"data_limit_reset_strategy"`
+	OnHoldExpireDuration   *int64  `json:"on_hold_expire_duration"`
+	OnHoldExpiresAt        *int64  `json:"on_hold_expires_at"`
+	Status                 *string `json:"status"`
+	LifetimeUsedBytes      int64   `json:"lifetime_used_bytes"`
+	TelegramID             *string `json:"telegram_id"`
+	ContactNumber          *string `json:"contact_number"`
+	LastOnlineAt           *int64  `json:"last_online_at"`
+	IsOnline               bool    `json:"is_online"`
+	OwnerAdminID           *int64  `json:"owner_admin_id"`
+	PrimaryServiceID       *int64  `json:"primary_service_id"`
+	RemainingBytes         *int64  `json:"remaining_bytes"`
+	RemainingDays          *int64  `json:"remaining_days"`
+	// Enriched fields for professional UI
+	ServiceIDs []int64 `json:"service_ids,omitempty"`
+	NodeIDs    []int64 `json:"node_ids,omitempty"`
 }
 
 func toSubjectDTO(s subjects.Subject) subjectDTO {
@@ -45,14 +62,36 @@ func toSubjectDTO(s subjects.Subject) subjectDTO {
 		QuotaBytes: s.QuotaBytes, QuotaUsedBytes: s.QuotaUsedBytes,
 		Frozen: s.FrozenAt != nil,
 		MaxDevices: s.MaxDevices, MaxIPs: s.MaxIPs, MaxConnections: s.MaxConnections,
+		AutoDeleteInDays: s.AutoDeleteInDays, DataLimitResetStrategy: s.DataLimitResetStrategy,
+		OnHoldExpireDuration: s.OnHoldExpireDuration, Status: s.Status,
+		LifetimeUsedBytes: s.LifetimeUsedBytes, TelegramID: s.TelegramID, ContactNumber: s.ContactNumber,
+		IsOnline: s.IsOnline, OwnerAdminID: s.OwnerAdminID, PrimaryServiceID: s.PrimaryServiceID,
 	}
 	if s.ExpiresAt != nil {
 		v := s.ExpiresAt.Unix()
 		dto.ExpiresAt = &v
+		now := time.Now().Unix()
+		rem := (v - now) / 86400
+		dto.RemainingDays = &rem
 	}
 	if s.ExpiredAt != nil {
 		v := s.ExpiredAt.Unix()
 		dto.ExpiredAt = &v
+	}
+	if s.OnHoldExpiresAt != nil {
+		v := s.OnHoldExpiresAt.Unix()
+		dto.OnHoldExpiresAt = &v
+	}
+	if s.LastOnlineAt != nil {
+		v := s.LastOnlineAt.Unix()
+		dto.LastOnlineAt = &v
+	}
+	if s.QuotaBytes != nil {
+		rem := *s.QuotaBytes - s.QuotaUsedBytes
+		if rem < 0 {
+			rem = 0
+		}
+		dto.RemainingBytes = &rem
 	}
 	return dto
 }
@@ -171,8 +210,6 @@ func (d Deps) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Permission and tenant scope are both enforced inside the service, so this
-	// handler cannot forget either one.
 	list, err := d.subjectService().List(r.Context(), d.svcActor(r, actor))
 	if err != nil {
 		d.writeServiceError(w, r, actor, "subject.list", err)
@@ -180,7 +217,30 @@ func (d Deps) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]subjectDTO, 0, len(list))
 	for _, s := range list {
-		out = append(out, toSubjectDTO(s))
+		dto := toSubjectDTO(s)
+		// Enrich with service_ids and node_ids for UI
+		svcIDs, _ := d.subjectStore().NodeIDsForRead(r.Context(), s.ID)
+		_ = svcIDs
+		// We need actual service IDs, not node IDs — query separately
+		rows, err := d.Store.Read().QueryContext(r.Context(),
+			`SELECT service_id FROM subject_services WHERE subject_id = ?`, s.ID)
+		if err == nil {
+			defer func() {
+				// close in loop is tricky; collect first then close
+			}()
+			var ids []int64
+			for rows.Next() {
+				var sid int64
+				if err := rows.Scan(&sid); err == nil {
+					ids = append(ids, sid)
+				}
+			}
+			_ = rows.Close()
+			dto.ServiceIDs = ids
+		}
+		nodeIDs, _ := d.subjectStore().NodeIDsForRead(r.Context(), s.ID)
+		dto.NodeIDs = nodeIDs
+		out = append(out, dto)
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"subjects": out})
 }
@@ -200,7 +260,24 @@ func (d Deps) handleGetSubject(w http.ResponseWriter, r *http.Request) {
 		d.writeServiceError(w, r, actor, "subject.get", err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toSubjectDTO(*s))
+	dto := toSubjectDTO(*s)
+	// Enrich
+	rows, err := d.Store.Read().QueryContext(r.Context(),
+		`SELECT service_id FROM subject_services WHERE subject_id = ?`, s.ID)
+	if err == nil {
+		var ids []int64
+		for rows.Next() {
+			var sid int64
+			if err := rows.Scan(&sid); err == nil {
+				ids = append(ids, sid)
+			}
+		}
+		_ = rows.Close()
+		dto.ServiceIDs = ids
+	}
+	nodeIDs, _ := d.subjectStore().NodeIDsForRead(r.Context(), s.ID)
+	dto.NodeIDs = nodeIDs
+	WriteJSON(w, http.StatusOK, dto)
 }
 
 type createSubjectRequest struct {
@@ -211,10 +288,17 @@ type createSubjectRequest struct {
 	// ExpireDays is a convenience for the UI: N days from now.
 	ExpireDays *int `json:"expire_days"`
 	// QuotaBytes is nil/0 for unlimited.
-	QuotaBytes     *int64 `json:"quota_bytes"`
-	MaxDevices     *int64 `json:"max_devices"`
-	MaxIPs         *int64 `json:"max_ips"`
-	MaxConnections *int64 `json:"max_connections"`
+	QuotaBytes             *int64  `json:"quota_bytes"`
+	MaxDevices             *int64  `json:"max_devices"`
+	MaxIPs                 *int64  `json:"max_ips"`
+	MaxConnections         *int64  `json:"max_connections"`
+	AutoDeleteInDays       *int64  `json:"auto_delete_in_days"`
+	DataLimitResetStrategy *string `json:"data_limit_reset_strategy"`
+	OnHoldExpireDuration   *int64  `json:"on_hold_expire_duration"`
+	TelegramID             *string `json:"telegram_id"`
+	ContactNumber          *string `json:"contact_number"`
+	OwnerAdminID           *int64  `json:"owner_admin_id"`
+	PrimaryServiceID       *int64  `json:"primary_service_id"`
 	// ServiceIDs the subject may use. Each one's node has its revision bumped.
 	ServiceIDs []int64 `json:"service_ids"`
 	// Credentials to import from an existing deployment, keyed by kind.
@@ -245,12 +329,23 @@ func (d Deps) handleCreateSubject(w http.ResponseWriter, r *http.Request) {
 
 	in := subjects.CreateInput{
 		Name: req.Name, Note: req.Note,
-		ServiceIDs:     req.ServiceIDs,
-		Credentials:    map[subjects.CredentialKind]string{},
-		QuotaBytes:     nilIfZero(req.QuotaBytes),
-		MaxDevices:     nilIfZero(req.MaxDevices),
-		MaxIPs:         nilIfZero(req.MaxIPs),
-		MaxConnections: nilIfZero(req.MaxConnections),
+		ServiceIDs:             req.ServiceIDs,
+		Credentials:            map[subjects.CredentialKind]string{},
+		QuotaBytes:             nilIfZero(req.QuotaBytes),
+		MaxDevices:             nilIfZero(req.MaxDevices),
+		MaxIPs:                 nilIfZero(req.MaxIPs),
+		MaxConnections:         nilIfZero(req.MaxConnections),
+		AutoDeleteInDays:       nilIfZero(req.AutoDeleteInDays),
+		DataLimitResetStrategy: req.DataLimitResetStrategy,
+		OnHoldExpireDuration:   nilIfZero(req.OnHoldExpireDuration),
+		TelegramID:             req.TelegramID,
+		ContactNumber:          req.ContactNumber,
+		OwnerAdminID:           req.OwnerAdminID,
+		PrimaryServiceID:       req.PrimaryServiceID,
+	}
+	if in.PrimaryServiceID == nil && len(req.ServiceIDs) > 0 {
+		v := req.ServiceIDs[0]
+		in.PrimaryServiceID = &v
 	}
 	switch {
 	case req.ExpiresAt != nil:
@@ -278,12 +373,27 @@ func (d Deps) handleCreateSubject(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateSubjectRequest struct {
-	Name        *string  `json:"name"`
-	Note        *string  `json:"note"`
-	Enabled     *bool    `json:"enabled"`
-	ExpiresAt   *int64   `json:"expires_at"`
-	ClearExpiry bool     `json:"clear_expiry"`
-	ServiceIDs  *[]int64 `json:"service_ids"`
+	Name                   *string  `json:"name"`
+	Note                   *string  `json:"note"`
+	Enabled                *bool    `json:"enabled"`
+	ExpiresAt              *int64   `json:"expires_at"`
+	ClearExpiry            bool     `json:"clear_expiry"`
+	ServiceIDs             *[]int64 `json:"service_ids"`
+	QuotaBytes             *int64   `json:"quota_bytes"`
+	ClearQuota             bool     `json:"clear_quota"`
+	MaxIPs                 *int64   `json:"max_ips"`
+	MaxDevices             *int64   `json:"max_devices"`
+	MaxConnections         *int64   `json:"max_connections"`
+	AutoDeleteInDays       *int64   `json:"auto_delete_in_days"`
+	ClearAutoDelete        bool     `json:"clear_auto_delete"`
+	DataLimitResetStrategy *string  `json:"data_limit_reset_strategy"`
+	OnHoldExpireDuration   *int64   `json:"on_hold_expire_duration"`
+	TelegramID             *string  `json:"telegram_id"`
+	ContactNumber          *string  `json:"contact_number"`
+	OwnerAdminID           *int64   `json:"owner_admin_id"`
+	PrimaryServiceID       *int64   `json:"primary_service_id"`
+	Status                 *string  `json:"status"`
+	ClearStatus            bool     `json:"clear_status"`
 }
 
 // handleUpdateSubject changes a subject and republishes it.
@@ -317,13 +427,18 @@ func (d Deps) handleUpdateSubject(w http.ResponseWriter, r *http.Request) {
 	up := subjects.UpdateInput{
 		Name: req.Name, Note: req.Note, Enabled: req.Enabled,
 		ClearExpiry: req.ClearExpiry, ServiceIDs: req.ServiceIDs,
+		QuotaBytes: req.QuotaBytes, ClearQuota: req.ClearQuota,
+		MaxIPs: req.MaxIPs, MaxDevices: req.MaxDevices, MaxConnections: req.MaxConnections,
+		AutoDeleteInDays: req.AutoDeleteInDays, ClearAutoDelete: req.ClearAutoDelete,
+		DataLimitResetStrategy: req.DataLimitResetStrategy, OnHoldExpireDuration: req.OnHoldExpireDuration,
+		TelegramID: req.TelegramID, ContactNumber: req.ContactNumber,
+		OwnerAdminID: req.OwnerAdminID, PrimaryServiceID: req.PrimaryServiceID,
+		Status: req.Status, ClearStatus: req.ClearStatus,
 	}
 	if req.ExpiresAt != nil {
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
 		up.ExpiresAt = &t
 	}
-	// The service republishes the union of the node sets before and after, so
-	// moving a subject between services stops the losing node serving them.
 	if err := d.subjectService().Update(r.Context(), d.svcActor(r, actor), id, up); err != nil {
 		d.writeServiceError(w, r, actor, "subject.update", err)
 		return
@@ -344,8 +459,6 @@ func (d Deps) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
 		return
 	}
-	// The service captures the affected nodes BEFORE deleting, since the
-	// cascade removes the grants that name them.
 	if err := d.subjectService().Delete(r.Context(), d.svcActor(r, actor), id); err != nil {
 		d.writeServiceError(w, r, actor, "subject.delete", err)
 		return
@@ -370,15 +483,11 @@ func (d Deps) handleRevealCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	kind := subjects.CredentialKind(chi.URLParam(r, "kind"))
 
-	// The highest-value read in the panel. Permission, tenant scope and the
-	// by-kind audit record all live in the service, so the bot gets the same
-	// three guarantees without repeating them.
 	value, err := d.subjectService().Credential(r.Context(), d.svcActor(r, actor), id, kind)
 	if err != nil {
 		d.writeServiceError(w, r, actor, "credential.reveal", err)
 		return
 	}
-	// no-store: a credential must not sit in a browser or proxy cache.
 	w.Header().Set("Cache-Control", "no-store")
 	WriteJSON(w, http.StatusOK, map[string]any{"kind": string(kind), "value": value})
 }
@@ -397,8 +506,6 @@ func (d Deps) handleRotateCredential(w http.ResponseWriter, r *http.Request) {
 	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
 		return
 	}
-	// Rotation is as sensitive as reveal in the other direction: rotating a
-	// foreign customer's credential would cut off a competitor's user.
 	if !d.requireSubjectInScope(w, r, actor, id) {
 		return
 	}
@@ -414,10 +521,6 @@ func (d Deps) handleRotateCredential(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"kind": string(kind), "value": fresh})
 }
 
-// republishNodes commits an empty change to each node, which rebuilds its
-// desired document and bumps the revision only if the document actually
-// changed. CommitNodeChange remains the single path that may do so.
-// rejectSubject records a refused write, per spec invariant 9.
 func (d Deps) rejectSubject(
 	w http.ResponseWriter, r *http.Request, actor *rbac.Actor, action string, cause error,
 ) {
@@ -468,6 +571,7 @@ func (d Deps) handleSubjectSubscription(w http.ResponseWriter, r *http.Request) 
 		"url":         url,
 		"clash_url":   url + "?format=clash",
 		"singbox_url": url + "?format=singbox",
+		"v2ray_url":   url + "?format=v2ray",
 		"qr_url":      "/api/v1/subscribe/" + token + "/qr",
 	})
 }
@@ -496,5 +600,103 @@ func (d Deps) handleRevokeSubjectSubscription(w http.ResponseWriter, r *http.Req
 		Action: "subject.subscription_revoke", TargetType: "subject",
 		TargetID: sql.NullInt64{Int64: id, Valid: true}, Result: "ok",
 	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Additional quick-action handlers
+
+func (d Deps) handleAddTraffic(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathInt64(r, "subjectID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
+	var req struct {
+		Bytes int64 `json:"bytes"`
+		GB    *int64 `json:"gb"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "malformed body")
+		return
+	}
+	delta := req.Bytes
+	if req.GB != nil {
+		delta = *req.GB * 1024 * 1024 * 1024
+	}
+	if delta == 0 {
+		WriteError(w, http.StatusBadRequest, "bad_request", "bytes or gb required")
+		return
+	}
+	if err := d.subjectService().AddTraffic(r.Context(), d.svcActor(r, actor), id, delta); err != nil {
+		d.writeServiceError(w, r, actor, "subject.add_traffic", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d Deps) handleAddDays(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathInt64(r, "subjectID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
+	var req struct {
+		Days int `json:"days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "malformed body")
+		return
+	}
+	if req.Days == 0 {
+		WriteError(w, http.StatusBadRequest, "bad_request", "days required")
+		return
+	}
+	if err := d.subjectService().AddDays(r.Context(), d.svcActor(r, actor), id, req.Days); err != nil {
+		d.writeServiceError(w, r, actor, "subject.add_days", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d Deps) handleResetTraffic(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathInt64(r, "subjectID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
+	if err := d.subjectService().ResetTraffic(r.Context(), d.svcActor(r, actor), id); err != nil {
+		d.writeServiceError(w, r, actor, "subject.reset_traffic", err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

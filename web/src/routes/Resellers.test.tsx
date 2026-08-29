@@ -234,7 +234,7 @@ describe("idempotency", () => {
     await screen.findByText("Provision a customer");
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Name"), "customer");
+    await user.type(screen.getByLabelText(/Username|Name/i), "customer");
     await user.click(screen.getByRole("button", { name: "Provision" }));
 
     await waitFor(() => {
@@ -267,7 +267,7 @@ describe("server refusals", () => {
     await screen.findByText("Provision a customer");
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Name"), "customer");
+    await user.type(screen.getByLabelText(/Username|Name/i), "customer");
     await user.click(screen.getByRole("button", { name: "Provision" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain("900 of 1000");

@@ -350,6 +350,36 @@ func (s *Subjects) RotateCredential(
 	return value, nil
 }
 
+// AddTraffic adds traffic quota.
+func (s *Subjects) AddTraffic(ctx context.Context, a Actor, id int64, delta int64) error {
+	if err := s.authorize(ctx, a, rbac.PermSubjectWrite, id); err != nil {
+		return err
+	}
+	return s.mutate(ctx, a, id, "subject.add_traffic", func(tx *sql.Tx) error {
+		return s.subjects.AddTraffic(ctx, tx, id, delta)
+	})
+}
+
+// AddDays adds days to expiry.
+func (s *Subjects) AddDays(ctx context.Context, a Actor, id int64, days int) error {
+	if err := s.authorize(ctx, a, rbac.PermSubjectWrite, id); err != nil {
+		return err
+	}
+	return s.mutate(ctx, a, id, "subject.add_days", func(tx *sql.Tx) error {
+		return s.subjects.AddDays(ctx, tx, id, days)
+	})
+}
+
+// ResetTraffic resets used traffic to 0.
+func (s *Subjects) ResetTraffic(ctx context.Context, a Actor, id int64) error {
+	if err := s.authorize(ctx, a, rbac.PermSubjectWrite, id); err != nil {
+		return err
+	}
+	return s.mutate(ctx, a, id, "subject.reset_traffic", func(tx *sql.Tx) error {
+		return s.subjects.ResetTraffic(ctx, tx, id)
+	})
+}
+
 // Provision creates a customer on behalf of a reseller, debiting their credit.
 //
 // The debit and the creation share one transaction, so a customer nobody paid
