@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api";
-import { formatTimestamp, t } from "../i18n";
+import { formatNumber, formatTimestamp, t } from "../i18n";
 import { Link } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DataTable } from "../components/DataTable";
@@ -11,6 +11,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { SubjectFilters, searchParamsFor } from "../components/SubjectFilters";
 import { BulkActions } from "../components/BulkActions";
+import { QuotaBar, formatTraffic, daysLeft } from "../components/QuotaBar";
 import {
   Sheet,
   SheetContent,
@@ -114,18 +115,37 @@ export function Subjects({ onSelect }: { onSelect: (id: number) => void }) {
       id: "quota",
       header: t("subject.quota"),
       sortValue: (s) => s.quota_used_bytes,
-      className: "font-mono text-xs",
-      cell: (s) =>
-        s.quota_bytes
-          ? `${Math.round(s.quota_used_bytes / 1_048_576)} / ${Math.round(s.quota_bytes / 1_048_576)} MB`
-          : t("filters.unlimited"),
+      cell: (s) => (
+        <div className="flex flex-col gap-0.5">
+          <QuotaBar used={s.quota_used_bytes} total={s.quota_bytes} />
+          {s.quota_bytes ? (
+            <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+              {formatTraffic(s.quota_used_bytes)} / {formatTraffic(s.quota_bytes)}
+            </span>
+          ) : null}
+        </div>
+      ),
     },
     {
       id: "expires",
       header: t("subject.expires"),
       sortValue: (s) => s.expires_at,
       className: "font-mono text-xs text-muted-foreground",
-      cell: (s) => formatTimestamp(s.expires_at),
+      cell: (s) => {
+        const left = daysLeft(s.expires_at);
+        return (
+          <div className="flex flex-col">
+            <span>{formatTimestamp(s.expires_at)}</span>
+            {left !== null && (
+              // The count is what an operator actually acts on ("renew the
+              // ones under seven days"); the date is the audit trail.
+              <span className={left <= 3 ? "text-warning" : undefined}>
+                {formatNumber(left)} {t("subject.daysLeft")}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       id: "created",
