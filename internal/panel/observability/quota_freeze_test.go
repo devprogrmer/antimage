@@ -10,21 +10,44 @@ import (
 	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
-func TestQuotaAutoFreeze(t *testing.T) {
+// These covered enforceQuotaFreeze, which froze subjects from this package.
+// That function is gone: it stamped frozen_at without setting enabled = 0 or
+// committing a node change, so the subject stayed in service, and the stamp
+// then excluded it from findSubjectsOverQuota permanently. Freezing belongs to
+// nodes.QuotaEnforcementSweeper alone.
+//
+// The alerting half survived as alertQuotaExceeded and is what is covered here.
+// The freezing half is covered by nodes.QuotaEnforcementSweeper's own tests and
+// by TestTheQuotaEnforcerStillCutsServiceAfterASweep.
+
+func quotaAlertFor(t *testing.T, s *sql.DB, subjectID int64) (alertType, severity string, found bool) {
+	t.Helper()
+	err := s.QueryRow(`
+		SELECT alert_type, severity FROM alerts
+		 WHERE target_type = 'subject' AND target_id = ? AND alert_type = 'quota_exceeded'`,
+		subjectID).Scan(&alertType, &severity)
+	if err == sql.ErrNoRows {
+		return "", "", false
+	}
+	if err != nil {
+		t.Fatalf("query alert: %v", err)
+	}
+	return alertType, severity, true
+}
+
+func TestQuotaExceededAlerting(t *testing.T) {
 	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	ctx := context.Background()
 	now := time.Unix(1700000000, 0).UTC()
 
-	// Create subjects with different quota states
 	var overQuotaID, nearQuotaID, underQuotaID, alreadyFrozenID int64
 
 	err = s.Write(ctx, func(tx *sql.Tx) error {
-		// Subject 1: Over quota, should be frozen
 		res, err := tx.Exec(`
 			INSERT INTO subjects (name, enabled, created_at, quota_bytes, quota_used_bytes)
 			VALUES (?, 1, ?, ?, ?)`,
@@ -34,7 +57,6 @@ func TestQuotaAutoFreeze(t *testing.T) {
 		}
 		overQuotaID, _ = res.LastInsertId()
 
-		// Subject 2: Near quota (90%), should not be frozen
 		res, err = tx.Exec(`
 			INSERT INTO subjects (name, enabled, created_at, quota_bytes, quota_used_bytes)
 			VALUES (?, 1, ?, ?, ?)`,
@@ -44,7 +66,6 @@ func TestQuotaAutoFreeze(t *testing.T) {
 		}
 		nearQuotaID, _ = res.LastInsertId()
 
-		// Subject 3: Under quota, should not be frozen
 		res, err = tx.Exec(`
 			INSERT INTO subjects (name, enabled, created_at, quota_bytes, quota_used_bytes)
 			VALUES (?, 1, ?, ?, ?)`,
@@ -54,137 +75,97 @@ func TestQuotaAutoFreeze(t *testing.T) {
 		}
 		underQuotaID, _ = res.LastInsertId()
 
-		// Subject 4: Over quota but already frozen
+		// Already frozen AND over quota: the enforcer has already acted.
 		res, err = tx.Exec(`
 			INSERT INTO subjects (name, enabled, created_at, quota_bytes, quota_used_bytes, frozen_at, frozen_reason)
-			VALUES (?, 1, ?, ?, ?, ?, ?)`,
-			"already_frozen", now.Unix(), 1000000, 2000000, now.Unix(), "already frozen")
+			VALUES (?, 0, ?, ?, ?, ?, ?)`,
+			"already_frozen", now.Unix(), 1000000, 2000000, now.Unix(), "quota_exceeded")
 		if err != nil {
 			return err
 		}
 		alreadyFrozenID, _ = res.LastInsertId()
-
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("seed subjects: %v", err)
 	}
 
-	// Run quota enforcement
 	sweeper := NewSweeper(s)
-	if err := sweeper.enforceQuotaFreeze(ctx, now); err != nil {
-		t.Fatalf("enforceQuotaFreeze: %v", err)
+	if err := sweeper.alertQuotaExceeded(ctx, now); err != nil {
+		t.Fatalf("alertQuotaExceeded: %v", err)
 	}
 
-	// Verify over_quota subject was frozen
-	t.Run("over quota subject frozen", func(t *testing.T) {
-		var frozenAt sql.NullInt64
-		var frozenReason sql.NullString
-		err := s.Read().QueryRow(`
-			SELECT frozen_at, frozen_reason FROM subjects WHERE id = ?`,
-			overQuotaID).Scan(&frozenAt, &frozenReason)
-		if err != nil {
-			t.Fatalf("query subject: %v", err)
+	t.Run("over quota subject is alerted", func(t *testing.T) {
+		typ, sev, found := quotaAlertFor(t, s.Read(), overQuotaID)
+		if !found {
+			t.Fatal("expected a quota_exceeded alert")
 		}
-
-		if !frozenAt.Valid {
-			t.Error("expected subject to be frozen")
+		if typ != "quota_exceeded" {
+			t.Errorf("alert_type = %s, want quota_exceeded", typ)
 		}
-		if frozenReason.String != "quota exceeded: 1500000/1000000 bytes used" {
-			t.Errorf("unexpected frozen_reason: %s", frozenReason.String)
+		if sev != "critical" {
+			t.Errorf("severity = %s, want critical", sev)
 		}
 	})
 
-	// Verify alert was created
-	t.Run("quota exceeded alert created", func(t *testing.T) {
-		var alertType, severity string
-		err := s.Read().QueryRow(`
-			SELECT alert_type, severity FROM alerts
-			WHERE target_type = 'subject' AND target_id = ? AND state = 'active'`,
-			overQuotaID).Scan(&alertType, &severity)
-		if err != nil {
-			t.Fatalf("query alert: %v", err)
-		}
-
-		if alertType != "quota_exceeded" {
-			t.Errorf("expected alert_type quota_exceeded, got %s", alertType)
-		}
-		if severity != "critical" {
-			t.Errorf("expected severity critical, got %s", severity)
+	t.Run("near quota subject is not alerted", func(t *testing.T) {
+		if _, _, found := quotaAlertFor(t, s.Read(), nearQuotaID); found {
+			t.Error("90% of quota is not over quota")
 		}
 	})
 
-	// Verify near_quota subject was NOT frozen
-	t.Run("near quota subject not frozen", func(t *testing.T) {
-		var frozenAt sql.NullInt64
-		err := s.Read().QueryRow(`
-			SELECT frozen_at FROM subjects WHERE id = ?`,
-			nearQuotaID).Scan(&frozenAt)
-		if err != nil {
-			t.Fatalf("query subject: %v", err)
-		}
-
-		if frozenAt.Valid {
-			t.Error("expected subject to NOT be frozen")
+	t.Run("under quota subject is not alerted", func(t *testing.T) {
+		if _, _, found := quotaAlertFor(t, s.Read(), underQuotaID); found {
+			t.Error("50% of quota is not over quota")
 		}
 	})
 
-	// Verify under_quota subject was NOT frozen
-	t.Run("under quota subject not frozen", func(t *testing.T) {
-		var frozenAt sql.NullInt64
-		err := s.Read().QueryRow(`
-			SELECT frozen_at FROM subjects WHERE id = ?`,
-			underQuotaID).Scan(&frozenAt)
-		if err != nil {
-			t.Fatalf("query subject: %v", err)
-		}
-
-		if frozenAt.Valid {
-			t.Error("expected subject to NOT be frozen")
+	// The condition is still true after the enforcer acts, and the operator
+	// needs to see why service stopped.
+	t.Run("an already frozen subject keeps its alert", func(t *testing.T) {
+		if _, _, found := quotaAlertFor(t, s.Read(), alreadyFrozenID); !found {
+			t.Error("a subject cut off for quota must still show why")
 		}
 	})
 
-	// Verify already_frozen subject's frozen_at timestamp wasn't changed
-	t.Run("already frozen subject unchanged", func(t *testing.T) {
-		var frozenAt sql.NullInt64
-		var frozenReason sql.NullString
-		err := s.Read().QueryRow(`
-			SELECT frozen_at, frozen_reason FROM subjects WHERE id = ?`,
-			alreadyFrozenID).Scan(&frozenAt, &frozenReason)
-		if err != nil {
-			t.Fatalf("query subject: %v", err)
-		}
-
-		if frozenAt.Int64 != now.Unix() {
-			t.Error("frozen_at timestamp should not have changed")
-		}
-		if frozenReason.String != "already frozen" {
-			t.Error("frozen_reason should not have changed")
+	// And the alerting pass must not have touched any subject.
+	t.Run("alerting mutates no subject", func(t *testing.T) {
+		for _, id := range []int64{overQuotaID, nearQuotaID, underQuotaID} {
+			var enabled int
+			var frozen sql.NullInt64
+			if err := s.Read().QueryRow(
+				`SELECT enabled, frozen_at FROM subjects WHERE id = ?`, id).
+				Scan(&enabled, &frozen); err != nil {
+				t.Fatalf("read subject %d: %v", id, err)
+			}
+			if enabled != 1 || frozen.Valid {
+				t.Errorf("subject %d was mutated by the alerting pass "+
+					"(enabled=%d frozen=%v); freezing belongs to "+
+					"nodes.QuotaEnforcementSweeper", id, enabled, frozen.Valid)
+			}
 		}
 	})
 }
 
-func TestQuotaAutoFreezeIdempotent(t *testing.T) {
+func TestQuotaExceededAlertingIsIdempotent(t *testing.T) {
 	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	ctx := context.Background()
 	now := time.Unix(1700000000, 0).UTC()
 
-	// Create subject over quota
-	var subjectID int64
+	var id int64
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`
 			INSERT INTO subjects (name, enabled, created_at, quota_bytes, quota_used_bytes)
-			VALUES (?, 1, ?, ?, ?)`,
-			"test_user", now.Unix(), 1000000, 1500000)
+			VALUES (?, 1, ?, ?, ?)`, "over", now.Unix(), 1000, 5000)
 		if err != nil {
 			return err
 		}
-		subjectID, _ = res.LastInsertId()
+		id, _ = res.LastInsertId()
 		return nil
 	})
 	if err != nil {
@@ -192,82 +173,21 @@ func TestQuotaAutoFreezeIdempotent(t *testing.T) {
 	}
 
 	sweeper := NewSweeper(s)
-
-	// Run enforcement first time
-	if err := sweeper.enforceQuotaFreeze(ctx, now); err != nil {
-		t.Fatalf("first enforceQuotaFreeze: %v", err)
-	}
-
-	// Get frozen_at timestamp
-	var firstFrozenAt sql.NullInt64
-	err = s.Read().QueryRow(`SELECT frozen_at FROM subjects WHERE id = ?`,
-		subjectID).Scan(&firstFrozenAt)
-	if err != nil {
-		t.Fatalf("query frozen_at: %v", err)
-	}
-
-	// Run enforcement second time
-	if err := sweeper.enforceQuotaFreeze(ctx, now.Add(time.Minute)); err != nil {
-		t.Fatalf("second enforceQuotaFreeze: %v", err)
-	}
-
-	// Verify frozen_at timestamp wasn't changed
-	var secondFrozenAt sql.NullInt64
-	err = s.Read().QueryRow(`SELECT frozen_at FROM subjects WHERE id = ?`,
-		subjectID).Scan(&secondFrozenAt)
-	if err != nil {
-		t.Fatalf("query frozen_at: %v", err)
-	}
-
-	if firstFrozenAt.Int64 != secondFrozenAt.Int64 {
-		t.Errorf("frozen_at changed on second run: %d -> %d",
-			firstFrozenAt.Int64, secondFrozenAt.Int64)
-	}
-}
-
-func TestQuotaAutoFreezeDisabledSubjects(t *testing.T) {
-	s, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	defer s.Close()
-
-	ctx := context.Background()
-	now := time.Unix(1700000000, 0).UTC()
-
-	// Create disabled subject over quota
-	var subjectID int64
-	err = s.Write(ctx, func(tx *sql.Tx) error {
-		res, err := tx.Exec(`
-			INSERT INTO subjects (name, enabled, created_at, quota_bytes, quota_used_bytes)
-			VALUES (?, 0, ?, ?, ?)`,
-			"disabled_user", now.Unix(), 1000000, 1500000)
-		if err != nil {
-			return err
+	for i := range 3 {
+		if err := sweeper.alertQuotaExceeded(ctx, now.Add(time.Duration(i)*time.Minute)); err != nil {
+			t.Fatalf("alertQuotaExceeded run %d: %v", i, err)
 		}
-		subjectID, _ = res.LastInsertId()
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("seed subject: %v", err)
 	}
 
-	sweeper := NewSweeper(s)
-
-	// Run enforcement
-	if err := sweeper.enforceQuotaFreeze(ctx, now); err != nil {
-		t.Fatalf("enforceQuotaFreeze: %v", err)
+	var count int
+	if err := s.Read().QueryRow(
+		`SELECT COUNT(*) FROM alerts
+		  WHERE target_type = 'subject' AND target_id = ? AND alert_type = 'quota_exceeded'`,
+		id).Scan(&count); err != nil {
+		t.Fatalf("count alerts: %v", err)
 	}
-
-	// Verify disabled subject was NOT frozen (already disabled)
-	var frozenAt sql.NullInt64
-	err = s.Read().QueryRow(`SELECT frozen_at FROM subjects WHERE id = ?`,
-		subjectID).Scan(&frozenAt)
-	if err != nil {
-		t.Fatalf("query frozen_at: %v", err)
-	}
-
-	if frozenAt.Valid {
-		t.Error("disabled subject should not be frozen (already disabled)")
+	if count != 1 {
+		t.Errorf("three sweeps produced %d alerts, want 1: the dedup key must "+
+			"collapse a persistent condition into one row", count)
 	}
 }

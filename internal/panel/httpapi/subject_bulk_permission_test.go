@@ -31,6 +31,7 @@ func TestBulkEndpointsRequireSubjectWrite(t *testing.T) {
 
 	for _, tc := range []struct{ name, path, body string }{
 		{"bulk/enable", "/api/v1/subjects/bulk/enable", `{"subject_ids":[` + own + `]}`},
+		{"bulk/disable", "/api/v1/subjects/bulk/disable", `{"subject_ids":[` + own + `]}`},
 		{"bulk/delete", "/api/v1/subjects/bulk/delete", `{"subject_ids":[` + own + `]}`},
 		{"bulk/extend", "/api/v1/subjects/bulk/extend", `{"subject_ids":[` + own + `],"days":30}`},
 		{"bulk/reset-traffic", "/api/v1/subjects/bulk/reset-traffic", `{"subject_ids":[` + own + `]}`},
@@ -78,5 +79,46 @@ func TestBulkEndpointsStillAllowSubjectWrite(t *testing.T) {
 	if res.Code == http.StatusForbidden {
 		t.Errorf("permission gate rejected an actor holding subject:write: %d %s",
 			res.Code, res.Body.String())
+	}
+}
+
+// bulk/disable is new, so it gets a functional test as well as a permission
+// one: the menu that drives it used to offer an action against a route that did
+// not exist, and a 403-only test would pass just as well against a handler that
+// answered 200 and did nothing.
+func TestBulkDisableActuallyDisables(t *testing.T) {
+	env, adminToken, svcID := newSubjectEnv(t)
+	writerToken, ownSubject := seedTenantWithRole(
+		t, env, "vendor2", "reseller", svcID, adminToken)
+	id := itoa64(ownSubject)
+
+	res := env.post(t, "/api/v1/subjects/bulk/disable",
+		`{"subject_ids":[`+id+`]}`, writerToken)
+	if res.Code != http.StatusOK {
+		t.Fatalf("bulk/disable -> %d %s", res.Code, strings.TrimSpace(res.Body.String()))
+	}
+	if body := res.Body.String(); !strings.Contains(body, `"disabled":1`) {
+		t.Errorf("bulk/disable reported %s, want disabled:1", strings.TrimSpace(body))
+	}
+
+	// And it must be visible on the subject, not just in the response count.
+	got := env.get(t, "/api/v1/subjects/"+id, writerToken)
+	if got.Code != http.StatusOK {
+		t.Fatalf("get subject -> %d", got.Code)
+	}
+	if body := got.Body.String(); !strings.Contains(body, `"enabled":false`) {
+		t.Errorf("after bulk/disable the subject reads %s, want enabled:false",
+			strings.TrimSpace(body))
+	}
+
+	// Symmetry: enable brings it back, so the pair is usable as a pair.
+	if res := env.post(t, "/api/v1/subjects/bulk/enable",
+		`{"subject_ids":[`+id+`]}`, writerToken); res.Code != http.StatusOK {
+		t.Fatalf("bulk/enable -> %d %s", res.Code, strings.TrimSpace(res.Body.String()))
+	}
+	got = env.get(t, "/api/v1/subjects/"+id, writerToken)
+	if body := got.Body.String(); !strings.Contains(body, `"enabled":true`) {
+		t.Errorf("after bulk/enable the subject reads %s, want enabled:true",
+			strings.TrimSpace(body))
 	}
 }

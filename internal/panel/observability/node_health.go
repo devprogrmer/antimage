@@ -24,7 +24,7 @@ func (sw *Sweeper) checkNodeHealth(ctx context.Context, now time.Time) error {
 
 	// Query nodes that are offline (by status or stale heartbeat)
 	rows, err := sw.store.Read().QueryContext(ctx, `
-		SELECT id, name, status, last_seen_at, last_reconcile_at
+		SELECT id, name, status, last_seen_at
 		FROM nodes
 		WHERE status = 'offline'
 		   OR (status NOT IN ('offline', 'disabled') AND last_seen_at < ?)
@@ -37,9 +37,9 @@ func (sw *Sweeper) checkNodeHealth(ctx context.Context, now time.Time) error {
 	for rows.Next() {
 		var nodeID int64
 		var nodeName, status string
-		var lastSeenAt, lastReconcileAt sql.NullInt64
+		var lastSeenAt sql.NullInt64
 
-		if err := rows.Scan(&nodeID, &nodeName, &status, &lastSeenAt, &lastReconcileAt); err != nil {
+		if err := rows.Scan(&nodeID, &nodeName, &status, &lastSeenAt); err != nil {
 			log.Printf("[observability] scan offline node: %v", err)
 			continue
 		}
@@ -66,9 +66,6 @@ func (sw *Sweeper) checkNodeHealth(ctx context.Context, now time.Time) error {
 		}
 		if lastSeenAt.Valid {
 			metadata["last_seen_at"] = time.Unix(lastSeenAt.Int64, 0).UTC().Format(time.RFC3339)
-		}
-		if lastReconcileAt.Valid {
-			metadata["last_reconcile_at"] = time.Unix(lastReconcileAt.Int64, 0).UTC().Format(time.RFC3339)
 		}
 
 		alert := Alert{

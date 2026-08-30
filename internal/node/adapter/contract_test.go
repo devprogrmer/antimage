@@ -9,6 +9,8 @@ import (
 	"github.com/amyrm/antimage/internal/node/adapter"
 	"github.com/amyrm/antimage/internal/node/adapter/hysteria2"
 	"github.com/amyrm/antimage/internal/node/adapter/l2tp"
+	"github.com/amyrm/antimage/internal/node/adapter/ocserv"
+	"github.com/amyrm/antimage/internal/node/adapter/openvpn"
 	"github.com/amyrm/antimage/internal/node/adapter/singbox"
 	"github.com/amyrm/antimage/internal/node/adapter/stub"
 	"github.com/amyrm/antimage/internal/node/adapter/wireguard"
@@ -30,6 +32,8 @@ func allAdapters(t *testing.T) map[string]adapter.Adapter {
 		"wireguard": wireguard.New(nil, dir, dir),
 		"hysteria2": hysteria2.New(nil, dir, dir),
 		"l2tp":      l2tp.New(dir, dir),
+		"ocserv":    ocserv.New(nil, dir, dir),
+		"openvpn":   openvpn.New(nil, dir, dir),
 		"stub":      stub.New(dir),
 	}
 }

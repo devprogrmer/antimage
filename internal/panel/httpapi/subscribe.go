@@ -69,6 +69,17 @@ func (d Deps) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The subject's subscription group, if they are on one. Applied HERE
+	// rather than in the SQL that gathers servers, because the protocol of an
+	// Xray inbound lives inside its params -- a WHERE clause could only filter
+	// by adapter kind and would treat vless and trojan as one thing.
+	filter, err := subscriptions.FilterForSubject(ctx, d.Store, subjectID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	servers = filter.Apply(servers)
+
 	if len(servers) == 0 {
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
@@ -160,17 +171,9 @@ func (d Deps) gatherServers(ctx context.Context, subjectID int64) ([]subscriptio
 			credsByKind[credKind.String] = credEnc
 		}
 
-		// Parse service params to extract protocol config.
 		var params map[string]interface{}
 		if err := json.Unmarshal([]byte(paramsJSON), &params); err != nil {
 			continue // Skip malformed params
-		}
-
-		// Extract inbound configuration (simplified - real implementation would
-		// parse the adapter-specific params structure).
-		protocol, port := d.extractInboundConfig(params)
-		if protocol == "" {
-			continue
 		}
 
 		// Unseal credentials.
@@ -188,18 +191,26 @@ func (d Deps) gatherServers(ctx context.Context, subjectID int64) ([]subscriptio
 			}
 		}
 
-		servers = append(servers, subscriptions.Server{
-			NodeID:      nodeID,
-			NodeName:    nodeName,
-			NodeAddress: nodeAddress,
-			ServiceID:   serviceID,
-			Protocol:    protocol,
-			Port:        port,
-			UUID:        uuid,
-			Password:    password,
-			TLS:         true, // Assume TLS for now
-			Network:     "tcp",
-		})
+		// ONE mapper, shared with the per-inbound panel. This used to read a
+		// "protocol" key that only Xray and sing-box have and default a missing
+		// one to "vless", so every WireGuard, OpenVPN, ocserv and L2TP inbound
+		// was emitted into the subscription as a VLESS entry pointing at its
+		// port. It also hardcoded TLS and TCP, so a plaintext WebSocket inbound
+		// produced an entry that could not connect.
+		srv, err := subscriptions.ServerFromInbound(
+			subscriptions.Inbound{
+				ServiceID: serviceID, AdapterKind: adapterKind, Params: params,
+			},
+			subscriptions.NodeRef{ID: nodeID, Name: nodeName, Address: nodeAddress},
+			subscriptions.Credentials{UUID: uuid, Password: password},
+		)
+		if err != nil {
+			// Not representable here, or unreadable. Skipped rather than
+			// guessed at; the panel's per-inbound view is where the operator
+			// sees which inbounds an aggregated format cannot carry.
+			continue
+		}
+		servers = append(servers, srv)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -207,31 +218,6 @@ func (d Deps) gatherServers(ctx context.Context, subjectID int64) ([]subscriptio
 	}
 
 	return servers, nil
-}
-
-// extractInboundConfig parses service params to extract protocol and port.
-// This is a simplified implementation - production would properly parse
-// adapter-specific schemas.
-func (d Deps) extractInboundConfig(params map[string]interface{}) (protocol string, port int) {
-	// Try to extract protocol and port from params.
-	// This is adapter-specific, so we use heuristics.
-
-	if proto, ok := params["protocol"].(string); ok {
-		protocol = proto
-	}
-	if p, ok := params["port"].(float64); ok {
-		port = int(p)
-	}
-
-	// Fallback defaults
-	if protocol == "" {
-		protocol = "vless"
-	}
-	if port == 0 {
-		port = 443
-	}
-
-	return protocol, port
 }
 
 // subscriptionRateLimiter is a global rate limiter for subscription endpoints.

@@ -1,35 +1,49 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { can, useSession } from "../lib/session";
 import { MutationError } from "../routes/Resellers";
-import { formatTimestamp, t } from "../i18n";
+import { t } from "../i18n";
 import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
+
+/**
+ * SSH bootstrap wizard: guided node onboarding, matching the real backend.
+ *
+ * The earlier version of this component polled `/bootstrap-ssh/status/{jobId}`
+ * for a job that never existed -- the backend has no job store, no async
+ * bootstrap, and no per-step progress. The real flow is two synchronous POSTs
+ * against the same route:
+ *
+ *   1. POST with no host_key_fingerprint. Panel opens SSH, reads the host's
+ *      key, hands the fingerprint back with `confirm_required: true`. Nothing
+ *      is executed. An admin who does not recognise the fingerprint stops.
+ *
+ *   2. POST again with the confirmed fingerprint. Panel opens SSH, mints a
+ *      one-time enrolment token, runs `curl | sudo bash` on the host, and
+ *      returns the install script's combined output on success (200) or the
+ *      output plus stderr on failure (502).
+ *
+ * The wizard is written to that shape. Progress is what the install script
+ * itself printed, streamed only at the granularity the script prints at,
+ * because that is what is actually available.
+ */
 
 interface SSHConfig {
   host: string;
   port: number;
-  username: string;
-  use_key: boolean;
-  key_path?: string;
+  user: string;
+  private_key_pem: string;
+  passphrase?: string;
 }
 
-interface BootstrapStep {
-  name: string;
-  status: "pending" | "running" | "completed" | "failed";
-  output?: string;
-  error?: string;
+interface PromptResponse {
+  host_key_fingerprint: string;
+  confirm_required: true;
 }
 
-interface BootstrapJob {
-  id: string;
-  node_id: number;
-  status: string;
-  steps: BootstrapStep[];
-  started_at: number;
-  completed_at: number | null;
+interface BootstrapSuccess {
+  output: string;
 }
 
 interface SSHBootstrapWizardProps {
@@ -37,46 +51,58 @@ interface SSHBootstrapWizardProps {
   onComplete?: () => void;
 }
 
-/**
- * SSH bootstrap wizard: guided node onboarding.
- * 
- * Step-by-step SSH-based node enrollment with real-time progress.
- * Installs agent, configures systemd, and enrolls with the panel.
- */
 export function SSHBootstrapWizard({ nodeId, onComplete }: SSHBootstrapWizardProps) {
   const session = useSession();
-  const [step, setStep] = useState<"config" | "confirm" | "running" | "complete">("config");
   const [config, setConfig] = useState<SSHConfig>({
     host: "",
     port: 22,
-    username: "root",
-    use_key: true,
-    key_path: "~/.ssh/id_rsa",
+    user: "root",
+    private_key_pem: "",
+    passphrase: "",
   });
-  const [password, setPassword] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
+  const [output, setOutput] = useState<string | null>(null);
+  const [failureOutput, setFailureOutput] = useState<string | null>(null);
 
   const mayWrite = can(session.data, "node:write");
 
-  const job = useQuery({
-    queryKey: ["bootstrap-job", jobId],
-    queryFn: () => api.get<BootstrapJob>(`/api/v1/nodes/${nodeId}/bootstrap-ssh/status/${jobId}`),
-    enabled: jobId !== null && step === "running",
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "running" || status === "pending" ? 1000 : false;
+  // Phase one: read the host key. Never runs anything -- the response says
+  // `confirm_required` and the admin decides. The private key is sent
+  // because SSH cannot read the host key without at least trying to open
+  // the transport, and the panel does not keep it.
+  const prompt = useMutation({
+    mutationFn: () =>
+      api.post<PromptResponse>(`/api/v1/nodes/${nodeId}/bootstrap-ssh`, {
+        ...config,
+        passphrase: config.passphrase || undefined,
+      }),
+    onSuccess: (data) => {
+      setFingerprint(data.host_key_fingerprint);
+      setFailureOutput(null);
     },
   });
 
-  const startBootstrap = useMutation({
+  // Phase two: run with the confirmed fingerprint. Returns the install
+  // script's combined output on success, or 502 with output+stderr.
+  const run = useMutation({
     mutationFn: () =>
-      api.post<{ job_id: string }>(`/api/v1/nodes/${nodeId}/bootstrap-ssh`, {
+      api.post<BootstrapSuccess>(`/api/v1/nodes/${nodeId}/bootstrap-ssh`, {
         ...config,
-        password: config.use_key ? undefined : password,
+        passphrase: config.passphrase || undefined,
+        host_key_fingerprint: fingerprint,
       }),
     onSuccess: (data) => {
-      setJobId(data.job_id);
-      setStep("running");
+      setOutput(data.output);
+      setFailureOutput(null);
+    },
+    onError: (err: Error) => {
+      // The 502 body carries the install script's output alongside the
+      // error envelope. An operator fixing this needs to read what the script
+      // said before it failed, not just the error line.
+      if (err instanceof ApiError && err.body && typeof err.body === "object") {
+        const output = (err.body as { output?: unknown }).output;
+        if (typeof output === "string") setFailureOutput(output);
+      }
     },
   });
 
@@ -88,16 +114,14 @@ export function SSHBootstrapWizard({ nodeId, onComplete }: SSHBootstrapWizardPro
     );
   }
 
-  if (step === "complete" || job.data?.status === "completed") {
+  if (output !== null) {
     return (
-      <div className="space-y-4 rounded-lg border border-success bg-success/10 p-4 text-center">
-        <div className="mx-auto h-12 w-12 rounded-full bg-success/20 flex items-center justify-center">
-          <span className="text-2xl text-success">✓</span>
-        </div>
-        <div>
-          <h3 className="text-sm font-semibold">{t("bootstrap.complete")}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{t("bootstrap.completeDesc")}</p>
-        </div>
+      <div className="space-y-3 rounded-lg border border-success bg-success/10 p-4">
+        <h3 className="text-sm font-semibold">{t("bootstrap.complete")}</h3>
+        <p className="text-xs text-muted-foreground">{t("bootstrap.completeDesc")}</p>
+        <pre className="max-h-64 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px]">
+          {output}
+        </pre>
         <Button size="sm" onClick={onComplete}>
           {t("common.close")}
         </Button>
@@ -112,28 +136,27 @@ export function SSHBootstrapWizard({ nodeId, onComplete }: SSHBootstrapWizardPro
         <p className="mt-1 text-xs text-muted-foreground">{t("bootstrap.description")}</p>
       </header>
 
-      {step === "config" && (
+      {fingerprint === null ? (
         <ConfigStep
           config={config}
-          password={password}
-          onConfigChange={setConfig}
-          onPasswordChange={setPassword}
-          onNext={() => setStep("confirm")}
+          onChange={setConfig}
+          onSubmit={() => prompt.mutate()}
+          pending={prompt.isPending}
+          error={prompt.error}
         />
-      )}
-
-      {step === "confirm" && (
+      ) : (
         <ConfirmStep
           config={config}
-          onBack={() => setStep("config")}
-          onConfirm={() => startBootstrap.mutate()}
-          isLoading={startBootstrap.isPending}
-          error={startBootstrap.error}
+          fingerprint={fingerprint}
+          onBack={() => {
+            setFingerprint(null);
+            prompt.reset();
+          }}
+          onConfirm={() => run.mutate()}
+          pending={run.isPending}
+          error={run.error}
+          failureOutput={failureOutput}
         />
-      )}
-
-      {step === "running" && job.data && (
-        <RunningStep job={job.data} />
       )}
     </div>
   );
@@ -141,24 +164,25 @@ export function SSHBootstrapWizard({ nodeId, onComplete }: SSHBootstrapWizardPro
 
 interface ConfigStepProps {
   config: SSHConfig;
-  password: string;
-  onConfigChange: (config: SSHConfig) => void;
-  onPasswordChange: (password: string) => void;
-  onNext: () => void;
+  onChange: (c: SSHConfig) => void;
+  onSubmit: () => void;
+  pending: boolean;
+  error: Error | null;
 }
 
-function ConfigStep({ config, password, onConfigChange, onPasswordChange, onNext }: ConfigStepProps) {
-  const update = (field: keyof SSHConfig, value: any) => {
-    onConfigChange({ ...config, [field]: value });
+function ConfigStep({ config, onChange, onSubmit, pending, error }: ConfigStepProps) {
+  const update = <K extends keyof SSHConfig>(field: K, value: SSHConfig[K]) => {
+    onChange({ ...config, [field]: value });
   };
 
   return (
     <div className="space-y-3">
       <div>
-        <label className="block text-xs font-medium text-muted-foreground mb-1">
+        <label className="block text-xs font-medium text-muted-foreground mb-1" htmlFor="ssh-host">
           {t("bootstrap.host")}
         </label>
         <input
+          id="ssh-host"
           type="text"
           value={config.host}
           onChange={(e) => update("host", e.target.value)}
@@ -169,73 +193,67 @@ function ConfigStep({ config, password, onConfigChange, onPasswordChange, onNext
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">
+          <label className="block text-xs font-medium text-muted-foreground mb-1" htmlFor="ssh-port">
             {t("bootstrap.port")}
           </label>
           <input
+            id="ssh-port"
             type="number"
             value={config.port}
-            onChange={(e) => update("port", parseInt(e.target.value, 10))}
+            onChange={(e) => update("port", parseInt(e.target.value, 10) || 22)}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">
+          <label className="block text-xs font-medium text-muted-foreground mb-1" htmlFor="ssh-user">
             {t("bootstrap.username")}
           </label>
           <input
+            id="ssh-user"
             type="text"
-            value={config.username}
-            onChange={(e) => update("username", e.target.value)}
+            value={config.user}
+            onChange={(e) => update("user", e.target.value)}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           />
         </div>
       </div>
 
-      <div className="space-y-2">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="radio"
-            checked={config.use_key}
-            onChange={() => update("use_key", true)}
-          />
-          {t("bootstrap.useSSHKey")}
+      <div>
+        <label className="block text-xs font-medium text-muted-foreground mb-1" htmlFor="ssh-key">
+          {t("bootstrap.privateKey")}
         </label>
-        {config.use_key && (
-          <input
-            type="text"
-            value={config.key_path || ""}
-            onChange={(e) => update("key_path", e.target.value)}
-            placeholder="~/.ssh/id_rsa"
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          />
-        )}
-
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="radio"
-            checked={!config.use_key}
-            onChange={() => update("use_key", false)}
-          />
-          {t("bootstrap.usePassword")}
-        </label>
-        {!config.use_key && (
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => onPasswordChange(e.target.value)}
-            placeholder={t("bootstrap.password")}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          />
-        )}
+        {/* PEM paste rather than a path on disk. The panel does not read the
+            filesystem the admin's browser sees; the key has to travel here to
+            be usable. It is held in memory only for the request; see
+            bootstrap.go and its defer creds.Zero(). */}
+        <textarea
+          id="ssh-key"
+          value={config.private_key_pem}
+          onChange={(e) => update("private_key_pem", e.target.value)}
+          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+          rows={6}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-[11px]"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">{t("bootstrap.privateKeyHint")}</p>
       </div>
 
-      <Button
-        size="sm"
-        onClick={onNext}
-        disabled={!config.host || (!config.use_key && !password)}
-      >
-        {t("common.next")}
+      <div>
+        <label className="block text-xs font-medium text-muted-foreground mb-1" htmlFor="ssh-pass">
+          {t("bootstrap.passphrase")}
+        </label>
+        <input
+          id="ssh-pass"
+          type="password"
+          value={config.passphrase ?? ""}
+          onChange={(e) => update("passphrase", e.target.value)}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+        />
+      </div>
+
+      <MutationError error={error} />
+
+      <Button size="sm" onClick={onSubmit} disabled={!config.host || !config.private_key_pem || pending}>
+        {pending ? t("common.loading") : t("bootstrap.readHostKey")}
       </Button>
     </div>
   );
@@ -243,106 +261,65 @@ function ConfigStep({ config, password, onConfigChange, onPasswordChange, onNext
 
 interface ConfirmStepProps {
   config: SSHConfig;
+  fingerprint: string;
   onBack: () => void;
   onConfirm: () => void;
-  isLoading: boolean;
+  pending: boolean;
   error: Error | null;
+  failureOutput: string | null;
 }
 
-function ConfirmStep({ config, onBack, onConfirm, isLoading, error }: ConfirmStepProps) {
+function ConfirmStep({
+  config, fingerprint, onBack, onConfirm, pending, error, failureOutput,
+}: ConfirmStepProps) {
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-border bg-background p-3">
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-          <dt className="text-muted-foreground">{t("bootstrap.host")}:</dt>
-          <dd className="font-mono">{config.host}</dd>
-          <dt className="text-muted-foreground">{t("bootstrap.port")}:</dt>
-          <dd className="font-mono">{config.port}</dd>
-          <dt className="text-muted-foreground">{t("bootstrap.username")}:</dt>
-          <dd className="font-mono">{config.username}</dd>
-          <dt className="text-muted-foreground">{t("bootstrap.auth")}:</dt>
-          <dd className="font-mono">
-            {config.use_key ? t("bootstrap.sshKey") : t("bootstrap.password")}
-          </dd>
+      {/* The fingerprint is what the admin verifies against the host they
+          expect. Wrong fingerprint = someone else's server. The panel refuses
+          to run anything until this value comes back on the next request. */}
+      <div className="rounded-lg border border-warning bg-warning/10 p-3">
+        <p className="text-xs font-semibold text-warning">
+          {t("bootstrap.confirmHostKey")}
+        </p>
+        <dl className="mt-2 space-y-1 text-xs">
+          <div className="flex gap-2">
+            <dt className="text-muted-foreground">{t("bootstrap.host")}:</dt>
+            <dd className="font-mono">{config.host}:{config.port}</dd>
+          </div>
+          <div className="flex gap-2">
+            <dt className="text-muted-foreground">{t("bootstrap.fingerprint")}:</dt>
+            <dd className="break-all font-mono">{fingerprint}</dd>
+          </div>
         </dl>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {t("bootstrap.fingerprintHint")}
+        </p>
       </div>
-
-      <p className="text-xs text-muted-foreground">{t("bootstrap.confirmDesc")}</p>
 
       <MutationError error={error} />
 
+      {/* On a 502 the install script's stderr is what an operator needs. It
+          shows the exact command the panel ran, redacted for the audit log
+          but not here, and whatever apt or systemctl said before it gave up. */}
+      {failureOutput !== null && (
+        <details open className="rounded-lg border border-destructive bg-destructive/5 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-destructive">
+            {t("bootstrap.failureOutput")}
+          </summary>
+          <pre className="mt-2 max-h-64 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px]">
+            {failureOutput}
+          </pre>
+        </details>
+      )}
+
       <div className="flex gap-2">
-        <Button size="sm" onClick={onConfirm} disabled={isLoading}>
-          {isLoading ? t("common.loading") : t("bootstrap.start")}
+        <Button size="sm" onClick={onConfirm} disabled={pending}>
+          {pending ? t("bootstrap.running") : t("bootstrap.confirmAndRun")}
         </Button>
-        <Button size="sm" variant="outline" onClick={onBack}>
+        <Button size="sm" variant="outline" onClick={onBack} disabled={pending}>
           {t("common.back")}
         </Button>
       </div>
-    </div>
-  );
-}
-
-function RunningStep({ job }: { job: BootstrapJob }) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{t("bootstrap.progress")}</span>
-        <Badge variant={job.status === "running" ? "warning" : "outline"}>
-          {job.status}
-        </Badge>
-      </div>
-
-      <div className="space-y-2">
-        {job.steps.map((step, idx) => (
-          <StepItem key={idx} step={step} />
-        ))}
-      </div>
-
-      {job.completed_at && (
-        <p className="text-xs text-muted-foreground">
-          {t("bootstrap.completedAt")}: {formatTimestamp(job.completed_at)}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function StepItem({ step }: { step: BootstrapStep }) {
-  const icon =
-    step.status === "completed"
-      ? "✓"
-      : step.status === "failed"
-      ? "✗"
-      : step.status === "running"
-      ? "⟳"
-      : "○";
-
-  const color =
-    step.status === "completed"
-      ? "text-success"
-      : step.status === "failed"
-      ? "text-destructive"
-      : step.status === "running"
-      ? "text-warning"
-      : "text-muted-foreground";
-
-  return (
-    <div className="rounded border border-border bg-background p-2">
-      <div className="flex items-center gap-2">
-        <span className={`text-lg ${color} ${step.status === "running" ? "animate-spin" : ""}`}>
-          {icon}
-        </span>
-        <span className="text-sm">{step.name}</span>
-      </div>
-      {step.output && (
-        <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 font-mono text-[10px] text-muted-foreground">
-          {step.output}
-        </pre>
-      )}
-      {step.error && (
-        <p className="mt-2 text-xs text-destructive">{step.error}</p>
-      )}
     </div>
   );
 }

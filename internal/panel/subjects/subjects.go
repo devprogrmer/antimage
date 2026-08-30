@@ -55,9 +55,37 @@ type Subject struct {
 	Enabled   bool
 	ExpiresAt *time.Time
 	ExpiredAt *time.Time
-	CreatedAt time.Time
-	Note      string
+	FrozenAt  *time.Time
+	// FrozenReason distinguishes a quota cut-off from an operator revocation.
+	// Without it the UI can say a subject is frozen but not why, which is the
+	// first thing asked when service stops.
+	FrozenReason string
+	// OnHoldSeconds is how long the plan runs once it starts. Non-nil means the
+	// clock has not started: the subject may connect, and doing so sets
+	// ExpiresAt and clears this.
+	OnHoldSeconds *int64
+	// StatusChangedAt is when the effective status last moved. Nil for rows
+	// that predate the column, where no transition was ever recorded.
+	StatusChangedAt *time.Time
+	CreatedAt       time.Time
+	Note            string
 }
+
+// Status is the one word that explains a subject's current state.
+type Status string
+
+const (
+	// StatusActive is being served.
+	StatusActive Status = "active"
+	// StatusOnHold has not started yet: the validity period begins at first use.
+	StatusOnHold Status = "on_hold"
+	// StatusExpired passed its expiry.
+	StatusExpired Status = "expired"
+	// StatusDisabled was switched off by an operator.
+	StatusDisabled Status = "disabled"
+	// StatusFrozen was revoked, by the quota sweeper or by an operator.
+	StatusFrozen Status = "frozen"
+)
 
 // Expired reports whether the subject has passed its expiry at the given time.
 // A subject with no expiry never expires.
@@ -65,11 +93,60 @@ func (s Subject) Expired(at time.Time) bool {
 	return s.ExpiresAt != nil && !at.Before(*s.ExpiresAt)
 }
 
+// OnHold reports whether the subject's validity period has not started yet.
+//
+// An on-hold subject is entitled to service -- that is the mechanism, not an
+// oversight. They must be able to connect, because connecting is what starts
+// their clock. See Active.
+func (s Subject) OnHold() bool {
+	return s.OnHoldSeconds != nil
+}
+
+// Status derives the subject's state from the columns that actually govern
+// service. It is computed rather than stored, so it cannot disagree with them.
+//
+// Precedence is by how much each state explains, not by severity. Frozen comes
+// first because it is the state an operator did not necessarily choose -- the
+// quota sweeper sets it -- and it is the only one carrying a reason, so it is
+// the most informative answer to "why has this stopped". Disabled follows as
+// the deliberate switch. Expired and on-hold are both about the clock, and a
+// subject cannot be in both: on-hold means expires_at is still NULL.
+//
+// It takes the time rather than reading the clock, like Expired and Active, so
+// a caller with an injected clock gets an answer consistent with the rest of
+// the type instead of one that quietly consults the real one.
+func (s Subject) Status(at time.Time) Status {
+	switch {
+	case s.Frozen():
+		return StatusFrozen
+	case !s.Enabled:
+		return StatusDisabled
+	case s.Expired(at):
+		return StatusExpired
+	case s.OnHold():
+		return StatusOnHold
+	default:
+		return StatusActive
+	}
+}
+
+// Frozen reports whether the subject is currently frozen. Freezing is a
+// revocation -- for quota exhaustion, or by an operator against abuse -- and
+// is independent of Enabled so that unfreezing cannot silently re-enable a
+// subject an operator had separately disabled.
+func (s Subject) Frozen() bool {
+	return s.FrozenAt != nil
+}
+
 // Active reports whether the subject should appear in a desired document.
 // This is the single predicate the document builder and the expiry sweeper
 // both consult, so they cannot disagree about who is entitled to service.
+//
+// Frozen is part of that predicate. It was not, and the omission was the whole
+// bug: freezing wrote frozen_at and nothing downstream read it, so a revoked
+// subject kept its place in every document that was built afterwards.
 func (s Subject) Active(at time.Time) bool {
-	return s.Enabled && !s.Expired(at)
+	return s.Enabled && !s.Frozen() && !s.Expired(at)
 }
 
 // GenerateCredential mints new credential material for a kind.
@@ -136,6 +213,10 @@ type CreateInput struct {
 	Name      string
 	Note      string
 	ExpiresAt *time.Time
+	// OnHoldSeconds starts the subject on hold: no expiry yet, and the plan
+	// runs for this long from first use. Mutually exclusive with ExpiresAt --
+	// a subject cannot both have a fixed end date and not have started.
+	OnHoldSeconds *int64
 	// ServiceIDs the subject may use.
 	ServiceIDs []int64
 	// Credentials to import. Absent kinds are generated.
@@ -157,16 +238,35 @@ func (s *Store) Create(ctx context.Context, tx *sql.Tx, in CreateInput) (int64, 
 		return 0, errors.New("no secret box configured; refusing to store credentials unsealed")
 	}
 
+	// Refused rather than silently preferring one: a caller asking for both a
+	// fixed end date and a not-yet-started plan has a bug, and picking a
+	// winner here would hide it behind a subject whose dates make no sense.
+	if in.ExpiresAt != nil && in.OnHoldSeconds != nil {
+		return 0, errors.New("a subject cannot be on hold and have a fixed expiry")
+	}
+	if in.OnHoldSeconds != nil && *in.OnHoldSeconds <= 0 {
+		return 0, errors.New("on-hold duration must be positive")
+	}
+
 	now := s.now().UTC()
 	var expires any
 	if in.ExpiresAt != nil {
 		expires = in.ExpiresAt.UTC().Unix()
 	}
+	var onHold any
+	var statusChanged any
+	if in.OnHoldSeconds != nil {
+		onHold = *in.OnHoldSeconds
+		// The subject enters on_hold at creation, which is a transition worth
+		// recording -- it is the answer to "when was this sold".
+		statusChanged = now.Unix()
+	}
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO subjects (name, enabled, expires_at, created_at, note)
-		 VALUES (?, 1, ?, ?, ?)`,
-		name, expires, now.Unix(), in.Note)
+		`INSERT INTO subjects (name, enabled, expires_at, on_hold_seconds,
+		                       status_changed_at, created_at, note)
+		 VALUES (?, 1, ?, ?, ?, ?, ?)`,
+		name, expires, onHold, statusChanged, now.Unix(), in.Note)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, fmt.Errorf("%w: %q", ErrNameTaken, name)
@@ -277,7 +377,7 @@ func (s *Store) Credential(ctx context.Context, subjectID int64, kind Credential
 func (s *Store) Get(ctx context.Context, sc rbac.Scope, id int64) (*Subject, error) {
 	args := append([]any{id}, store.ScopeArgs(sc)...)
 	row := s.db.Read().QueryRowContext(ctx,
-		`SELECT id, name, enabled, expires_at, expired_at, created_at, note
+		`SELECT id, name, enabled, expires_at, expired_at, frozen_at, frozen_reason, on_hold_seconds, status_changed_at, created_at, note
 		   FROM subjects
 		  WHERE subjects.id = ? AND `+store.SubjectScopeSQL, args...)
 	return scanSubject(row)
@@ -289,7 +389,7 @@ func (s *Store) Get(ctx context.Context, sc rbac.Scope, id int64) (*Subject, err
 // to leak them. Scope is required for the same reason as on Get.
 func (s *Store) List(ctx context.Context, sc rbac.Scope) ([]Subject, error) {
 	rows, err := s.db.Read().QueryContext(ctx,
-		`SELECT id, name, enabled, expires_at, expired_at, created_at, note
+		`SELECT id, name, enabled, expires_at, expired_at, frozen_at, frozen_reason, on_hold_seconds, status_changed_at, created_at, note
 		   FROM subjects
 		  WHERE `+store.SubjectScopeSQL+`
 		  ORDER BY id DESC`, store.ScopeArgs(sc)...)
@@ -305,9 +405,13 @@ func (s *Store) List(ctx context.Context, sc rbac.Scope) ([]Subject, error) {
 			enabled   int
 			expiresAt sql.NullInt64
 			expiredAt sql.NullInt64
+			frozenAt  sql.NullInt64
+			frozenRsn sql.NullString
+			onHold    sql.NullInt64
+			statusAt  sql.NullInt64
 			createdAt int64
 		)
-		if err := rows.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &frozenAt, &frozenRsn, &onHold, &statusAt, &createdAt, &s.Note); err != nil {
 			return nil, fmt.Errorf("scan subject: %w", err)
 		}
 		s.Enabled = enabled == 1
@@ -319,6 +423,18 @@ func (s *Store) List(ctx context.Context, sc rbac.Scope) ([]Subject, error) {
 		if expiredAt.Valid {
 			t := time.Unix(expiredAt.Int64, 0).UTC()
 			s.ExpiredAt = &t
+		}
+		if frozenAt.Valid {
+			t := time.Unix(frozenAt.Int64, 0).UTC()
+			s.FrozenAt = &t
+			s.FrozenReason = frozenRsn.String
+		}
+		if onHold.Valid {
+			s.OnHoldSeconds = &onHold.Int64
+		}
+		if statusAt.Valid {
+			t := time.Unix(statusAt.Int64, 0).UTC()
+			s.StatusChangedAt = &t
 		}
 		out = append(out, s)
 	}
@@ -336,9 +452,13 @@ func scanSubject(row rowScanner) (*Subject, error) {
 		enabled   int
 		expiresAt sql.NullInt64
 		expiredAt sql.NullInt64
+		frozenAt  sql.NullInt64
+		frozenRsn sql.NullString
+		onHold    sql.NullInt64
+		statusAt  sql.NullInt64
 		createdAt int64
 	)
-	err := row.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note)
+	err := row.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &frozenAt, &frozenRsn, &onHold, &statusAt, &createdAt, &s.Note)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -354,6 +474,18 @@ func scanSubject(row rowScanner) (*Subject, error) {
 	if expiredAt.Valid {
 		t := time.Unix(expiredAt.Int64, 0).UTC()
 		s.ExpiredAt = &t
+	}
+	if frozenAt.Valid {
+		t := time.Unix(frozenAt.Int64, 0).UTC()
+		s.FrozenAt = &t
+		s.FrozenReason = frozenRsn.String
+	}
+	if onHold.Valid {
+		s.OnHoldSeconds = &onHold.Int64
+	}
+	if statusAt.Valid {
+		t := time.Unix(statusAt.Int64, 0).UTC()
+		s.StatusChangedAt = &t
 	}
 	return &s, nil
 }
@@ -522,8 +654,8 @@ func (s *Store) NodeIDsForRead(ctx context.Context, subjectID int64) ([]int64, e
 func (s *Store) Freeze(ctx context.Context, tx *sql.Tx, subjectID int64, reason string) error {
 	now := s.now().UTC().Unix()
 	res, err := tx.ExecContext(ctx,
-		`UPDATE subjects SET frozen_at = ?, frozen_reason = ? WHERE id = ?`,
-		now, reason, subjectID)
+		`UPDATE subjects SET frozen_at = ?, frozen_reason = ?, status_changed_at = ? WHERE id = ?`,
+		now, reason, now, subjectID)
 	if err != nil {
 		return fmt.Errorf("freeze subject: %w", err)
 	}
@@ -541,8 +673,8 @@ func (s *Store) Freeze(ctx context.Context, tx *sql.Tx, subjectID int64, reason 
 // Clears frozen_at and frozen_reason.
 func (s *Store) Unfreeze(ctx context.Context, tx *sql.Tx, subjectID int64) error {
 	res, err := tx.ExecContext(ctx,
-		`UPDATE subjects SET frozen_at = NULL, frozen_reason = NULL WHERE id = ?`,
-		subjectID)
+		`UPDATE subjects SET frozen_at = NULL, frozen_reason = NULL, status_changed_at = ? WHERE id = ?`,
+		s.now().UTC().Unix(), subjectID)
 	if err != nil {
 		return fmt.Errorf("unfreeze subject: %w", err)
 	}
@@ -560,8 +692,8 @@ func (s *Store) Unfreeze(ctx context.Context, tx *sql.Tx, subjectID int64) error
 // This is different from freeze: disable is manual admin action, freeze is automatic quota enforcement.
 func (s *Store) Disable(ctx context.Context, tx *sql.Tx, subjectID int64) error {
 	res, err := tx.ExecContext(ctx,
-		`UPDATE subjects SET enabled = 0 WHERE id = ?`,
-		subjectID)
+		`UPDATE subjects SET enabled = 0, status_changed_at = ? WHERE id = ?`,
+		s.now().UTC().Unix(), subjectID)
 	if err != nil {
 		return fmt.Errorf("disable subject: %w", err)
 	}
@@ -578,8 +710,8 @@ func (s *Store) Disable(ctx context.Context, tx *sql.Tx, subjectID int64) error 
 // Enable enables a subject, setting enabled = 1 and clearing expired_at.
 func (s *Store) Enable(ctx context.Context, tx *sql.Tx, subjectID int64) error {
 	res, err := tx.ExecContext(ctx,
-		`UPDATE subjects SET enabled = 1, expired_at = NULL WHERE id = ?`,
-		subjectID)
+		`UPDATE subjects SET enabled = 1, expired_at = NULL, status_changed_at = ? WHERE id = ?`,
+		s.now().UTC().Unix(), subjectID)
 	if err != nil {
 		return fmt.Errorf("enable subject: %w", err)
 	}

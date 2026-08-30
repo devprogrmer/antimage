@@ -183,7 +183,7 @@ function NodeCard({ node, selected, onSelect, mayWrite }: NodeCardProps) {
     >
       {/* Status indicator dot */}
       <div
-        className={`absolute right-2 top-2 h-3 w-3 rounded-full ${statusColor} ${
+        className={`absolute end-2 top-2 h-3 w-3 rounded-full ${statusColor} ${
           node.online ? "animate-pulse" : ""
         }`}
         title={node.online ? t("node.online") : t("node.offline")}

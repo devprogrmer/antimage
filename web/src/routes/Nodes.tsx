@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api } from "../lib/api";
@@ -8,6 +8,9 @@ import { StatusBadge, type NodeStatus } from "../components/StatusBadge";
 import { DataTable } from "../components/DataTable";
 import type { Column } from "../components/DataTable";
 import { useNodeStream } from "../lib/useNodeStream";
+import { AddNode } from "../components/AddNode";
+import { BulkNodeActions } from "../components/NodeActions";
+import { Button } from "../components/ui/button";
 
 interface NodeRow {
   id: number;
@@ -21,6 +24,9 @@ interface NodeRow {
 }
 
 export function Nodes({ onSelect }: { onSelect: (id: number) => void }) {
+  const [adding, setAdding] = useState(false);
+  const [selected, setSelected] = useState<Set<string | number>>(new Set());
+
   const nodes = useQuery({
     queryKey: ["nodes"],
     queryFn: () => api.get<{ nodes: NodeRow[] }>("/api/v1/nodes"),
@@ -43,6 +49,21 @@ export function Nodes({ onSelect }: { onSelect: (id: number) => void }) {
       })),
     [nodes.data, live],
   );
+
+  // Keep the selection to rows that still exist. A node deleted or filtered
+  // away must not stay selected and then be restarted by a fleet action the
+  // operator thought applied to what was on screen.
+  useEffect(() => {
+    if (nodes.data === undefined) return;
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set<string | number>(nodes.data.nodes.map((n) => n.id));
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [nodes.data]);
+
+  const selectedNodes = rows.filter((n) => selected.has(n.id));
 
   const columns: Column<NodeRow>[] = [
     {
@@ -105,14 +126,33 @@ export function Nodes({ onSelect }: { onSelect: (id: number) => void }) {
   ];
 
   return (
-    <DataTable
-      rows={rows}
-      columns={columns}
-      rowKey={(n) => n.id}
-      onRowActivate={(n) => onSelect(n.id)}
-      storageKey="nodes"
-      empty={t("node.none")}
-      caption={t("nav.nodes")}
-    />
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">{t("nav.nodes")}</h2>
+        <Button size="sm" onClick={() => setAdding(true)}>
+          {t("node.add")}
+        </Button>
+      </div>
+
+      <AddNode open={adding} onOpenChange={setAdding} />
+
+      <BulkNodeActions
+        nodes={selectedNodes.map((n) => ({ id: n.id, name: n.name, status: n.status }))}
+        onDone={() => setSelected(new Set())}
+      />
+
+      <DataTable
+        rows={rows}
+        columns={columns}
+        selected={selected}
+        onSelectedChange={setSelected}
+        selectionLabel={(n) => n.name}
+        rowKey={(n) => n.id}
+        onRowActivate={(n) => onSelect(n.id)}
+        storageKey="nodes"
+        empty={t("node.none")}
+        caption={t("nav.nodes")}
+      />
+    </div>
   );
 }

@@ -26,6 +26,24 @@ func GenerateToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// PeekToken returns the subject's subscription token without creating one.
+//
+// The read-only counterpart to EnsureToken, and the difference matters on a
+// GET. EnsureToken mints a token when the subject has none, so calling it from
+// a read endpoint would make merely LOOKING at a customer issue them a live
+// subscription link -- state changed by a page load, and a credential nobody
+// decided to hand out. An empty string means no token has been issued yet,
+// which is a legitimate answer rather than an error.
+func PeekToken(ctx context.Context, st *store.Store, subjectID int64) (string, error) {
+	var token string
+	row := st.Read().QueryRowContext(ctx,
+		`SELECT subscription_token FROM subjects WHERE id = ?`, subjectID)
+	if err := row.Scan(&token); err != nil {
+		return "", fmt.Errorf("query subject token: %w", err)
+	}
+	return token, nil
+}
+
 // EnsureToken returns the subject's subscription token, generating one if empty.
 // Lazy initialization: existing subjects get tokens on first access.
 func EnsureToken(ctx context.Context, st *store.Store, subjectID int64) (string, error) {
@@ -122,4 +140,29 @@ func LookupByToken(ctx context.Context, st *store.Store, token string) (int64, e
 	}
 
 	return subjectID, nil
+}
+
+// ClearToken withdraws a subject's subscription link entirely.
+//
+// Distinct from RevokeToken, which ROTATES -- it always leaves a working link,
+// which covers "this leaked, give me a new one" and cannot express "this
+// customer should have no link at all". Setting the column back to empty is
+// the only way to say the second, and LookupByToken already treats an empty
+// token as no match, so a cleared subject's old link stops resolving.
+func ClearToken(ctx context.Context, st *store.Store, subjectID int64) error {
+	return st.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE subjects SET subscription_token = '' WHERE id = ?`, subjectID)
+		if err != nil {
+			return fmt.Errorf("clear subject token: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return sql.ErrNoRows
+		}
+		return nil
+	})
 }

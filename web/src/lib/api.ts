@@ -13,12 +13,23 @@ export class ApiError extends Error {
    * before the middleware ran -- a network error, or a proxy in between.
    */
   readonly requestID: string;
+  /**
+   * The full JSON body the server sent, when there was one.
+   *
+   * Some failures carry fields beside the error envelope that an operator
+   * needs -- the SSH bootstrap 502 returns the install script's stderr as
+   * `output`, for example. `error.message` alone is a header without the
+   * receipt. Kept as `unknown` because the callers that read it are the ones
+   * that know what shape they expect; the common case still uses `.message`.
+   */
+  readonly body: unknown;
 
-  constructor(status: number, code: string, message: string, requestID = "") {
+  constructor(status: number, code: string, message: string, requestID = "", body: unknown = null) {
     super(message);
     this.status = status;
     this.code = code;
     this.requestID = requestID;
+    this.body = body;
   }
 }
 
@@ -45,13 +56,49 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       err?.code ?? "unknown",
       err?.message ?? "request failed",
       requestID,
+      payload,
     );
   }
   return payload as T;
 }
 
+/**
+ * Fetches a non-JSON body, such as the CSV export.
+ *
+ * request() parses every response as JSON, so it cannot be used here -- but a
+ * FAILED export still answers with the usual JSON error envelope, so the error
+ * path has to parse and the success path must not. Reading the text once and
+ * only parsing it when the status is bad keeps both honest.
+ */
+async function requestText(path: string): Promise<string> {
+  const response = await fetch(path, { credentials: "same-origin" });
+  const text = await response.text();
+  if (!response.ok) {
+    let code = "unknown";
+    let message = "request failed";
+    let requestID = response.headers.get("X-Request-ID") ?? "";
+    try {
+      const err = (JSON.parse(text) as {
+        error?: { code: string; message: string; request_id?: string };
+      }).error;
+      if (err) {
+        code = err.code;
+        message = err.message;
+        requestID = err.request_id ?? requestID;
+      }
+    } catch {
+      // A non-JSON error body, e.g. http.Error's plain text. The status and
+      // whatever text arrived are still more useful than a generic message.
+      if (text.trim() !== "") message = text.trim();
+    }
+    throw new ApiError(response.status, code, message, requestID);
+  }
+  return text;
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
+  getText: (path: string) => requestText(path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
   del: <T>(path: string) => request<T>("DELETE", path),

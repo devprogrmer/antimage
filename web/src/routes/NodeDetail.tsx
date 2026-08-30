@@ -3,12 +3,15 @@ import { api } from "../lib/api";
 import { formatNumber, formatTimestamp, t } from "../i18n";
 import { StatusBadge, type NodeStatus } from "../components/StatusBadge";
 import { EgressPanel } from "../components/EgressPanel";
-import { DeploymentPanel } from "../components/DeploymentPanel";
+import { EnhancedDeploymentPanel } from "../components/EnhancedDeploymentPanel";
 import { NodeAdapters } from "../components/NodeAdapters";
 import { NodeHealth } from "../components/NodeHealth";
 import { NodeReconciliation } from "../components/NodeReconciliation";
+import { NodeLogs } from "../components/NodeLogs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { InboundStudio } from "../components/InboundStudio";
+import { NodeActions } from "../components/NodeActions";
+import { ReissueEnrolment } from "../components/AddNode";
 
 interface NodeDetailData {
   id: number;
@@ -76,6 +79,18 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
         <span className="font-mono text-xs text-muted-foreground">{node.data.address}</span>
       </header>
 
+      {/* The lifecycle controls sit with the node's identity, not inside a
+          tab: taking a host out of service is the first thing an operator
+          comes here to do during an incident. */}
+      <NodeActions
+        node={{ id: nodeId, name: node.data.name, status: node.data.status }}
+      />
+
+      {/* Re-issuing a token is how an operator recovers a node whose
+          enrolment expired or was lost. Separate from the lifecycle controls
+          because it changes nothing about the running host. */}
+      <ReissueEnrolment nodeId={nodeId} nodeName={node.data.name} />
+
       <section className="flex gap-6 border-y border-border py-2 font-mono text-xs">
         <span>
           {t("node.revision")}: {formatNumber(node.data.applied_revision)} /{" "}
@@ -92,6 +107,7 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
           <TabsTrigger value="deployments">{t("deploy.title")}</TabsTrigger>
           <TabsTrigger value="adapters">{t("node.adapters")}</TabsTrigger>
           <TabsTrigger value="health">{t("health.tab")}</TabsTrigger>
+          <TabsTrigger value="logs">{t("node.logs")}</TabsTrigger>
           <TabsTrigger value="history">{t("node.tabHistory")}</TabsTrigger>
         </TabsList>
 
@@ -108,7 +124,12 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
         </TabsContent>
 
         <TabsContent value="deployments">
-          <DeploymentPanel
+          {/* EnhancedDeploymentPanel wraps three pieces that were each
+              built and unreachable: the guided DeploymentWizard, the
+              ApplyRunsTimeline history, and the DeploymentPanel itself.
+              Toggling between simple and wizard leaves the existing
+              tests against DeploymentPanel intact. */}
+          <EnhancedDeploymentPanel
             nodeId={nodeId}
             targetRevision={node.data.desired_revision}
           />
@@ -120,6 +141,10 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
 
         <TabsContent value="health">
           <NodeHealth nodeId={nodeId} />
+        </TabsContent>
+
+        <TabsContent value="logs">
+          <NodeLogs nodeId={nodeId} />
         </TabsContent>
 
         <TabsContent value="history" className="space-y-6">

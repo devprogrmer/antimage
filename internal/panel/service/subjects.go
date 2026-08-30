@@ -293,8 +293,68 @@ func (s *Subjects) SetFrozen(ctx context.Context, a Actor, id int64, frozen bool
 }
 
 // Delete removes a subject and deprovisions it everywhere.
+// ErrDeleteCapExceeded means the actor may not delete a subject that has
+// carried this much traffic.
+var ErrDeleteCapExceeded = errors.New(
+	"this user has carried more traffic than you may delete; ask a super admin")
+
+// checkDeleteCap refuses to let an actor delete a customer they have been
+// billed for.
+//
+// A reseller is charged on the traffic their customers carry, and usage rows
+// cascade with the subject -- so deleting a heavy user before settlement
+// destroys the evidence along with the debt. admins.delete_cap_bytes is the
+// ceiling; NULL means no ceiling, which is what every admin has by default.
+//
+// The measure is LIFETIME BILLABLE, not subjects.quota_used_bytes. The running
+// counter is zeroed by the quota reset sweeper, so a cap read from it would be
+// defeated by waiting for the reset and deleting in the window afterwards --
+// the control would look present and enforce nothing. Billable is also the
+// figure the reseller is actually invoiced on, which is the number the cap is
+// about.
+//
+// Super admins are exempt: they are who sets the caps, and a panel where
+// nobody can remove a heavy user is a panel that fills up with them.
+func (s *Subjects) checkDeleteCap(ctx context.Context, a Actor, id int64) error {
+	if a.RBAC != nil && a.RBAC.IsSuper {
+		return nil
+	}
+	var cap sql.NullInt64
+	err := s.db.Read().QueryRowContext(ctx,
+		`SELECT delete_cap_bytes FROM admins WHERE id = ?`, a.RBAC.AdminID).Scan(&cap)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No such admin: this is a machine actor (the sweepers, antimage-ctl),
+		// which has no commercial relationship to protect.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read delete cap: %w", err)
+	}
+	if !cap.Valid {
+		return nil
+	}
+
+	// from = 0, to = now: the whole life of the subject, across every period.
+	report, err := nodes.BillableForSubject(ctx, s.db, id, 0, s.now().Unix())
+	if err != nil {
+		return fmt.Errorf("read lifetime usage: %w", err)
+	}
+	if report.Billable > cap.Int64 {
+		return fmt.Errorf("%w (%d bytes used, cap %d)",
+			ErrDeleteCapExceeded, report.Billable, cap.Int64)
+	}
+	return nil
+}
+
 func (s *Subjects) Delete(ctx context.Context, a Actor, id int64) error {
 	if err := s.authorize(ctx, a, rbac.PermSubjectWrite, id); err != nil {
+		return err
+	}
+	// After authorisation, before anything is read for the delete: an actor who
+	// may not delete this subject should learn that without the panel doing any
+	// of the work. Placed here rather than in the handlers so the bulk path
+	// cannot bypass it -- bulk delete calls straight through to this method.
+	if err := s.checkDeleteCap(ctx, a, id); err != nil {
 		return err
 	}
 	// Node ids are read BEFORE the delete: afterwards the grants are gone and

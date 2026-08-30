@@ -83,11 +83,15 @@ jobs:
       # WireGuard and Hysteria2 (AD-3). Both adapters shipped with Apply
       # returning "not yet implemented", so nothing had ever executed their
       # ExecRuntime. Installing the real tooling is what makes that testable.
-      - name: install wireguard and hysteria
+      #
+      # ocserv is here too rather than in a step of its own, because it needs
+      # the same apt-get update: installing it first would run against whatever
+      # package lists the runner image happened to ship with.
+      - name: install wireguard, hysteria, ocserv and openvpn
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq wireguard-tools
+          sudo apt-get install -y -qq wireguard-tools ocserv openvpn
           curl -sSL -o "$HOME/bin/hysteria" \
             "https://github.com/apernet/hysteria/releases/download/app%2Fv${HYSTERIA_VERSION}/hysteria-linux-amd64"
           chmod +x "$HOME/bin/hysteria"
@@ -98,7 +102,23 @@ jobs:
           sing-box version
           wg --version
           wg-quick --help 2>&1 | head -1
+          openvpn --version | head -1
           hysteria version
+          ocpasswd --help 2>&1 | head -1
+
+      # The ocserv adapter's real-runtime test lives in its own package rather
+      # than test/e2e, because it drives the adapter's own passwd parser -- a
+      # test that reimplemented that parser would assert against a copy of the
+      # code it is meant to check. It therefore needs its own run line: the e2e
+      # line below would not reach it.
+      - name: real-runtime ocserv user database
+        run: go test ./internal/node/adapter/ocserv/ -tags realruntime -run TestRealRuntime -v -count=1
+
+      # Two things only the real thing can answer: whether openvpn accepts the
+      # generated config, and whether the login script -- which IS the
+      # authentication decision -- behaves under a real shell.
+      - name: real-runtime openvpn config and login script
+        run: go test ./internal/node/adapter/openvpn/ -tags realruntime -run TestRealRuntime -v -count=1
 
       - name: real-runtime lifecycle for both adapters
         # Excludes the WireGuard interface lifecycle: it needs root and runs in

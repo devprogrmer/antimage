@@ -399,3 +399,256 @@ it("asks in the operator's language", async () => {
   expect(within(dialog).getByRole("button", { name: "لغو" })).toBeInTheDocument();
   setLocale("en");
 });
+
+// ------------------------------------------- the workflow, end to end
+
+// The studio could list, create and delete. An operator could not change an
+// inbound's port without deleting it and retyping every field, could not turn
+// one off for maintenance, and could not act on more than one at a time.
+
+const wgAdapter = {
+  kind: "wireguard", version: "1", schema: wgSchema, offerable: true,
+  hot_user_add: true, requires_pki: false,
+};
+
+function twoInbounds() {
+  return {
+    body: {
+      services: [
+        {
+          id: 11, node_id: 1, adapter_kind: "wireguard", enabled: true,
+          params: { port: 51820, private_key: "k1" }, created_at: 1,
+        },
+        {
+          id: 12, node_id: 1, adapter_kind: "wireguard", enabled: false,
+          params: { port: 51821, private_key: "k2" }, created_at: 2,
+        },
+      ],
+    },
+  };
+}
+
+function seedStudio() {
+  routes["/api/v1/nodes/1/service-schemas"] = schemas(wgAdapter);
+  routes["/api/v1/nodes/1/services"] = twoInbounds();
+}
+
+describe("editing an inbound", () => {
+  it("loads the existing params into the form and PUTs the change", async () => {
+    seedStudio();
+    routes["PUT /api/v1/services/11"] = { body: {} };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+
+    // Pre-filled from the inbound being edited, not blank: retyping every
+    // field to change a port is how an operator loses a private key.
+    const port = await screen.findByLabelText(/port/i);
+    expect(port).toHaveValue(51820);
+    await user.clear(port);
+    await user.type(port, "51999");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "PUT" && c.path === "/api/v1/services/11");
+      expect(sent?.body).toMatchObject({
+        adapter_kind: "wireguard",
+        params: { port: 51999, private_key: "k1" },
+        // Carried through: the handler rewrites the whole row, so omitting it
+        // would silently re-enable an inbound the operator had turned off.
+        enabled: true,
+      });
+    });
+  });
+
+  // Changing the protocol would keep the id and swap the adapter under it,
+  // which is a different inbound wearing the old one's identity.
+  it("will not let the protocol be changed on an existing inbound", async () => {
+    seedStudio();
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    expect(await screen.findByLabelText("Protocol")).toBeDisabled();
+  });
+
+  it("keeps a disabled inbound disabled when it is edited", async () => {
+    seedStudio();
+    routes["PUT /api/v1/services/12"] = { body: {} };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getAllByRole("button", { name: "Edit" })[1]);
+    await user.click(await screen.findByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "PUT" && c.path === "/api/v1/services/12");
+      expect(sent?.body).toMatchObject({ enabled: false });
+    });
+  });
+});
+
+describe("cloning an inbound", () => {
+  // A blind clone would POST a copy that binds the same port and be refused
+  // nearly every time. Pre-filling lets the operator change what must differ.
+  it("opens a create form pre-filled from the source", async () => {
+    seedStudio();
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getAllByRole("button", { name: "Clone" })[0]);
+
+    expect(await screen.findByLabelText(/port/i)).toHaveValue(51820);
+    // A create, not an edit: nothing has been sent yet.
+    expect(calls.some((c) => c.method === "PUT" || c.method === "POST")).toBe(false);
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument();
+  });
+
+  it("POSTs a new inbound rather than overwriting the original", async () => {
+    seedStudio();
+    routes["POST /api/v1/nodes/1/services"] = { status: 201, body: { id: 13 } };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getAllByRole("button", { name: "Clone" })[0]);
+    const port = await screen.findByLabelText(/port/i);
+    await user.clear(port);
+    await user.type(port, "51888");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "POST");
+      expect(sent?.path).toBe("/api/v1/nodes/1/services");
+      expect(sent?.body).toMatchObject({ params: { port: 51888, private_key: "k1" } });
+    });
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+});
+
+describe("enable and disable", () => {
+  // Disabling goes through the same PUT, which republishes the node. A row
+  // that changed without republishing would leave the inbound serving.
+  it("turns a running inbound off", async () => {
+    seedStudio();
+    routes["PUT /api/v1/services/11"] = { body: {} };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getAllByRole("button", { name: "Disable" })[0]);
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "PUT" && c.path === "/api/v1/services/11");
+      expect(sent?.body).toMatchObject({ enabled: false, params: { port: 51820 } });
+    });
+  });
+
+  it("turns a stopped inbound back on", async () => {
+    seedStudio();
+    routes["PUT /api/v1/services/12"] = { body: {} };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getByRole("button", { name: "Enable" }));
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "PUT" && c.path === "/api/v1/services/12");
+      expect(sent?.body).toMatchObject({ enabled: true });
+    });
+  });
+});
+
+describe("bulk actions", () => {
+  it("offers no bulk bar until an inbound is selected", async () => {
+    seedStudio();
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+    expect(screen.queryByText(/selected/)).toBeNull();
+  });
+
+  it("applies to exactly the selected inbounds", async () => {
+    seedStudio();
+    routes["PUT /api/v1/services/11"] = { body: {} };
+    routes["PUT /api/v1/services/12"] = { body: {} };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getByRole("checkbox", { name: "wireguard 11" }));
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+
+    // The bulk bar's Disable, not the row's.
+    await user.click(within(bar).getByRole("button", { name: "Disable" }));
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PUT" && c.path === "/api/v1/services/11")).toBe(true),
+    );
+    expect(calls.some((c) => c.path === "/api/v1/services/12")).toBe(false);
+  });
+
+  it("selects every inbound at once", async () => {
+    seedStudio();
+    routes["PUT /api/v1/services/11"] = { body: {} };
+    routes["PUT /api/v1/services/12"] = { body: {} };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select all rows" }));
+    const bar = (await screen.findByText("2 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Enable" }));
+
+    await waitFor(() => {
+      expect(calls.filter((c) => c.method === "PUT").length).toBe(2);
+    });
+  });
+
+  // These run one request per inbound, and a batch where some failed is the
+  // normal outcome when one has a stale port. "Done" would hide it.
+  it("reports how many actually changed", async () => {
+    seedStudio();
+    routes["PUT /api/v1/services/11"] = { body: {} };
+    routes["PUT /api/v1/services/12"] = {
+      status: 422, body: { error: { code: "validation", message: "port already bound" } },
+    };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select all rows" }));
+    const bar = (await screen.findByText("2 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Enable" }));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("1 changed, 1 failed");
+    expect(status).toHaveTextContent("port already bound");
+  });
+
+  it("asks before deleting a batch and says how many", async () => {
+    seedStudio();
+    routes["DELETE /api/v1/services/11"] = { body: {} };
+    const user = userEvent.setup({ delay: null });
+    renderWithQuery(<InboundStudio nodeId={1} />);
+    await screen.findAllByText("wireguard");
+
+    await user.click(screen.getByRole("checkbox", { name: "wireguard 11" }));
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("This affects 1 inbounds.");
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/services/11")).toBe(true),
+    );
+  });
+});

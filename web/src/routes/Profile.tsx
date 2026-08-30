@@ -1,6 +1,8 @@
 import { MyTenancy } from "../components/MyTenancy";
 import { SessionList } from "../components/SessionList";
 import { TelegramLink } from "../components/TelegramLink";
+import { TOTPSection } from "../components/TOTPSection";
+import { ChangePasswordSection } from "../components/ChangePasswordSection";
 import { t } from "../i18n";
 
 /**
@@ -17,6 +19,8 @@ export function Profile() {
       <SessionList />
       <div className="max-w-xl space-y-4">
         <MyTenancy />
+        <ChangePasswordSection />
+        <TOTPSection />
         <TelegramLink />
       </div>
     </div>

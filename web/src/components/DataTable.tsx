@@ -57,12 +57,27 @@ export function DataTable<T>({
   storageKey,
   empty,
   caption,
+  selected,
+  onSelectedChange,
+  selectionLabel,
 }: {
   rows: T[];
   columns: Column<T>[];
   rowKey: (row: T) => string | number;
   /** Called on click, Enter or Space. Omit for a table that is only read. */
   onRowActivate?: (row: T) => void;
+  /**
+   * Selected row keys. Pass this together with onSelectedChange to get a
+   * leading checkbox column; omit both and the table is exactly as it was, so
+   * the lists that have no bulk actions grow no dead controls.
+   */
+  selected?: Set<string | number>;
+  onSelectedChange?: (next: Set<string | number>) => void;
+  /**
+   * Per-row accessible name for the checkbox, e.g. (s) => s.name. A column of
+   * checkboxes labelled only "select" is unusable with a screen reader.
+   */
+  selectionLabel?: (row: T) => string;
   /**
    * Persists which columns are hidden. Omit and the choice lasts one visit --
    * which is worse than not offering it, so callers that show the control
@@ -122,6 +137,26 @@ export function DataTable<T>({
 
   const hideable = columns.filter((c) => c.hideable !== false);
 
+  const selectable = selected !== undefined && onSelectedChange !== undefined;
+  // Select-all covers the rows currently rendered, not every row the server
+  // holds. Filters are server-side, so "all" here means "all of what you are
+  // looking at" -- which is the only set the operator has actually seen.
+  const allSelected = selectable && sorted.length > 0 && sorted.every((r) => selected.has(rowKey(r)));
+  const someSelected = selectable && sorted.some((r) => selected.has(rowKey(r)));
+
+  function toggleRow(key: string | number) {
+    if (!selectable) return;
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onSelectedChange(next);
+  }
+
+  function toggleAll() {
+    if (!selectable) return;
+    onSelectedChange(allSelected ? new Set() : new Set(sorted.map(rowKey)));
+  }
+
   return (
     <div className="space-y-2">
       {hideable.length > 0 && (
@@ -157,6 +192,22 @@ export function DataTable<T>({
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead>
           <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+            {selectable && (
+              <th className="w-8 py-2 pe-3 text-start font-medium">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  // Indeterminate is a property, not an attribute, so it has to
+                  // be set through a ref rather than in JSX.
+                  ref={(el) => {
+                    if (el) el.indeterminate = !allSelected && someSelected;
+                  }}
+                  onChange={toggleAll}
+                  aria-label={t("table.selectAll")}
+                  className="size-4 cursor-pointer accent-primary"
+                />
+              </th>
+            )}
             {visible.map((column) => {
               const active = sort?.id === column.id;
               return (
@@ -198,7 +249,7 @@ export function DataTable<T>({
           {sorted.length === 0 ? (
             <tr>
               <td
-                colSpan={visible.length}
+                colSpan={visible.length + (selectable ? 1 : 0)}
                 className="py-6 text-center text-sm text-muted-foreground"
               >
                 {empty}
@@ -227,6 +278,20 @@ export function DataTable<T>({
                   onRowActivate && "cursor-pointer hover:bg-accent/50",
                 )}
               >
+                {selectable && (
+                  <td className="py-1.5 pe-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(rowKey(row))}
+                      onChange={() => toggleRow(rowKey(row))}
+                      // The row activates on click; without this, ticking a box
+                      // would also navigate away from the list being selected.
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={selectionLabel ? selectionLabel(row) : String(rowKey(row))}
+                      className="size-4 cursor-pointer accent-primary"
+                    />
+                  </td>
+                )}
                 {visible.map((column) => (
                   <td key={column.id} className={cn("py-1.5 pe-3", column.className)}>
                     {column.cell(row)}

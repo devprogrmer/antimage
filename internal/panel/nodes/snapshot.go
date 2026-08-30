@@ -160,11 +160,19 @@ func BuildDesiredSnapshot(
 // buildSubjects assembles the subjects entitled to service on this node.
 //
 // A subject appears exactly once, carrying every credential kind it holds,
-// and only if it is enabled and unexpired. Expiry is enforced here rather
-// than in generated protocol config: an expired subject simply stops being
-// part of desired state, so the ordinary convergence path removes them and
-// the removal is hash-verified like any other change. See the SP2 decision
+// and only if it is enabled, unfrozen and unexpired. Expiry is enforced here
+// rather than in generated protocol config: an expired subject simply stops
+// being part of desired state, so the ordinary convergence path removes them
+// and the removal is hash-verified like any other change. See the SP2 decision
 // record, decision 2.
+//
+// frozen_at is checked here for the same reason, and it was missing. Freezing
+// is documented as a revocation on the admin path (service.Subjects.SetFrozen)
+// and is how quota exhaustion cuts a subject off, but subjects.Store.Freeze
+// writes frozen_at without touching enabled -- so a frozen subject was rebuilt
+// straight back into the document. SetFrozen republishes correctly, which made
+// it worse rather than better: the node was promptly handed a NEW revision
+// that still served the user the operator had just revoked.
 //
 // Ordering is by subject id and then credential kind so the canonical
 // document is byte-identical across builds; invariant 3 depends on it.
@@ -178,6 +186,7 @@ func buildSubjects(
 		   JOIN services sv         ON sv.id = ss.service_id
 		  WHERE sv.node_id = ?
 		    AND s.enabled = 1
+		    AND s.frozen_at IS NULL
 		    AND (s.expires_at IS NULL OR s.expires_at > ?)
 		  ORDER BY s.id`, nodeID, nowUnix())
 	if err != nil {

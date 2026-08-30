@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -19,10 +20,26 @@ func (r *ClashRenderer) Render(ctx context.Context, servers []Server) ([]byte, s
 	var proxies []map[string]interface{}
 	for _, srv := range servers {
 		proxy, err := r.renderServer(srv)
+		// A protocol this format cannot express is SKIPPED, not fatal. The
+		// loop used to abort the whole document, so a user holding one VLESS
+		// inbound and one WireGuard inbound received an empty subscription --
+		// and nothing anywhere said why. The per-inbound view in the panel is
+		// where the omission is explained.
+		if errors.Is(err, ErrNotRepresentable) {
+			continue
+		}
 		if err != nil {
 			return nil, "", fmt.Errorf("render server %s: %w", srv.NodeName, err)
 		}
 		proxies = append(proxies, proxy)
+	}
+
+	// Nothing this format can express. Saying so beats a valid YAML document
+	// with an empty proxy list, which gives the user nothing and explains
+	// nothing.
+	if len(proxies) == 0 {
+		return nil, "", fmt.Errorf(
+			"none of this subject's inbounds can be expressed in a Clash configuration")
 	}
 
 	config := map[string]interface{}{
@@ -46,8 +63,12 @@ func (r *ClashRenderer) renderServer(srv Server) (map[string]interface{}, error)
 		return r.renderVMess(srv), nil
 	case "trojan":
 		return r.renderTrojan(srv), nil
+	case "hysteria2":
+		return clashHysteria2(srv)
+	case "shadowsocks":
+		return clashShadowsocks(srv)
 	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", srv.Protocol)
+		return nil, ErrNotRepresentable
 	}
 }
 

@@ -57,9 +57,27 @@ export function localeFromTag(tag: string): Locale {
 }
 
 /** Returns the key itself when a translation is missing, so gaps are visible
- *  in the UI rather than rendering as blanks. */
-export function t(key: TranslationKey): string {
-  return catalogs[current][key] ?? key;
+ *  in the UI rather than rendering as blanks.
+ *
+ *  Optional params substitute {placeholders}. The catalogues already carried
+ *  keys like "Expires in {days} days" while t() had no way to fill them, so
+ *  those strings would have rendered with the braces showing. Substitution is
+ *  positional-by-name rather than index-based because word order differs
+ *  between the five locales: Persian and Arabic put the count elsewhere in the
+ *  sentence, and a positional scheme would silently reorder their arguments.
+ *
+ *  An unmatched placeholder is left as-is rather than blanked, for the same
+ *  reason a missing key returns the key: a visible defect beats an invisible
+ *  one. */
+export function t(
+  key: TranslationKey,
+  params?: Record<string, string | number>,
+): string {
+  const raw = catalogs[current][key] ?? key;
+  if (!params) return raw;
+  return raw.replace(/\{(\w+)\}/g, (whole, name: string) =>
+    name in params ? String(params[name]) : whole,
+  );
 }
 
 /** BCP 47 tag for Intl. Kept in one place so digit systems -- Persian and

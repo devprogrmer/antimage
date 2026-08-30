@@ -6,6 +6,11 @@ export interface Session {
   role: string;
   is_super: boolean;
   permissions: string[];
+  // Whether the signed-in admin has TOTP enrolled. The Profile TOTP section
+  // reads this to decide whether to offer enrolment or the disable form; a
+  // missing field (older backend or older session cache) is treated as
+  // disabled so the UI leans toward enabling.
+  totp_enabled?: boolean;
 }
 
 /**

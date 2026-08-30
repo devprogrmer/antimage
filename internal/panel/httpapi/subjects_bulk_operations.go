@@ -413,3 +413,87 @@ func (d Deps) handleBulkSetQuota(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// BulkDisableRequest specifies subjects to disable.
+type BulkDisableRequest struct {
+	SubjectIDs []int64 `json:"subject_ids"`
+}
+
+// BulkDisableResponse reports disable results.
+type BulkDisableResponse struct {
+	Disabled int      `json:"disabled"`
+	Failed   int      `json:"failed"`
+	Errors   []string `json:"errors,omitempty"`
+}
+
+// handleBulkDisableSubjects disables multiple subjects.
+// POST /api/v1/subjects/bulk/disable
+//
+// The counterpart to handleBulkEnableSubjects, which shipped without one. The
+// bulk action menu in the UI offered "disable" against a route that did not
+// exist, so the only way to take a batch of subjects out of service was one at
+// a time. Guarded identically: permission first, then scope, because the two
+// answer different questions and neither substitutes for the other.
+func (d Deps) handleBulkDisableSubjects(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+
+	var req BulkDisableRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.SubjectIDs) == 0 {
+		http.Error(w, "subject_ids required", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.SubjectIDs) > 1000 {
+		http.Error(w, "maximum 1000 subjects per request", http.StatusBadRequest)
+		return
+	}
+
+	// Filtering rather than rejecting keeps an out-of-scope id
+	// indistinguishable from a nonexistent one.
+	scoped, scopeErr := d.scopeFilterSubjectIDs(r, req.SubjectIDs)
+	if scopeErr != nil {
+		http.Error(w, "could not check subject scope", http.StatusInternalServerError)
+		return
+	}
+	req.SubjectIDs = scoped
+
+	disabled := 0
+	failed := 0
+	errMsgs := []string{}
+
+	// Through the service layer, which republishes: disabling changes which
+	// subjects appear in a node's desired document, and a disable that does not
+	// reach the node is not a disable.
+	svc := d.subjectService()
+	sa := d.svcActor(r, actor)
+	ctx := r.Context()
+	for _, subjectID := range req.SubjectIDs {
+		if err := svc.SetEnabled(ctx, sa, subjectID, false); err != nil {
+			errMsgs = append(errMsgs, err.Error())
+			failed++
+			continue
+		}
+		disabled++
+	}
+
+	resp := BulkDisableResponse{
+		Disabled: disabled,
+		Failed:   failed,
+		Errors:   errMsgs,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}

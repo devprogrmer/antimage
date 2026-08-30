@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -16,20 +17,36 @@ func (r *SingBoxRenderer) Render(ctx context.Context, servers []Server) ([]byte,
 	}
 
 	var outbounds []map[string]interface{}
+	var outboundTags []string
 
 	// Add each server as an outbound
 	for _, srv := range servers {
 		outbound, err := r.renderServer(srv)
+		// A protocol this format cannot express is SKIPPED, not fatal. The
+		// loop used to abort the whole document, so a user holding one VLESS
+		// inbound and one WireGuard inbound received an empty subscription --
+		// and nothing anywhere said why. The per-inbound view in the panel is
+		// where the omission is explained.
+		if errors.Is(err, ErrNotRepresentable) {
+			continue
+		}
 		if err != nil {
 			return nil, "", fmt.Errorf("render server %s: %w", srv.NodeName, err)
 		}
 		outbounds = append(outbounds, outbound)
+		// The selector's tag list is built from what was ACTUALLY rendered,
+		// not from the servers we were handed. Iterating the input meant a
+		// skipped protocol still appeared as a tag, so sing-box was told to
+		// select an outbound that is not in the document.
+		outboundTags = append(outboundTags, srv.NodeName)
 	}
 
-	// Build selector outbound that includes all servers
-	var outboundTags []string
-	for _, srv := range servers {
-		outboundTags = append(outboundTags, srv.NodeName)
+	// Every server was unrepresentable in this format. Returning an error
+	// beats indexing outboundTags[0] and panicking, and beats a document whose
+	// selector has no options.
+	if len(outboundTags) == 0 {
+		return nil, "", fmt.Errorf(
+			"none of this subject's inbounds can be expressed in a sing-box configuration")
 	}
 
 	selector := map[string]interface{}{
@@ -85,8 +102,12 @@ func (r *SingBoxRenderer) renderServer(srv Server) (map[string]interface{}, erro
 		return r.renderVMess(srv), nil
 	case "trojan":
 		return r.renderTrojan(srv), nil
+	case "hysteria2":
+		return singboxHysteria2(srv)
+	case "shadowsocks":
+		return singboxShadowsocks(srv)
 	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", srv.Protocol)
+		return nil, ErrNotRepresentable
 	}
 }
 

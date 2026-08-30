@@ -16,6 +16,8 @@ import (
 	"github.com/amyrm/antimage/internal/node/adapter"
 	"github.com/amyrm/antimage/internal/node/adapter/hysteria2"
 	"github.com/amyrm/antimage/internal/node/adapter/l2tp"
+	"github.com/amyrm/antimage/internal/node/adapter/ocserv"
+	"github.com/amyrm/antimage/internal/node/adapter/openvpn"
 	"github.com/amyrm/antimage/internal/node/adapter/singbox"
 	"github.com/amyrm/antimage/internal/node/adapter/stub"
 	"github.com/amyrm/antimage/internal/node/adapter/wireguard"
@@ -63,6 +65,7 @@ func SupportedKinds() []string {
 	kinds := []string{
 		string(stub.Kind), string(xray.Kind), string(singbox.Kind),
 		string(wireguard.Kind), string(hysteria2.Kind), string(l2tp.Kind),
+		string(ocserv.Kind), string(openvpn.Kind),
 	}
 	sort.Strings(kinds)
 	return kinds
@@ -111,6 +114,16 @@ func build(cfg *agent.Config, spec agent.AdapterConfig) (adapter.Adapter, error)
 
 	case l2tp.Kind:
 		return l2tp.New(orDefault(spec.ConfigDir, defaultL2TPDir), stateDir), nil
+
+	case ocserv.Kind:
+		return ocserv.New(
+			ocserv.NewExecRuntime(spec.Unit, spec.Binary, ""),
+			orDefault(spec.ConfigDir, ocserv.DefaultConfigDir), stateDir), nil
+
+	case openvpn.Kind:
+		return openvpn.New(
+			openvpn.NewExecRuntime(spec.Unit, spec.Binary),
+			orDefault(spec.ConfigDir, openvpn.DefaultConfigDir), stateDir), nil
 	}
 
 	return nil, fmt.Errorf("unknown adapter kind %q; this node supports %s",

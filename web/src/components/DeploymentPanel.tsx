@@ -70,6 +70,7 @@ export function DeploymentPanel({
   const [strategy, setStrategy] = useState("all_at_once");
   const [confirmingDeploy, setConfirmingDeploy] = useState(false);
   const [rollingBack, setRollingBack] = useState<Deployment | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const mayWrite = can(session.data, "node:write");
 
@@ -238,31 +239,14 @@ export function DeploymentPanel({
           </thead>
           <tbody>
             {deployments.data.map((d) => (
-              <tr key={d.id} className="border-b border-border/50 align-top">
-                <td className="py-1 pe-3 font-mono">{d.strategy}</td>
-                <td className="pe-3">
-                  <DeploymentStatus status={d.status} />
-                  {d.error !== "" && (
-                    <p className="mt-0.5 text-destructive">{d.error}</p>
-                  )}
-                </td>
-                <td className="pe-3 font-mono text-muted-foreground">
-                  {formatTimestamp(d.created_at)}
-                </td>
-                <td>
-                  {/* Only a finished deployment can be rolled back; one still
-                      running has no settled state to return to. */}
-                  {mayWrite && !IN_FLIGHT.has(d.status) && d.status !== "rolled_back" && (
-                    <button
-                      type="button"
-                      onClick={() => setRollingBack(d)}
-                      className="text-destructive hover:underline"
-                    >
-                      {t("deploy.rollback")}
-                    </button>
-                  )}
-                </td>
-              </tr>
+              <DeploymentRow
+                key={d.id}
+                d={d}
+                expanded={expandedId === d.id}
+                onToggle={() => setExpandedId(expandedId === d.id ? null : d.id)}
+                mayWrite={mayWrite}
+                onRollback={() => setRollingBack(d)}
+              />
             ))}
           </tbody>
         </table>
@@ -296,4 +280,171 @@ function DeploymentStatus({ status }: { status: string }) {
   if (status === "failed") return <Badge variant="destructive">{status}</Badge>;
   if (status === "rolled_back") return <Badge variant="warning">{status}</Badge>;
   return <Badge variant="outline">{status}</Badge>;
+}
+
+interface DeploymentRowProps {
+  d: Deployment;
+  expanded: boolean;
+  onToggle: () => void;
+  mayWrite: boolean;
+  onRollback: () => void;
+}
+
+/**
+ * One deployment row with an expand toggle. Kept as a subcomponent so the
+ * two <tr> elements each carry their own key without a Fragment wrapper that
+ * <tbody> would refuse to parse.
+ */
+function DeploymentRow({ d, expanded, onToggle, mayWrite, onRollback }: DeploymentRowProps) {
+  return (
+    <>
+      <tr className="border-b border-border/50 align-top">
+        <td className="py-1 pe-3 font-mono">
+          <button
+            type="button"
+            onClick={onToggle}
+            className="me-1 text-muted-foreground hover:text-foreground"
+            aria-expanded={expanded}
+            aria-label={t("deploy.toggleDetail")}
+          >
+            {expanded ? "▾" : "▸"}
+          </button>
+          {d.strategy}
+        </td>
+        <td className="pe-3">
+          <DeploymentStatus status={d.status} />
+          {d.error !== "" && <p className="mt-0.5 text-destructive">{d.error}</p>}
+        </td>
+        <td className="pe-3 font-mono text-muted-foreground">
+          {formatTimestamp(d.created_at)}
+        </td>
+        <td>
+          {mayWrite && !IN_FLIGHT.has(d.status) && d.status !== "rolled_back" && (
+            <button
+              type="button"
+              onClick={onRollback}
+              className="text-destructive hover:underline"
+            >
+              {t("deploy.rollback")}
+            </button>
+          )}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={4} className="border-b border-border/50 bg-muted/30 p-3">
+            <DeploymentDetail deploymentID={d.id} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+interface NodeStatusRow {
+  node_id: number;
+  status: string;
+  started_at: number | null;
+  completed_at: number | null;
+  error: string;
+}
+
+interface DeploymentDetailResponse {
+  deployment: {
+    id: number;
+    node_id: number;
+    revision_id: number;
+    strategy: string;
+    status: string;
+    created_by: number;
+    created_at: number;
+    started_at: number | null;
+    completed_at: number | null;
+    error: string;
+  };
+  node_status: NodeStatusRow[];
+}
+
+/**
+ * Per-node breakdown for one deployment.
+ *
+ * The `/deployments/{id}` endpoint existed and nothing rendered it, so the
+ * DeploymentPanel could show a deployment's aggregate status but never the
+ * per-node results a canary or rolling deploy needs an operator to see. This
+ * component pulls it on demand -- expanded rows only -- to keep the list
+ * request light.
+ */
+function DeploymentDetail({ deploymentID }: { deploymentID: number }) {
+  const detail = useQuery({
+    queryKey: ["deployment", deploymentID],
+    queryFn: () =>
+      api.get<DeploymentDetailResponse>(`/api/v1/deployments/${deploymentID}`),
+    // Poll while the deployment is moving so the per-node table converges
+    // without an operator having to collapse and re-expand.
+    refetchInterval: (query) => {
+      const st = query.state.data?.deployment.status;
+      return st && IN_FLIGHT.has(st) ? 2000 : false;
+    },
+  });
+
+  if (detail.isLoading) {
+    return <p className="text-xs text-muted-foreground">{t("common.loading")}</p>;
+  }
+  if (detail.error) {
+    return <MutationError error={detail.error} />;
+  }
+  const data = detail.data;
+  if (!data) return null;
+
+  return (
+    <div className="space-y-2 text-xs">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+        <dt className="text-muted-foreground">{t("deploy.revision")}</dt>
+        <dd className="font-mono">{formatNumber(data.deployment.revision_id)}</dd>
+        <dt className="text-muted-foreground">{t("deploy.startedAt")}</dt>
+        <dd className="font-mono">
+          {data.deployment.started_at ? formatTimestamp(data.deployment.started_at) : "—"}
+        </dd>
+        <dt className="text-muted-foreground">{t("deploy.completedAt")}</dt>
+        <dd className="font-mono">
+          {data.deployment.completed_at ? formatTimestamp(data.deployment.completed_at) : "—"}
+        </dd>
+      </dl>
+      <div>
+        <p className="mb-1 font-semibold">{t("deploy.perNodeStatus")}</p>
+        {data.node_status.length === 0 ? (
+          <p className="text-muted-foreground">{t("deploy.noNodeStatus")}</p>
+        ) : (
+          <table className="w-full">
+            <thead>
+              <tr className="text-muted-foreground">
+                <th className="text-start pe-3">{t("deploy.nodeID")}</th>
+                <th className="text-start pe-3">{t("deploy.status")}</th>
+                <th className="text-start pe-3">{t("deploy.startedAt")}</th>
+                <th className="text-start pe-3">{t("deploy.completedAt")}</th>
+                <th className="text-start">{t("deploy.error")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.node_status.map((n) => (
+                <tr key={n.node_id} className="border-t border-border/40">
+                  <td className="py-0.5 pe-3 font-mono">{n.node_id}</td>
+                  <td className="pe-3">
+                    <DeploymentStatus status={n.status} />
+                  </td>
+                  <td className="pe-3 font-mono text-muted-foreground">
+                    {n.started_at ? formatTimestamp(n.started_at) : "—"}
+                  </td>
+                  <td className="pe-3 font-mono text-muted-foreground">
+                    {n.completed_at ? formatTimestamp(n.completed_at) : "—"}
+                  </td>
+                  <td className="text-destructive whitespace-pre-wrap">{n.error}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
 }

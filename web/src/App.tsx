@@ -10,6 +10,8 @@ import { NodeDetail } from "@/routes/NodeDetail";
 import { Observability } from "@/routes/Observability";
 import { Audit } from "@/routes/Audit";
 import { Templates } from "@/routes/Templates";
+import { FleetManagement } from "@/routes/FleetManagement";
+import { Access } from "@/routes/Access";
 import { Subjects } from "@/routes/Subjects";
 import { SubjectDetail } from "@/routes/SubjectDetail";
 import { Profile } from "@/routes/Profile";
@@ -95,6 +97,8 @@ export default function App() {
         {/* Ownership-scoped in the service layer rather than behind a
             permission, so every signed-in operator has their own. */}
         <Route path="templates" element={<Templates />} />
+        <Route path="fleet" element={<FleetManagement />} />
+        <Route path="access" element={<Access />} />
         <Route path="profile" element={<Profile />} />
         {/* An unknown path is an operator's typo or a stale bookmark, not an
             error worth a screen of its own. */}

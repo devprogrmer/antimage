@@ -22,17 +22,31 @@ func TestPremiumLayerSchema(t *testing.T) {
 			t.Errorf("service_templates table does not exist")
 		}
 
-		// Test adapter_kind constraint
-		err = s.Write(context.Background(), func(tx *sql.Tx) error {
-			_, err := tx.Exec(`
-				INSERT INTO service_templates
-				(name, adapter_kind, params_json, created_at, updated_at)
-				VALUES ('test', 'invalid', '{}', 1, 1)
-			`)
-			return err
-		})
-		if err == nil {
-			t.Error("expected adapter_kind constraint violation, got nil")
+		// adapter_kind is deliberately unconstrained since 00038.
+		//
+		// It used to carry CHECK (adapter_kind IN ('xray','singbox','openvpn',
+		// 'l2tp')), which was wrong in both directions: it permitted openvpn,
+		// for which no adapter has ever existed, and rejected wireguard and
+		// hysteria2, which ship. So this asserted that the database enforced a
+		// list of protocols that did not match the ones the product could run.
+		//
+		// Which kinds are real is the adapters' knowledge, published through
+		// adapter.Caps, and a copy of it in SQL cannot be kept current. The
+		// test now checks the property that actually matters: a template for a
+		// shipped adapter can be saved.
+		for _, kind := range []string{"wireguard", "hysteria2", "ocserv", "xray"} {
+			err = s.Write(context.Background(), func(tx *sql.Tx) error {
+				_, err := tx.Exec(`
+					INSERT INTO service_templates
+					(name, adapter_kind, params_json, created_at, updated_at)
+					VALUES (?, ?, '{}', 1, 1)
+				`, "tpl-"+kind, kind)
+				return err
+			})
+			if err != nil {
+				t.Errorf("a template for %s -- a shipped adapter -- was refused by "+
+					"the database: %v", kind, err)
+			}
 		}
 	})
 

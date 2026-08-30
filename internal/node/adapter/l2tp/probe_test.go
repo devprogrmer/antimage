@@ -109,13 +109,13 @@ func TestProbeIntegration(t *testing.T) {
 	// Note: This test will only pass on a system with strongSwan and xl2tpd
 	// properly configured and running. In other environments, it documents
 	// the expected behavior.
-	
+
 	// We don't use ctx.Background() with a timeout here since Probe should be fast.
 	// health, err := a.Probe(context.Background())
 	// if err != nil {
 	// 	t.Fatalf("Probe failed: %v", err)
 	// }
-	
+
 	// Log the result without enforcing specific expectations since test
 	// environment may not have services running.
 	// t.Logf("Probe result: OK=%v, Detail=%s", health.OK, health.Detail)
@@ -127,7 +127,7 @@ func TestProbeIntegration(t *testing.T) {
 func TestPortListeningErrorHandling(t *testing.T) {
 	// Test with privileged ports (< 1024) that we can't bind to without root.
 	// The function should handle the permission error gracefully.
-	
+
 	// Port 1 is typically restricted and unused.
 	result := isPortListening(1)
 	// We don't assert a specific result since it depends on privileges and OS,

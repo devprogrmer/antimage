@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -23,6 +24,20 @@ type Server struct {
 	ALPN        []string
 	Network     string // "tcp", "ws", "grpc"
 	Path        string // WebSocket/HTTP path
+
+	// Hysteria2. Obfs is the obfuscation mode ("salamander" or empty), and
+	// ObfsPassword is meaningless without it. UpMbps and DownMbps are the
+	// congestion-control hints the protocol needs to pace itself; zero means
+	// the client picks, which is a legitimate configuration rather than a
+	// missing one.
+	// Method is the Shadowsocks cipher. Clash calls this field "cipher" and
+	// sing-box calls it "method"; the name here follows the protocol's own
+	// terminology rather than either client's.
+	Method       string
+	Obfs         string
+	ObfsPassword string
+	UpMbps       int
+	DownMbps     int
 }
 
 // V2RayRenderer renders v2ray-format subscriptions (base64-encoded URI lines).
@@ -37,10 +52,23 @@ func (r *V2RayRenderer) Render(ctx context.Context, servers []Server) ([]byte, s
 	var lines []string
 	for _, srv := range servers {
 		uri, err := r.renderServer(srv)
+		// A protocol this format cannot express is SKIPPED, not fatal. The
+		// loop used to abort the whole document, so a user holding one VLESS
+		// inbound and one WireGuard inbound received an empty subscription --
+		// and nothing anywhere said why. The per-inbound view in the panel is
+		// where the omission is explained.
+		if errors.Is(err, ErrNotRepresentable) {
+			continue
+		}
 		if err != nil {
 			return nil, "", fmt.Errorf("render server %s: %w", srv.NodeName, err)
 		}
 		lines = append(lines, uri)
+	}
+
+	if len(lines) == 0 {
+		return nil, "", fmt.Errorf(
+			"none of this subject's inbounds can be expressed in a v2ray subscription")
 	}
 
 	// Join lines and base64-encode the result.
@@ -59,8 +87,15 @@ func (r *V2RayRenderer) renderServer(srv Server) (string, error) {
 		return r.renderVMess(srv)
 	case "trojan":
 		return r.renderTrojan(srv), nil
+	case "hysteria2":
+		return hysteria2URI(srv)
+	case "shadowsocks":
+		return shadowsocksURI(srv)
 	default:
-		return "", fmt.Errorf("unsupported protocol: %s", srv.Protocol)
+		// Not an error: this format cannot express the protocol. The caller
+		// skips it so one WireGuard inbound does not empty the whole
+		// subscription.
+		return "", ErrNotRepresentable
 	}
 }
 

@@ -242,12 +242,34 @@ func TestV2RayRenderer_UnsupportedProtocol(t *testing.T) {
 			NodeName:    "Unknown",
 			NodeAddress: "unknown.example.com",
 			Port:        443,
-			Protocol:    "shadowsocks", // Not supported yet
+			// WireGuard has no representation in ANY aggregated format. This
+			// used to say shadowsocks, which is now rendered.
+			Protocol: "wireguard",
 		},
 	}
 
-	_, _, err := r.Render(context.Background(), servers)
-	if err == nil {
-		t.Error("expected error for unsupported protocol")
+	// Every server is unrepresentable, so the caller is told rather than
+	// handed an empty subscription that explains nothing.
+	if _, _, err := r.Render(context.Background(), servers); err == nil {
+		t.Error("expected an error when NOTHING could be rendered")
+	}
+
+	// One among usable ones is skipped, not fatal.
+	body, _, err := r.Render(context.Background(), append(servers, Server{
+		NodeName: "ok", NodeAddress: "203.0.113.1", Port: 443,
+		Protocol: "vless", UUID: "u-1", TLS: true,
+	}))
+	if err != nil {
+		t.Fatalf("one unrepresentable server emptied the whole subscription: %v", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(string(body))
+	if err != nil {
+		t.Fatalf("not base64: %v", err)
+	}
+	if !strings.Contains(string(raw), "ok") {
+		t.Errorf("the usable server is missing: %q", raw)
+	}
+	if strings.Contains(string(raw), "Unknown") {
+		t.Errorf("the unrepresentable server was rendered anyway: %q", raw)
 	}
 }

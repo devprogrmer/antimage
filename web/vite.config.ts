@@ -42,5 +42,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.ts'],
+    // Vitest defaults to 5s per test, which is the same budget setupTests gives
+    // Testing Library's findBy/waitFor. Equal budgets mean the test dies before
+    // the async util can report what it was waiting for, so a slow render and a
+    // genuinely wrong expectation both surface as a bare "timed out in 5000ms".
+    // The test gets the larger budget so the util is always the one to speak.
+    testTimeout: 20000,
   },
 })
