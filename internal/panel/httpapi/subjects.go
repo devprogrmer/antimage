@@ -43,7 +43,7 @@ func toSubjectDTO(s subjects.Subject) subjectDTO {
 		ID: s.ID, Name: s.Name, Enabled: s.Enabled,
 		CreatedAt: s.CreatedAt.Unix(), Note: s.Note,
 		QuotaBytes: s.QuotaBytes, QuotaUsedBytes: s.QuotaUsedBytes,
-		Frozen: s.FrozenAt != nil,
+		Frozen:     s.FrozenAt != nil,
 		MaxDevices: s.MaxDevices, MaxIPs: s.MaxIPs, MaxConnections: s.MaxConnections,
 	}
 	if s.ExpiresAt != nil {

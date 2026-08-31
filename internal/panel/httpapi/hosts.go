@@ -12,27 +12,27 @@ import (
 )
 
 type hostDTO struct {
-	ID            int64   `json:"id"`
-	ServiceID     int64   `json:"service_id"`
-	NodeID        int64   `json:"node_id"`
-	NodeName      string  `json:"node_name"`
-	Remark        string  `json:"remark"`
-	Address       string  `json:"address"`
-	Port          *int64  `json:"port"`
-	SNI           string  `json:"sni"`
-	Host          string  `json:"host"`
-	Path          string  `json:"path"`
-	Security      string  `json:"security"`
-	Fingerprint   string  `json:"fingerprint"`
-	ALPN          string  `json:"alpn"`
-	AllowInsecure bool    `json:"allow_insecure"`
-	PublicKey     string  `json:"public_key"`
-	ShortID       string  `json:"short_id"`
-	SpiderX       string  `json:"spider_x"`
-	Flow          string  `json:"flow"`
-	Enabled       bool    `json:"enabled"`
-	Priority      int     `json:"priority"`
-	CreatedAt     int64   `json:"created_at"`
+	ID            int64  `json:"id"`
+	ServiceID     int64  `json:"service_id"`
+	NodeID        int64  `json:"node_id"`
+	NodeName      string `json:"node_name"`
+	Remark        string `json:"remark"`
+	Address       string `json:"address"`
+	Port          *int64 `json:"port"`
+	SNI           string `json:"sni"`
+	Host          string `json:"host"`
+	Path          string `json:"path"`
+	Security      string `json:"security"`
+	Fingerprint   string `json:"fingerprint"`
+	ALPN          string `json:"alpn"`
+	AllowInsecure bool   `json:"allow_insecure"`
+	PublicKey     string `json:"public_key"`
+	ShortID       string `json:"short_id"`
+	SpiderX       string `json:"spider_x"`
+	Flow          string `json:"flow"`
+	Enabled       bool   `json:"enabled"`
+	Priority      int    `json:"priority"`
+	CreatedAt     int64  `json:"created_at"`
 }
 
 type hostWriteRequest struct {
@@ -97,8 +97,8 @@ func (d Deps) handleListHosts(w http.ResponseWriter, r *http.Request) {
 
 func scanHost(row interface{ Scan(dest ...any) error }) (hostDTO, error) {
 	var (
-		dto     hostDTO
-		port    sql.NullInt64
+		dto               hostDTO
+		port              sql.NullInt64
 		insecure, enabled int
 	)
 	err := row.Scan(&dto.ID, &dto.ServiceID, &dto.NodeID, &dto.NodeName, &dto.Remark, &dto.Address, &port,

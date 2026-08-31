@@ -212,10 +212,23 @@ func (d Deps) handleMe(w http.ResponseWriter, r *http.Request) {
 	for p := range actor.Perms {
 		perms = append(perms, string(p))
 	}
+	// Whether TOTP is enrolled is the one thing the Profile TOTP section
+	// cannot infer for itself: the /enrol route conflicts if a secret is
+	// already live and /disable refuses if there is none. Without this
+	// field the section would have to attempt enrol just to discover the
+	// state, which is wasteful and also mints an audit row for a no-op.
+	var totpSecretEnc []byte
+	if err := d.Store.Read().QueryRowContext(r.Context(),
+		`SELECT totp_secret_enc FROM admins WHERE id = ?`, actor.AdminID,
+	).Scan(&totpSecretEnc); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not read profile")
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"admin_id":    actor.AdminID,
-		"role":        actor.RoleName,
-		"is_super":    actor.IsSuper,
-		"permissions": perms,
+		"admin_id":     actor.AdminID,
+		"role":         actor.RoleName,
+		"is_super":     actor.IsSuper,
+		"permissions":  perms,
+		"totp_enabled": len(totpSecretEnc) > 0,
 	})
 }

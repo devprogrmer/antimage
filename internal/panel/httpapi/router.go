@@ -131,6 +131,20 @@ func NewRouter(d Deps) http.Handler {
 
 			private.Post("/auth/logout", d.handleLogout)
 			private.Get("/auth/me", d.handleMe)
+			// Read-only visibility onto who has access to the panel.
+			// Write operations against admins/roles are still antimage-ctl.
+			private.Get("/admins", d.handleListAdmins)
+			private.Post("/admins", d.handleCreateAdmin)
+			private.Put("/admins/{adminID}", d.handleUpdateAdmin)
+			private.Delete("/admins/{adminID}", d.handleDeleteAdmin)
+			// Admin resets someone else's password; self-service uses the
+			// separate change-password route below, which requires the
+			// current password.
+			private.Post("/admins/{adminID}/password", d.handleResetAdminPassword)
+			// Signed-in admin changes their own password. Not gated on
+			// admin:manage: every admin must be able to rotate their own.
+			private.Post("/me/password", d.handleChangeMyPassword)
+			private.Get("/roles", d.handleListRoles)
 
 			// Each of these acts on the caller's own account only — no admin
 			// id in the path, so there is no other account to authorize
@@ -180,6 +194,11 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/nodes/{nodeID}/adapters", d.handleListAdapters) // SP5: adapter registry
 			private.Get("/nodes/{nodeID}/metrics", d.handleNodeMetrics)   // SP5: connection metrics
 			private.Get("/nodes/{nodeID}/history", d.handleNodeHistory)   // SP7: metrics history
+			// The panel's own timeline for this node: failing apply steps,
+			// audit records, current last_error. Not agent syslog -- the
+			// agent does not stream logs -- but what an operator investigating
+			// this node during an incident needs first.
+			private.Get("/nodes/{nodeID}/logs", d.handleGetNodeLogs)
 			private.Get("/nodes/{nodeID}/health/latest", d.handleGetNodeHealthLatest)
 			private.Get("/nodes/{nodeID}/health/history", d.handleGetNodeHealthHistory)
 			private.Get("/nodes/{nodeID}/reconciliation", d.handleGetNodeReconciliation)
@@ -198,6 +217,13 @@ func NewRouter(d Deps) http.Handler {
 
 			// Bulk node operations (M7)
 			private.Post("/nodes/bulk/action", d.handleBulkNodeAction)
+
+			// PKI: the panel is the CA for the whole fleet, so this is the one
+			// place an operator can see who holds a valid certificate, warn
+			// before one lapses, and revoke one whose key may have been copied.
+			private.Get("/ca", d.handleGetCA)
+			private.Get("/certificates", d.handleListCertificates)
+			private.Post("/nodes/{nodeID}/certificate/revoke", d.handleRevokeNodeCertificate)
 
 			// Services could be created, updated and deleted but never read, so
 			// nothing could show what a node is already serving.
@@ -262,8 +288,12 @@ func NewRouter(d Deps) http.Handler {
 			private.Delete("/subjects/{subjectID}", d.handleDeleteSubject)
 			private.Get("/subjects/{subjectID}/credentials/{kind}", d.handleRevealCredential)
 			private.Post("/subjects/{subjectID}/credentials/{kind}/rotate", d.handleRotateCredential)
+			// Master's subscription reader (V2Ray + Clash + sing-box aggregated
+			// URLs consumed by the SubjectDetail page).
 			private.Get("/subjects/{subjectID}/subscription", d.handleSubjectSubscription)
 			private.Post("/subjects/{subjectID}/subscription/revoke", d.handleRevokeSubjectSubscription)
+
+			private.Post("/qr", d.handleQRCode)
 			private.Get("/subjects/export", d.handleExportSubjects)
 			private.Post("/subjects/import", d.handleImportSubjects)
 			private.Post("/subjects/bulk/delete", d.handleBulkDeleteSubjects)
@@ -282,6 +312,11 @@ func NewRouter(d Deps) http.Handler {
 			// Device management and enforcement endpoints
 			private.Get("/subjects/{id}/devices", d.handleListDevices)
 			private.Get("/subjects/{id}/connections", d.handleListActiveConnections)
+			// The subject's timeline: audit rows for admin actions merged with
+			// connection_audit_log's forensic trace. Two tables, one endpoint,
+			// so an operator investigating "what happened to this user
+			// yesterday" doesn't have to piece two views together.
+			private.Get("/subjects/{id}/activity", d.handleGetSubjectActivity)
 			private.Get("/subjects/{id}/enforcement", d.handleGetEnforcementStatus)
 			private.Post("/devices/{id}/revoke", d.handleRevokeDevice)
 

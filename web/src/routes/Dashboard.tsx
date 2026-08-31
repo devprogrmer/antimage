@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { t } from '../i18n';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { formatNumber, t } from '../i18n';
 
 interface DashboardMetrics {
   timestamp: number;
@@ -136,17 +138,146 @@ export function Dashboard() {
         />
       </div>
 
+      {/* Two panels the operator asks for daily and that were built and
+          unreachable: the traffic chart over a selectable period, and the
+          top talkers table scoped to what this caller may see. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <TrafficChart />
+        <TopUsers />
+      </div>
+
       {/* Nodes Grid */}
       <div className="bg-card rounded-lg shadow-sm border border-border p-6">
         <h2 className="text-xl font-semibold mb-4">{t('dashboard.nodes')}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {metrics.nodes.map((node) => (
+          {(metrics?.nodes || []).map((node) => (
             <NodeCard key={node.id} node={node} />
           ))}
         </div>
       </div>
     </div>
   );
+}
+
+interface TrafficPoint {
+  timestamp: number;
+  uplink_bytes: number;
+  downlink_bytes: number;
+}
+
+interface TrafficChartResponse {
+  period: "24h" | "7d" | "30d";
+  granularity: "hour" | "day";
+  data_points: TrafficPoint[];
+}
+
+/**
+ * Traffic over time, drawn as an SVG bar chart to avoid pulling a chart
+ * library for two axes and one legend. Bars stack uplink over downlink so
+ * total-per-bucket is visible without a second read.
+ */
+function TrafficChart() {
+  const [period, setPeriod] = useState<"24h" | "7d" | "30d">("24h");
+  const chart = useQuery({
+    queryKey: ["dashboard", "traffic-chart", period],
+    queryFn: () =>
+      api.get<TrafficChartResponse>(`/api/v1/dashboard/traffic-chart?period=${period}`),
+  });
+
+  const points = chart.data?.data_points ?? [];
+  const totals = points.map((p) => p.uplink_bytes + p.downlink_bytes);
+  const max = Math.max(1, ...totals);
+
+  return (
+    <div className="bg-card rounded-lg shadow-sm border border-border p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold">{t("dashboard.trafficChart")}</h2>
+        <select
+          value={period}
+          onChange={(e) => setPeriod(e.target.value as typeof period)}
+          className="rounded border border-input bg-background px-2 py-1 text-xs"
+        >
+          <option value="24h">{t("dashboard.last24h")}</option>
+          <option value="7d">{t("dashboard.last7d")}</option>
+          <option value="30d">{t("dashboard.last30d")}</option>
+        </select>
+      </div>
+      {chart.isLoading ? (
+        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
+      ) : points.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("dashboard.noTraffic")}</p>
+      ) : (
+        <div className="flex items-end gap-0.5 h-40" role="img"
+             aria-label={t("dashboard.trafficChart")}>
+          {points.map((p) => {
+            const h = Math.max(1, Math.round(((p.uplink_bytes + p.downlink_bytes) / max) * 100));
+            return (
+              <div
+                key={p.timestamp}
+                className="flex-1 bg-primary/70 hover:bg-primary transition-colors"
+                style={{ height: `${h}%` }}
+                title={`${new Date(p.timestamp * 1000).toLocaleString()}  ↑ ${formatBytes(p.uplink_bytes)}  ↓ ${formatBytes(p.downlink_bytes)}`}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface TopUser {
+  subject_id: number;
+  subject_name: string;
+  total_bytes: number;
+  uplink_bytes: number;
+  downlink_bytes: number;
+}
+
+function TopUsers() {
+  const users = useQuery({
+    queryKey: ["dashboard", "top-users"],
+    queryFn: () => api.get<{ users: TopUser[] }>(`/api/v1/dashboard/top-users?limit=10`),
+  });
+
+  return (
+    <div className="bg-card rounded-lg shadow-sm border border-border p-6">
+      <h2 className="text-lg font-semibold mb-4">{t("dashboard.topUsers")}</h2>
+      {users.isLoading ? (
+        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
+      ) : (users.data?.users ?? []).length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("dashboard.noUsers")}</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-xs text-muted-foreground">
+              <th className="py-2 text-start">{t("subject.name")}</th>
+              <th className="text-end">{t("dashboard.traffic")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(users.data?.users ?? []).map((u) => (
+              <tr key={u.subject_id} className="border-b border-border">
+                <td className="py-1.5 font-mono text-xs">{u.subject_name}</td>
+                <td className="text-end font-mono text-xs">
+                  <span title={`↑ ${formatBytes(u.uplink_bytes)} / ↓ ${formatBytes(u.downlink_bytes)}`}>
+                    {formatBytes(u.total_bytes)} ({formatNumber(u.total_bytes)}B)
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(n) / Math.log(1024));
+  return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 interface MetricCardProps {
@@ -228,3 +359,5 @@ function NodeCard({ node }: NodeCardProps) {
     </div>
   );
 }
+
+

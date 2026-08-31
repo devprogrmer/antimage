@@ -218,6 +218,7 @@ func (d Deps) handleCreateUserPreset(w http.ResponseWriter, r *http.Request) {
 		Description            string          `json:"description"`
 		QuotaBytes             *int64          `json:"quota_bytes"`
 		ValidityDays           *int            `json:"validity_days"`
+		OnHold                 bool            `json:"on_hold"`
 		AutoAssignServicesJSON json.RawMessage `json:"auto_assign_services_json"`
 		AutoAssignNodeTagsJSON json.RawMessage `json:"auto_assign_node_tags_json"`
 		IsPublic               bool            `json:"is_public"`
@@ -236,6 +237,7 @@ func (d Deps) handleCreateUserPreset(w http.ResponseWriter, r *http.Request) {
 		Description:            req.Description,
 		QuotaBytes:             req.QuotaBytes,
 		ValidityDays:           req.ValidityDays,
+		OnHold:                 req.OnHold,
 		AutoAssignServicesJSON: req.AutoAssignServicesJSON,
 		AutoAssignNodeTagsJSON: req.AutoAssignNodeTagsJSON,
 		IsPublic:               req.IsPublic,

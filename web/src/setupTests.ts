@@ -2,14 +2,37 @@
 // augments its Assertion type, so toHaveAttribute type-checks under tsc -b.
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
+
+// Testing Library gives every findBy/waitFor one second. That is ample for a
+// single file and not ample for the whole suite in parallel workers: opening a
+// Radix menu and settling a React Query mutation can take most of a second
+// each on a loaded machine, so a test would fail on the clock while asserting
+// something that was about to be true. Raising the budget changes no
+// assertion -- a genuinely wrong expectation still fails, it just takes longer
+// to say so.
+configure({ asyncUtilTimeout: 5000 });
 
 // Testing Library only auto-registers its own afterEach when vitest runs with
 // globals enabled, which this project does not: every test imports what it
 // uses. Without this, a component left mounted by one test is still in the
 // document for the next, and getByRole throws "found multiple elements".
 afterEach(cleanup);
+
+// Radix locks scroll while a modal is open by setting pointer-events:none and
+// overflow:hidden on <body>, and it undoes that on close -- but a test that
+// ends with a dialog or menu still open never reaches the close. cleanup()
+// unmounts the React tree and does not touch body styles, so the lock survives
+// into the next test, where userEvent finds the whole document unclickable and
+// every click silently does nothing. The failure surfaces as an assertion about
+// a request that was never sent, several tests away from the one that caused it.
+afterEach(() => {
+  document.body.style.pointerEvents = "";
+  document.body.style.overflow = "";
+  document.body.removeAttribute("data-scroll-locked");
+  document.body.removeAttribute("aria-hidden");
+});
 
 // jsdom implements no matchMedia, and the theme provider asks it whether the
 // OS prefers dark. Without this every component that renders inside

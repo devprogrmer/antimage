@@ -10,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amyrm/antimage/internal/node/adapter/stub"
 	"github.com/amyrm/antimage/internal/node/agent"
-	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/testutil/chaos"
 )
 
@@ -521,10 +519,9 @@ func (e *env) waitForConvergedByID(nodeID int64, d time.Duration) {
 	})
 }
 
-func (e *env) restartGRPCServer() {
-	e.t.Helper()
-	// Restart gRPC server with same configuration
-	// Note: This is simplified. In real test, would need to re-create listener and server
-	// For demonstration, we'll just note that this would restart the server
-	e.t.Log("gRPC server restart (would re-create listener and server)")
-}
+// restartGRPCServer lives in harness.go, where it actually re-creates the
+// listener and server. A second copy here declared the same method on the same
+// type, so this package has never compiled under the e2e tag -- and the copy
+// was a stub that only logged "would re-create listener and server", so had it
+// compiled, every reliability test that restarts the server would have been
+// asserting against a server that never restarted.

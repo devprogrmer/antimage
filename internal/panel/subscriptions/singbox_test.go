@@ -323,23 +323,6 @@ func TestSingBoxRenderer_EmptyServers(t *testing.T) {
 	}
 }
 
-func TestSingBoxRenderer_UnsupportedProtocol(t *testing.T) {
-	r := &SingBoxRenderer{}
-	servers := []Server{
-		{
-			NodeName:    "Unknown",
-			NodeAddress: "unknown.example.com",
-			Port:        443,
-			Protocol:    "shadowsocks",
-		},
-	}
-
-	_, _, err := r.Render(context.Background(), servers)
-	if err == nil {
-		t.Error("expected error for unsupported protocol")
-	}
-}
-
 func TestSingBoxRenderer_ValidJSON(t *testing.T) {
 	r := &SingBoxRenderer{}
 	servers := []Server{

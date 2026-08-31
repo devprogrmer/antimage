@@ -8,6 +8,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { SubscriptionGroups } from "../components/SubscriptionGroups";
 import {
   Sheet,
   SheetContent,
@@ -57,12 +58,16 @@ export function Templates() {
         <TabsList>
           <TabsTrigger value="services">{t("templates.services")}</TabsTrigger>
           <TabsTrigger value="presets">{t("templates.presets")}</TabsTrigger>
+          <TabsTrigger value="groups">{t("group.title")}</TabsTrigger>
         </TabsList>
         <TabsContent value="services">
           <ServiceTemplates />
         </TabsContent>
         <TabsContent value="presets">
           <UserPresets />
+        </TabsContent>
+        <TabsContent value="groups">
+          <SubscriptionGroups />
         </TabsContent>
       </Tabs>
     </div>

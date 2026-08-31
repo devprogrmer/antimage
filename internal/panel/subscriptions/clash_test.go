@@ -239,13 +239,32 @@ func TestClashRenderer_UnsupportedProtocol(t *testing.T) {
 			NodeName:    "Unknown",
 			NodeAddress: "unknown.example.com",
 			Port:        443,
-			Protocol:    "shadowsocks",
+			// WireGuard has no representation in ANY aggregated format. This
+			// used to say shadowsocks, which is now rendered.
+			Protocol: "wireguard",
 		},
 	}
 
+	// Every server is unrepresentable, so there is nothing to render and the
+	// caller is told rather than handed an empty proxy list.
 	_, _, err := r.Render(context.Background(), servers)
 	if err == nil {
-		t.Error("expected error for unsupported protocol")
+		t.Error("expected an error when NOTHING could be rendered")
+	}
+
+	// But one unrepresentable server among usable ones is skipped, not fatal.
+	body, _, err := r.Render(context.Background(), append(servers, Server{
+		NodeName: "ok", NodeAddress: "203.0.113.1", Port: 443,
+		Protocol: "vless", UUID: "u-1", TLS: true,
+	}))
+	if err != nil {
+		t.Fatalf("one unrepresentable server emptied the whole subscription: %v", err)
+	}
+	if !strings.Contains(string(body), "ok") {
+		t.Errorf("the usable server is missing:\n%s", body)
+	}
+	if strings.Contains(string(body), "Unknown") {
+		t.Errorf("the unrepresentable server was rendered anyway:\n%s", body)
 	}
 }
 

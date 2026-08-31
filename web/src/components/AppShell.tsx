@@ -7,6 +7,7 @@ import {
   Activity,
   ScrollText,
   BookMarked,
+  ShieldCheck,
   UserCircle,
   Monitor,
   Moon,
@@ -46,6 +47,11 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/", label: "nav.dashboard", icon: Gauge },
   { to: "/nodes", label: "nav.nodes", icon: Server },
+  // Fleet-wide topology, drift, PKI and SSH bootstrap. Everything inside the
+  // fleet tab is per-fleet rather than per-node, so it doesn't fit under any
+  // single node's detail page. Nav-linked rather than only reachable from a
+  // deep tab; the certificate expiry warning is a homepage-level concern.
+  { to: "/fleet", label: "fleet.title", icon: ShieldCheck, permission: "node:read" },
   { to: "/subjects", label: "nav.subjects", icon: Users },
   // Hidden without reseller:read, which the tenant role deliberately lacks:
   // every route behind it would 403, and offering a tab that can only fail is
@@ -53,7 +59,6 @@ const NAV: NavItem[] = [
   // regardless. A tenant reaches their own account through Profile instead.
   { to: "/resellers", label: "nav.resellers", icon: Building2, permission: "reseller:read" },
   { to: "/hosts", label: "nav.hosts", icon: Globe, permission: "service:read" },
-  { to: "/fleet", label: "fleet.title", icon: Server, permission: "node:read" },
   { to: "/observability", label: "observability.title", icon: Activity },
   { to: "/audit", label: "nav.audit", icon: ScrollText, permission: "audit:read" },
   { to: "/templates", label: "templates.title", icon: BookMarked },

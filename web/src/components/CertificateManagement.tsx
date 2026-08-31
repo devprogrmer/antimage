@@ -23,11 +23,14 @@ interface NodeCertificate {
   node_id: number;
   node_name: string;
   subject: string;
-  not_before: number;
   not_after: number;
   serial_number: string;
   fingerprint: string;
-  status: "valid" | "expiring_soon" | "expired";
+  enrolled_at: number;
+  // The backend also reports "unknown" for a node whose certificate the panel
+  // did not record an expiry for; the client must not render an expiry date
+  // for those rows.
+  status: "valid" | "expiring_soon" | "expired" | "unknown";
   days_until_expiry: number;
 }
 
@@ -36,6 +39,9 @@ interface CertificateStats {
   valid: number;
   expiring_soon: number;
   expired: number;
+  // Nodes enrolled before the panel started recording certificate expiry.
+  // The certificate works; nobody can say for how much longer.
+  unknown: number;
 }
 
 /**
@@ -192,22 +198,30 @@ interface CertificateCardProps {
 function CertificateCard({ certificate, mayWrite, onRevoke }: CertificateCardProps) {
   const [expanded, setExpanded] = useState(false);
 
-  // Status badge variant based on certificate status
-  const statusVariant =
+  // Status badge variant based on certificate status. "unknown" is not fatal
+  // and not fine either -- the certificate works and the panel just cannot
+  // say how much longer -- so it reads as outline, not warning or success.
+  const statusVariant: "success" | "warning" | "destructive" | "outline" =
     certificate.status === "valid"
       ? "success"
       : certificate.status === "expiring_soon"
       ? "warning"
-      : "destructive";
+      : certificate.status === "expired"
+      ? "destructive"
+      : "outline";
 
+  // Rendered via the i18n table -- an English literal here is invisible to
+  // the fa/ru/zh-CN/ar locales the panel ships.
   const expiryText =
-    certificate.days_until_expiry < 0
-      ? `Expired ${Math.abs(certificate.days_until_expiry)} days ago`
+    certificate.status === "unknown"
+      ? t("certificates.expiryUnknown")
+      : certificate.days_until_expiry < 0
+      ? t("certificates.expiredDaysAgo", { days: String(Math.abs(certificate.days_until_expiry)) })
       : certificate.days_until_expiry === 0
       ? t("certificates.expiresToday")
       : certificate.days_until_expiry === 1
       ? t("certificates.expiresTomorrow")
-      : `Expires in ${certificate.days_until_expiry} days`;
+      : t("certificates.expiresInDays", { days: String(certificate.days_until_expiry) });
 
   return (
     <div
@@ -230,7 +244,11 @@ function CertificateCard({ certificate, mayWrite, onRevoke }: CertificateCardPro
 
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <dt className="text-muted-foreground">{t("certificates.validUntil")}:</dt>
-            <dd className="font-mono">{formatTimestamp(certificate.not_after)}</dd>
+            {/* Rendering formatTimestamp(0) would print the Unix epoch as a
+                real date, which reads as a certificate that expired in 1970. */}
+            <dd className="font-mono">
+              {certificate.status === "unknown" ? "—" : formatTimestamp(certificate.not_after)}
+            </dd>
             <dt className="text-muted-foreground">{t("certificates.expiry")}:</dt>
             <dd
               className={`font-medium ${
@@ -270,7 +288,11 @@ function CertificateCard({ certificate, mayWrite, onRevoke }: CertificateCardPro
           </Button>
         </div>
 
-        {mayWrite && certificate.status !== "expired" && (
+        {/* Revocation is still offered when the certificate has expired: the
+            fingerprint is what mTLS accepts, and it stays in the allow-list
+            until this button clears it. An expired certificate whose row is
+            never revoked is a stale allow-list entry, not a locked-out node. */}
+        {mayWrite && (
           <Button
             size="sm"
             variant="destructive"

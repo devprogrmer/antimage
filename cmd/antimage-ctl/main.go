@@ -27,6 +27,7 @@ Commands:
   create-admin   USERNAME PASSWORD ROLE   create an admin (roles: super_admin, admin, reseller, readonly)
   reset-password USERNAME PASSWORD        set a new password and revoke that admin's sessions
   list-admins                             list admins with their roles
+  set-delete-cap USERNAME BYTES|none      refuse this admin deletion of a customer past this much traffic
   enroll-token   NODE_ID                  print a single-use enrollment token
   backup         DEST.db                  write a consistent database copy
   version                                 print the version
@@ -86,6 +87,17 @@ func dispatch(ctx context.Context, s *store.Store, args []string, out *os.File) 
 
 	case "list-admins":
 		return listAdmins(ctx, s, out)
+
+	case "set-delete-cap":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: set-delete-cap USERNAME BYTES|none")
+		}
+		shown, err := setDeleteCap(ctx, s, args[1], args[2])
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "delete cap for %q is now %s\n", args[1], shown)
+		return nil
 
 	case "enroll-token":
 		if len(args) != 2 {

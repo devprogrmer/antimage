@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -20,10 +21,26 @@ func (r *ClashRenderer) Render(ctx context.Context, servers []Server) ([]byte, s
 	var proxies []map[string]interface{}
 	for _, srv := range servers {
 		proxy, err := r.renderServer(srv)
+		// A protocol this format cannot express is SKIPPED, not fatal. The
+		// loop used to abort the whole document, so a user holding one VLESS
+		// inbound and one WireGuard inbound received an empty subscription --
+		// and nothing anywhere said why. The per-inbound view in the panel is
+		// where the omission is explained.
+		if errors.Is(err, ErrNotRepresentable) {
+			continue
+		}
 		if err != nil {
 			return nil, "", fmt.Errorf("render server %s: %w", srv.Label(), err)
 		}
 		proxies = append(proxies, proxy)
+	}
+
+	// Nothing this format can express. Saying so beats a valid YAML document
+	// with an empty proxy list, which gives the user nothing and explains
+	// nothing.
+	if len(proxies) == 0 {
+		return nil, "", fmt.Errorf(
+			"none of this subject's inbounds can be expressed in a Clash configuration")
 	}
 
 	config := map[string]interface{}{
@@ -48,9 +65,14 @@ func (r *ClashRenderer) renderServer(srv Server) (map[string]interface{}, error)
 	case "trojan":
 		return r.renderTrojan(srv), nil
 	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", srv.Protocol)
+		return nil, ErrNotRepresentable
 	}
 }
+
+// ErrNotRepresentable signals a protocol Clash cannot express. The renderer
+// skips these rather than aborting, so the operator still receives a valid
+// document for the protocols Clash does understand.
+var ErrNotRepresentable = fmt.Errorf("protocol not representable in this format")
 
 // renderVLESS generates a Clash VLESS proxy.
 func (r *ClashRenderer) renderVLESS(srv Server) map[string]interface{} {

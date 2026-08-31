@@ -11,10 +11,12 @@ import (
 	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/store"
@@ -23,6 +25,15 @@ import (
 
 // NodeCertLifetime is one year; agents auto-renew at the halfway mark.
 const NodeCertLifetime = 365 * 24 * time.Hour
+
+// NodeCommonName is the subject the CA puts in a node certificate.
+//
+// One definition because two places need to agree on it: SignNodeCert writes
+// it, and the certificates API renders it for display. The panel does not keep
+// the certificates it signs, so the displayed subject is reconstructed -- and a
+// reconstruction that drifts from what was signed is a subject that quietly
+// stops matching the certificate on the host.
+func NodeCommonName(nodeID int64) string { return strconv.FormatInt(nodeID, 10) }
 
 const caLifetime = 10 * 365 * 24 * time.Hour
 
@@ -42,6 +53,21 @@ func (c *CA) CertDER() []byte { return c.certDER }
 func (c *CA) FingerprintSHA256() string {
 	sum := sha256.Sum256(c.certDER)
 	return hex.EncodeToString(sum[:])
+}
+
+// Certificate exposes the CA's own certificate for display.
+//
+// Returned rather than copied field by field because the caller wants several
+// unrelated details of it (subject, validity, serial) and a getter per field
+// would have to grow every time the UI shows one more. Callers must not mutate
+// it; x509.Certificate has no copy helper, and the alternative -- re-parsing
+// certDER on every read -- costs more than the discipline is worth.
+func (c *CA) Certificate() *x509.Certificate { return c.cert }
+
+// CertPEM is the CA certificate in the form an operator can paste elsewhere:
+// into a client's trust store, a curl --cacert, another tool's config.
+func (c *CA) CertPEM() string {
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.certDER}))
 }
 
 // LoadOrCreateCA reads the CA, generating one on first run. The private key
@@ -146,7 +172,7 @@ func (c *CA) SignNodeCert(csrDER []byte, nodeID int64, now time.Time) ([]byte, s
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: fmt.Sprintf("%d", nodeID)},
+		Subject:      pkix.Name{CommonName: NodeCommonName(nodeID)},
 		NotBefore:    now.Add(-5 * time.Minute),
 		NotAfter:     now.Add(-5 * time.Minute).Add(NodeCertLifetime),
 		KeyUsage:     x509.KeyUsageDigitalSignature,

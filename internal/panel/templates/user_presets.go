@@ -21,11 +21,14 @@ import (
 // convention each route happened to use. Nothing consumed these endpoints when
 // the tags were added, which is the only cheap moment to fix a wire format.
 type UserPreset struct {
-	ID                     int64           `json:"id"`
-	Name                   string          `json:"name"`
-	Description            string          `json:"description"`
-	QuotaBytes             *int64          `json:"quota_bytes"`
-	ValidityDays           *int            `json:"validity_days"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	QuotaBytes   *int64 `json:"quota_bytes"`
+	ValidityDays *int   `json:"validity_days"`
+	// OnHold sells the plan without starting it: ValidityDays counts from the
+	// customer's first use rather than from creation.
+	OnHold                 bool            `json:"on_hold"`
 	AutoAssignServicesJSON json.RawMessage `json:"auto_assign_services"`
 	AutoAssignNodeTagsJSON json.RawMessage `json:"auto_assign_node_tags"`
 	IsPublic               bool            `json:"is_public"`
@@ -39,6 +42,7 @@ type CreatePresetInput struct {
 	Description            string
 	QuotaBytes             *int64
 	ValidityDays           *int
+	OnHold                 bool
 	AutoAssignServicesJSON json.RawMessage
 	AutoAssignNodeTagsJSON json.RawMessage
 	IsPublic               bool
@@ -49,6 +53,7 @@ type UpdatePresetInput struct {
 	Description            *string
 	QuotaBytes             **int64
 	ValidityDays           **int
+	OnHold                 *bool
 	AutoAssignServicesJSON *json.RawMessage
 	AutoAssignNodeTagsJSON *json.RawMessage
 	IsPublic               *bool
@@ -56,7 +61,7 @@ type UpdatePresetInput struct {
 
 func ListPresets(ctx context.Context, db *store.Store, actor rbac.Actor) ([]UserPreset, error) {
 	query := `
-		SELECT id, name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at
+		SELECT id, name, description, quota_bytes, validity_days, on_hold, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at
 		FROM user_presets
 		WHERE is_public = 1 OR created_by = ?
 		ORDER BY name
@@ -72,7 +77,7 @@ func ListPresets(ctx context.Context, db *store.Store, actor rbac.Actor) ([]User
 	for rows.Next() {
 		var p UserPreset
 		var servicesRaw, tagsRaw string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.OnHold, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan preset: %w", err)
 		}
 		p.AutoAssignServicesJSON = json.RawMessage(servicesRaw)
@@ -104,11 +109,11 @@ func CreatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, input 
 
 		var servicesRaw, tagsRaw string
 		err := tx.QueryRowContext(ctx, `
-			INSERT INTO user_presets (name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			RETURNING id, name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at
-		`, input.Name, input.Description, input.QuotaBytes, input.ValidityDays, servicesJSON, tagsJSON, input.IsPublic, actor.AdminID, now, now).
-			Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+			INSERT INTO user_presets (name, description, quota_bytes, validity_days, on_hold, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			RETURNING id, name, description, quota_bytes, validity_days, on_hold, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at
+		`, input.Name, input.Description, input.QuotaBytes, input.ValidityDays, input.OnHold, servicesJSON, tagsJSON, input.IsPublic, actor.AdminID, now, now).
+			Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.OnHold, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
 
 		if err != nil {
 			return fmt.Errorf("insert preset: %w", err)
@@ -133,10 +138,10 @@ func GetPreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int64)
 	var p UserPreset
 	var servicesRaw, tagsRaw string
 	err := db.Read().QueryRowContext(ctx, `
-		SELECT id, name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at
+		SELECT id, name, description, quota_bytes, validity_days, on_hold, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at
 		FROM user_presets
 		WHERE id = ? AND (is_public = 1 OR created_by = ?)
-	`, id, actor.AdminID).Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+	`, id, actor.AdminID).Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.OnHold, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return UserPreset{}, fmt.Errorf("preset not found or access denied")
@@ -192,6 +197,10 @@ func UpdatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int
 			updates = append(updates, "validity_days = ?")
 			args = append(args, *input.ValidityDays)
 		}
+		if input.OnHold != nil {
+			updates = append(updates, "on_hold = ?")
+			args = append(args, *input.OnHold)
+		}
 		if input.AutoAssignServicesJSON != nil {
 			updates = append(updates, "auto_assign_services_json = ?")
 			args = append(args, string(*input.AutoAssignServicesJSON))
@@ -214,10 +223,10 @@ func UpdatePreset(ctx context.Context, db *store.Store, actor rbac.Actor, id int
 		args = append(args, now)
 		args = append(args, id)
 
-		query := "UPDATE user_presets SET " + strings.Join(updates, ", ") + " WHERE id = ? RETURNING id, name, description, quota_bytes, validity_days, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at"
+		query := "UPDATE user_presets SET " + strings.Join(updates, ", ") + " WHERE id = ? RETURNING id, name, description, quota_bytes, validity_days, on_hold, auto_assign_services_json, auto_assign_node_tags_json, is_public, created_by, created_at, updated_at"
 
 		var servicesRaw, tagsRaw string
-		err = tx.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.Name, &p.Description, &p.QuotaBytes, &p.ValidityDays, &p.OnHold, &servicesRaw, &tagsRaw, &p.IsPublic, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("update preset: %w", err)
 		}

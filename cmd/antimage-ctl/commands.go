@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -173,4 +174,56 @@ func backup(ctx context.Context, s *store.Store, destination string) error {
 		return fmt.Errorf("vacuum into %s: %w", destination, err)
 	}
 	return nil
+}
+
+// setDeleteCap limits how much traffic a customer may have carried before this
+// admin is refused permission to delete them.
+//
+// A reseller is billed on their customers' traffic, and usage rows cascade with
+// the subject -- so deleting a heavy user before settlement destroys the debt
+// along with the evidence. "none" removes the cap, which is the default every
+// admin has.
+//
+// Lives here rather than behind an HTTP route because admin management is CLI
+// only in this panel: there is no create-admin endpoint either, and adding one
+// route for the cap alone would put half of admin management on the web and
+// half on the terminal.
+func setDeleteCap(ctx context.Context, s *store.Store, username, capArg string) (string, error) {
+	var capBytes any
+	shown := "no cap"
+	if capArg != "none" {
+		n, err := strconv.ParseInt(capArg, 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("cap must be a byte count or \"none\": %w", err)
+		}
+		if n < 0 {
+			return "", errors.New("cap cannot be negative; use \"none\" to remove it")
+		}
+		// 0 is deliberately allowed: it means "may not delete a customer who
+		// has used anything at all", which is a real setting for an untrusted
+		// reseller.
+		capBytes = n
+		shown = fmt.Sprintf("%d bytes", n)
+	}
+
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE admins SET delete_cap_bytes = ? WHERE username = ?`,
+			capBytes, username)
+		if err != nil {
+			return fmt.Errorf("set delete cap: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("no admin named %q", username)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return shown, nil
 }

@@ -33,6 +33,14 @@ type Server struct {
 	SpiderX       string
 	Flow          string
 	AllowInsecure bool
+
+	// Shadowsocks and Hysteria2 additions carried in the same Server type so
+	// aggregating helpers do not need per-protocol variants.
+	Method       string // Shadowsocks cipher
+	Obfs         string // Hysteria2 obfuscation type
+	ObfsPassword string // Hysteria2 obfuscation password
+	UpMbps       int    // Hysteria2 upstream bandwidth hint
+	DownMbps     int    // Hysteria2 downstream bandwidth hint
 }
 
 // Label is the name shown in a client. A host remark wins over the node name.

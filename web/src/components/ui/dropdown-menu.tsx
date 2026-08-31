@@ -67,6 +67,34 @@ export function DropdownMenuSeparator({
   );
 }
 
+/**
+ * A plain action item. The menu shipped with only a checkbox item, so any
+ * screen wanting a list of actions had to hand-roll buttons in a floating div.
+ *
+ * variant="destructive" is a prop rather than a caller-supplied class so the
+ * colour for "this deletes things" is decided once.
+ */
+export function DropdownMenuItem({
+  className,
+  variant = "default",
+  ...props
+}: ComponentProps<typeof DropdownMenuPrimitive.Item> & {
+  variant?: "default" | "destructive";
+}) {
+  return (
+    <DropdownMenuPrimitive.Item
+      className={cn(
+        "relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm",
+        "outline-none focus:bg-accent focus:text-accent-foreground",
+        "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        variant === "destructive" && "text-destructive focus:text-destructive",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 export function DropdownMenuCheckboxItem({
   className,
   children,

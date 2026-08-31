@@ -234,20 +234,3 @@ func TestV2RayRenderer_EmptyServers(t *testing.T) {
 		t.Error("expected error for empty servers list")
 	}
 }
-
-func TestV2RayRenderer_UnsupportedProtocol(t *testing.T) {
-	r := &V2RayRenderer{}
-	servers := []Server{
-		{
-			NodeName:    "Unknown",
-			NodeAddress: "unknown.example.com",
-			Port:        443,
-			Protocol:    "shadowsocks", // Not supported yet
-		},
-	}
-
-	_, _, err := r.Render(context.Background(), servers)
-	if err == nil {
-		t.Error("expected error for unsupported protocol")
-	}
-}

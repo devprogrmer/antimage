@@ -13,10 +13,10 @@ import (
 )
 
 var allowedSettings = map[string]bool{
-	"public_url":       true,
-	"remark_template":  true,
-	"brand_name":       true,
-	"support_url":      true,
+	"public_url":        true,
+	"remark_template":   true,
+	"brand_name":        true,
+	"support_url":       true,
 	"subscription_info": true,
 }
 

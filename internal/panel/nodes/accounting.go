@@ -76,10 +76,53 @@ func IngestUsageReport(
 			if err != nil {
 				return fmt.Errorf("update subject quota usage: %w", err)
 			}
+
+			// Start the clock on a subject sold "on hold".
+			//
+			// Usage is the truest first-use signal available: the subject
+			// authenticated and moved bytes. active_connections would be
+			// narrower -- it depends on the devices path being wired for that
+			// protocol -- while every adapter reports usage, so hooking here
+			// means on-hold works for all of them rather than some.
+			//
+			// Guarded on on_hold_seconds IS NOT NULL so this is a no-op index
+			// probe for the overwhelmingly common case, and so activation
+			// happens exactly once: clearing the column in the same statement
+			// makes the transition one-way. A second delta in the same report
+			// finds nothing left to do.
+			if err := activateIfOnHold(ctx, tx, sample.SubjectID,
+				sample.UplinkBytes+sample.DownlinkBytes > 0, now); err != nil {
+				return err
+			}
 		}
 
 		return nil
 	})
+}
+
+// activateIfOnHold converts an on-hold subject into a running one: the plan it
+// was sold with starts now and ends on_hold_seconds later.
+//
+// Zero-byte deltas do NOT activate. A node reports a subject as soon as it is
+// configured, before anyone connects, and treating that as first use would
+// start every customer's clock the moment their credential reached the node --
+// which is precisely the loss on-hold exists to prevent.
+func activateIfOnHold(ctx context.Context, tx *sql.Tx, subjectID int64, used bool, now int64) error {
+	if !used {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE subjects
+		   SET expires_at        = ? + on_hold_seconds,
+		       on_hold_seconds   = NULL,
+		       status_changed_at = ?
+		 WHERE id = ?
+		   AND on_hold_seconds IS NOT NULL`,
+		now, now, subjectID)
+	if err != nil {
+		return fmt.Errorf("activate on-hold subject %d: %w", subjectID, err)
+	}
+	return nil
 }
 
 // resolveService turns a service id reported by a node into one that can be

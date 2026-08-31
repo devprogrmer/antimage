@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"time"
@@ -18,8 +19,12 @@ const EnforcementFailureThreshold = 3
 // A node triggers an alert if failed_reconcile_streak >= threshold.
 func (sw *Sweeper) checkEnforcementFailures(ctx context.Context, now time.Time) error {
 	// Query nodes with failed reconciliation streaks
+	// last_seen_at and last_error, not last_reconcile_at and
+	// last_reconcile_error: those two columns have never existed in any
+	// migration, so this query failed on every sweep and this alert had never
+	// fired. Both are nullable, so both are scanned as such.
 	rows, err := sw.store.Read().QueryContext(ctx, `
-		SELECT id, name, status, failed_reconcile_streak, last_reconcile_at, last_reconcile_error
+		SELECT id, name, status, failed_reconcile_streak, last_seen_at, last_error
 		FROM nodes
 		WHERE failed_reconcile_streak >= ?
 		  AND status NOT IN ('disabled', 'pending', 'enrolling')
@@ -33,16 +38,13 @@ func (sw *Sweeper) checkEnforcementFailures(ctx context.Context, now time.Time) 
 		var nodeID int64
 		var nodeName, status string
 		var failedStreak int
-		var lastReconcileAt int64
-		var lastError string
+		var lastSeenAt sql.NullInt64
+		var lastError sql.NullString
 
-		if err := rows.Scan(&nodeID, &nodeName, &status, &failedStreak, &lastReconcileAt, &lastError); err != nil {
+		if err := rows.Scan(&nodeID, &nodeName, &status, &failedStreak, &lastSeenAt, &lastError); err != nil {
 			log.Printf("[observability] scan enforcement failure node: %v", err)
 			continue
 		}
-
-		lastReconcile := time.Unix(lastReconcileAt, 0).UTC()
-		timeSinceFailure := now.Sub(lastReconcile)
 
 		// Severity based on streak length
 		severity := SeverityWarning
@@ -54,9 +56,16 @@ func (sw *Sweeper) checkEnforcementFailures(ctx context.Context, now time.Time) 
 			"node_name":               nodeName,
 			"status":                  status,
 			"failed_reconcile_streak": failedStreak,
-			"last_reconcile_at":       lastReconcile.Format(time.RFC3339),
-			"time_since_failure":      timeSinceFailure.String(),
-			"last_error":              lastError,
+		}
+		// A node that has never checked in has no last_seen_at, and an absent
+		// timestamp must not be reported as the epoch.
+		if lastSeenAt.Valid {
+			seen := time.Unix(lastSeenAt.Int64, 0).UTC()
+			metadata["last_seen_at"] = seen.Format(time.RFC3339)
+			metadata["time_since_last_seen"] = now.Sub(seen).String()
+		}
+		if lastError.Valid && lastError.String != "" {
+			metadata["last_error"] = lastError.String
 		}
 
 		alert := Alert{
