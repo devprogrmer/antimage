@@ -83,8 +83,14 @@ func TestRealRuntimeOpenVPNParsesTheGeneratedConfig(t *testing.T) {
 	}
 
 	confPath := filepath.Join(dir, confName)
+	// No --test-crypto: that flag forces a static-key self-test regardless of
+	// the config's tls-server directive, so on OpenVPN 2.7 it rejects a TLS
+	// config with "You must define key file (--secret)". Without it, OpenVPN
+	// parses the config and reports any Options error before touching the
+	// network; a subsequent tun/bind failure without privileges is what the
+	// "logged rather than asserted" note below covers.
 	out, err := exec.CommandContext(context.Background(),
-		bin, "--config", confPath, "--test-crypto").CombinedOutput()
+		bin, "--config", confPath).CombinedOutput()
 	body := string(out)
 	t.Logf("openvpn said:\n%s", strings.TrimSpace(body))
 
