@@ -10,13 +10,15 @@ import { NodeDetail } from "@/routes/NodeDetail";
 import { Observability } from "@/routes/Observability";
 import { Audit } from "@/routes/Audit";
 import { Templates } from "@/routes/Templates";
-import { FleetManagement } from "@/routes/FleetManagement";
-import { Access } from "@/routes/Access";
 import { Subjects } from "@/routes/Subjects";
 import { SubjectDetail } from "@/routes/SubjectDetail";
 import { Profile } from "@/routes/Profile";
 import { Resellers } from "@/routes/Resellers";
 import { ResellerDetail } from "@/routes/ResellerDetail";
+import { Hosts } from "@/routes/Hosts";
+import { Settings } from "@/routes/Settings";
+import { Admins } from "@/routes/Admins";
+import { FleetManagement } from "@/routes/FleetManagement";
 import { api } from "@/lib/api";
 import { can, useSession } from "@/lib/session";
 import type { Session } from "@/lib/session";
@@ -85,6 +87,14 @@ export default function App() {
             </RequirePermission>
           }
         />
+        <Route
+          path="fleet"
+          element={
+            <RequirePermission session={session.data} permission="node:read">
+              <FleetManagement />
+            </RequirePermission>
+          }
+        />
         <Route path="observability" element={<Observability />} />
         <Route
           path="audit"
@@ -97,8 +107,23 @@ export default function App() {
         {/* Ownership-scoped in the service layer rather than behind a
             permission, so every signed-in operator has their own. */}
         <Route path="templates" element={<Templates />} />
-        <Route path="fleet" element={<FleetManagement />} />
-        <Route path="access" element={<Access />} />
+        <Route
+          path="hosts"
+          element={
+            <RequirePermission session={session.data} permission="service:read">
+              <Hosts />
+            </RequirePermission>
+          }
+        />
+        <Route path="settings" element={<Settings />} />
+        <Route
+          path="admins"
+          element={
+            <RequirePermission session={session.data} permission="admin:manage">
+              <Admins />
+            </RequirePermission>
+          }
+        />
         <Route path="profile" element={<Profile />} />
         {/* An unknown path is an operator's typo or a stale bookmark, not an
             error worth a screen of its own. */}

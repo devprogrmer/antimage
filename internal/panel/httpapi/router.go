@@ -229,6 +229,7 @@ func NewRouter(d Deps) http.Handler {
 			// nothing could show what a node is already serving.
 			private.Get("/nodes/{nodeID}/services", d.handleListServices)
 			private.Post("/nodes/{nodeID}/services", d.handleCreateService)
+			private.Get("/services", d.handleListAllServices)
 
 			// Egress. Node-scoped, because an outbound is a path off one host
 			// and a routing rule selects between the outbounds that host has.
@@ -287,12 +288,14 @@ func NewRouter(d Deps) http.Handler {
 			private.Delete("/subjects/{subjectID}", d.handleDeleteSubject)
 			private.Get("/subjects/{subjectID}/credentials/{kind}", d.handleRevealCredential)
 			private.Post("/subjects/{subjectID}/credentials/{kind}/rotate", d.handleRotateCredential)
-			// Client configurations and the subscription link. The configs
-			// endpoint is the operator's per-inbound view, including the
-			// protocols no aggregated subscription format can carry.
+			// Master's subscription reader (V2Ray + Clash + sing-box aggregated
+			// URLs consumed by the SubjectDetail page).
+			private.Get("/subjects/{subjectID}/subscription", d.handleSubjectSubscription)
+			private.Post("/subjects/{subjectID}/subscription/revoke", d.handleRevokeSubjectSubscription)
+
+			// Per-inbound client configs, including protocols no aggregated
+			// subscription format can carry (WireGuard native, OpenVPN, etc).
 			private.Get("/subjects/{subjectID}/configs", d.handleSubjectConfigs)
-			private.Post("/subjects/{subjectID}/subscription", d.handleIssueSubscription)
-			private.Delete("/subjects/{subjectID}/subscription", d.handleRevokeSubscription)
 			private.Post("/qr", d.handleQRCode)
 
 			// Subscription groups: the named protocol selection a subject's
@@ -341,6 +344,19 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/deployments/{id}/rollback", d.handleDeploymentRollback)
 
 			private.Get("/events", d.handleEvents)
+
+			private.Get("/hosts", d.handleListHosts)
+			private.Post("/hosts", d.handleCreateHost)
+			private.Put("/hosts/{hostID}", d.handleUpdateHost)
+			private.Delete("/hosts/{hostID}", d.handleDeleteHost)
+
+			private.Get("/settings", d.handleGetSettings)
+			private.Put("/settings", d.handlePutSettings)
+			private.Get("/backup", d.handleDownloadBackup)
+
+			private.Get("/admins", d.handleListAdmins)
+			private.Post("/admins", d.handleCreateAdmin)
+			private.Delete("/admins/{adminID}", d.handleDeleteAdmin)
 		})
 	})
 

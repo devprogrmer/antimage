@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -29,7 +30,7 @@ func (r *ClashRenderer) Render(ctx context.Context, servers []Server) ([]byte, s
 			continue
 		}
 		if err != nil {
-			return nil, "", fmt.Errorf("render server %s: %w", srv.NodeName, err)
+			return nil, "", fmt.Errorf("render server %s: %w", srv.Label(), err)
 		}
 		proxies = append(proxies, proxy)
 	}
@@ -75,7 +76,7 @@ func (r *ClashRenderer) renderServer(srv Server) (map[string]interface{}, error)
 // renderVLESS generates a Clash VLESS proxy.
 func (r *ClashRenderer) renderVLESS(srv Server) map[string]interface{} {
 	proxy := map[string]interface{}{
-		"name":   srv.NodeName,
+		"name":   srv.Label(),
 		"type":   "vless",
 		"server": srv.NodeAddress,
 		"port":   srv.Port,
@@ -90,37 +91,32 @@ func (r *ClashRenderer) renderVLESS(srv Server) map[string]interface{} {
 	}
 	proxy["network"] = network
 
-	// TLS
-	if srv.TLS {
-		proxy["tls"] = true
-		proxy["skip-cert-verify"] = false
-		if srv.SNI != "" {
-			proxy["servername"] = srv.SNI
-		}
-	}
+	applyClashSecurity(proxy, srv)
 
-	// ALPN
 	if len(srv.ALPN) > 0 {
 		proxy["alpn"] = srv.ALPN
 	}
+	if srv.Flow != "" {
+		proxy["flow"] = srv.Flow
+	}
 
-	// WebSocket options
 	if network == "ws" {
 		wsOpts := make(map[string]interface{})
 		if srv.Path != "" {
 			wsOpts["path"] = srv.Path
+		}
+		if srv.Host != "" {
+			wsOpts["headers"] = map[string]interface{}{"Host": srv.Host}
 		}
 		if len(wsOpts) > 0 {
 			proxy["ws-opts"] = wsOpts
 		}
 	}
 
-	// gRPC options
 	if network == "grpc" && srv.Path != "" {
-		grpcOpts := map[string]interface{}{
-			"grpc-service-name": srv.Path,
+		proxy["grpc-opts"] = map[string]interface{}{
+			"grpc-service-name": strings.TrimPrefix(srv.Path, "/"),
 		}
-		proxy["grpc-opts"] = grpcOpts
 	}
 
 	return proxy
@@ -129,7 +125,7 @@ func (r *ClashRenderer) renderVLESS(srv Server) map[string]interface{} {
 // renderVMess generates a Clash VMess proxy.
 func (r *ClashRenderer) renderVMess(srv Server) map[string]interface{} {
 	proxy := map[string]interface{}{
-		"name":    srv.NodeName,
+		"name":    srv.Label(),
 		"type":    "vmess",
 		"server":  srv.NodeAddress,
 		"port":    srv.Port,
@@ -185,7 +181,7 @@ func (r *ClashRenderer) renderVMess(srv Server) map[string]interface{} {
 // renderTrojan generates a Clash Trojan proxy.
 func (r *ClashRenderer) renderTrojan(srv Server) map[string]interface{} {
 	proxy := map[string]interface{}{
-		"name":     srv.NodeName,
+		"name":     srv.Label(),
 		"type":     "trojan",
 		"server":   srv.NodeAddress,
 		"port":     srv.Port,
@@ -207,4 +203,40 @@ func (r *ClashRenderer) renderTrojan(srv Server) map[string]interface{} {
 	}
 
 	return proxy
+}
+
+func applyClashSecurity(proxy map[string]interface{}, srv Server) {
+	sec := srv.security()
+	switch sec {
+	case "tls":
+		proxy["tls"] = true
+		proxy["skip-cert-verify"] = srv.AllowInsecure
+		if srv.SNI != "" {
+			proxy["servername"] = srv.SNI
+		}
+		if srv.Fingerprint != "" {
+			proxy["client-fingerprint"] = srv.Fingerprint
+		}
+	case "reality":
+		proxy["tls"] = true
+		proxy["skip-cert-verify"] = true
+		if srv.SNI != "" {
+			proxy["servername"] = srv.SNI
+		}
+		fp := srv.Fingerprint
+		if fp == "" {
+			fp = "chrome"
+		}
+		proxy["client-fingerprint"] = fp
+		reality := map[string]interface{}{}
+		if srv.PublicKey != "" {
+			reality["public-key"] = srv.PublicKey
+		}
+		if srv.ShortID != "" {
+			reality["short-id"] = srv.ShortID
+		}
+		if len(reality) > 0 {
+			proxy["reality-opts"] = reality
+		}
+	}
 }

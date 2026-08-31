@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/amyrm/antimage/internal/panel/resellers"
 	"github.com/amyrm/antimage/internal/panel/service"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/panel/subjects"
@@ -177,6 +179,14 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		b.cmdUsers(ctx, msg)
 	case "/user":
 		b.cmdUser(ctx, msg, arg)
+	case "/create":
+		b.cmdCreate(ctx, msg, arg)
+	case "/enable":
+		b.cmdSetEnabled(ctx, msg, arg, true)
+	case "/disable":
+		b.cmdSetEnabled(ctx, msg, arg, false)
+	case "/extend":
+		b.cmdExtend(ctx, msg, arg)
 	case "/balance":
 		b.cmdBalance(ctx, msg)
 	case "/config":
@@ -269,6 +279,10 @@ func (b *Bot) cmdHelp(ctx context.Context, msg *Message) {
 		"",
 		"/users        list your users",
 		"/user <name>  details for one user",
+		"/create <name> [days] [quota_gb]  create a user",
+		"/enable <name>   enable a user",
+		"/disable <name>  disable a user",
+		"/extend <name> <days>  extend expiry",
 		"/balance      your credit balance",
 		"/config <name>  subscription link for one user",
 		"/help         this message",
@@ -390,6 +404,14 @@ func (b *Bot) replyServiceError(ctx context.Context, msg *Message, what string, 
 	case errors.Is(err, service.ErrNoReseller):
 		b.reply(ctx, msg.Chat.ID,
 			"This account is not a reseller, so it has no credit balance.")
+	case errors.Is(err, subjects.ErrNameTaken):
+		b.reply(ctx, msg.Chat.ID, "A user with that name already exists.")
+	case errors.Is(err, resellers.ErrInsufficientCredit):
+		b.reply(ctx, msg.Chat.ID, "Insufficient credit.")
+	case errors.Is(err, resellers.ErrLimitExceeded):
+		b.reply(ctx, msg.Chat.ID, "Reseller limit exceeded.")
+	case errors.Is(err, resellers.ErrDisabled):
+		b.reply(ctx, msg.Chat.ID, "This reseller account is disabled.")
 	case errors.Is(err, rbac.ErrForbidden):
 		b.reply(ctx, msg.Chat.ID, "Your role does not allow that.")
 	default:
@@ -558,4 +580,157 @@ func (b *Bot) cmdConfig(ctx context.Context, msg *Message, name string) {
 	lines = append(lines, "",
 		"Anyone with this link can download the config. Treat it as a password.")
 	b.reply(ctx, msg.Chat.ID, strings.Join(lines, "\n"))
+}
+
+func (b *Bot) cmdCreate(ctx context.Context, msg *Message, arg string) {
+	name, days, quotaGB, errMsg := parseCreateArgs(arg)
+	if errMsg != "" {
+		b.reply(ctx, msg.Chat.ID, errMsg)
+		return
+	}
+	actor, ok := b.requireActor(ctx, msg)
+	if !ok {
+		return
+	}
+	if b.subj == nil {
+		b.reply(ctx, msg.Chat.ID, "Something went wrong. Try again shortly.")
+		return
+	}
+	sa := b.svcActor(actor, msg)
+	in := subjects.CreateInput{Name: name}
+	if days > 0 {
+		t := b.now().Add(time.Duration(days) * 24 * time.Hour)
+		in.ExpiresAt = &t
+	}
+	if quotaGB > 0 {
+		q := int64(quotaGB) * 1024 * 1024 * 1024
+		in.QuotaBytes = &q
+	}
+	var allocated int64
+	if in.QuotaBytes != nil {
+		allocated = *in.QuotaBytes
+	}
+
+	bal, balErr := b.subj.Balance(ctx, sa)
+	switch {
+	case balErr == nil:
+		out, err := b.subj.Provision(ctx, sa, resellers.ProvisionInput{
+			ResellerID:     bal.ResellerID,
+			Cost:           0,
+			Subject:        in,
+			QuotaBytes:     allocated,
+			IdempotencyKey: fmt.Sprintf("tg-%d-%s", msg.MessageID, name),
+		})
+		if err != nil {
+			b.replyServiceError(ctx, msg, "/create", err)
+			return
+		}
+		b.reply(ctx, msg.Chat.ID, fmt.Sprintf("Created %s (id %d).", name, out.SubjectID))
+	case errors.Is(balErr, service.ErrNoReseller):
+		id, err := b.subj.Create(ctx, sa, in)
+		if err != nil {
+			b.replyServiceError(ctx, msg, "/create", err)
+			return
+		}
+		b.reply(ctx, msg.Chat.ID, fmt.Sprintf("Created %s (id %d).", name, id))
+	default:
+		b.replyServiceError(ctx, msg, "/create", balErr)
+	}
+}
+
+func parseCreateArgs(arg string) (name string, days, quotaGB int, errMsg string) {
+	fields := strings.Fields(arg)
+	if len(fields) == 0 {
+		return "", 0, 0, "Usage: /create NAME [DAYS] [QUOTA_GB]"
+	}
+	name = fields[0]
+	if len(fields) >= 2 {
+		n, err := strconv.Atoi(fields[1])
+		if err != nil || n < 0 {
+			return "", 0, 0, "DAYS must be a non-negative integer."
+		}
+		days = n
+	}
+	if len(fields) >= 3 {
+		n, err := strconv.Atoi(fields[2])
+		if err != nil || n < 0 {
+			return "", 0, 0, "QUOTA_GB must be a non-negative integer."
+		}
+		quotaGB = n
+	}
+	if len(fields) > 3 {
+		return "", 0, 0, "Usage: /create NAME [DAYS] [QUOTA_GB]"
+	}
+	return name, days, quotaGB, ""
+}
+
+func (b *Bot) cmdSetEnabled(ctx context.Context, msg *Message, name string, on bool) {
+	verb := "/disable"
+	if on {
+		verb = "/enable"
+	}
+	if strings.TrimSpace(name) == "" {
+		b.reply(ctx, msg.Chat.ID, "Usage: "+verb+" NAME")
+		return
+	}
+	actor, ok := b.requireActor(ctx, msg)
+	if !ok {
+		return
+	}
+	if b.subj == nil {
+		b.reply(ctx, msg.Chat.ID, "Something went wrong. Try again shortly.")
+		return
+	}
+	sa := b.svcActor(actor, msg)
+	s, err := b.subj.FindByName(ctx, sa, name)
+	if err != nil {
+		b.replyServiceError(ctx, msg, verb, err)
+		return
+	}
+	if err := b.subj.SetEnabled(ctx, sa, s.ID, on); err != nil {
+		b.replyServiceError(ctx, msg, verb, err)
+		return
+	}
+	if on {
+		b.reply(ctx, msg.Chat.ID, fmt.Sprintf("Enabled %s.", s.Name))
+	} else {
+		b.reply(ctx, msg.Chat.ID, fmt.Sprintf("Disabled %s.", s.Name))
+	}
+}
+
+func (b *Bot) cmdExtend(ctx context.Context, msg *Message, arg string) {
+	fields := strings.Fields(arg)
+	if len(fields) != 2 {
+		b.reply(ctx, msg.Chat.ID, "Usage: /extend NAME DAYS")
+		return
+	}
+	days, err := strconv.Atoi(fields[1])
+	if err != nil || days < 1 {
+		b.reply(ctx, msg.Chat.ID, "DAYS must be a positive integer.")
+		return
+	}
+	actor, ok := b.requireActor(ctx, msg)
+	if !ok {
+		return
+	}
+	if b.subj == nil {
+		b.reply(ctx, msg.Chat.ID, "Something went wrong. Try again shortly.")
+		return
+	}
+	sa := b.svcActor(actor, msg)
+	s, err := b.subj.FindByName(ctx, sa, fields[0])
+	if err != nil {
+		b.replyServiceError(ctx, msg, "/extend", err)
+		return
+	}
+	base := b.now()
+	if s.ExpiresAt != nil && s.ExpiresAt.After(base) {
+		base = *s.ExpiresAt
+	}
+	exp := base.Add(time.Duration(days) * 24 * time.Hour)
+	if err := b.subj.Update(ctx, sa, s.ID, subjects.UpdateInput{ExpiresAt: &exp}); err != nil {
+		b.replyServiceError(ctx, msg, "/extend", err)
+		return
+	}
+	b.reply(ctx, msg.Chat.ID, fmt.Sprintf("Extended %s to %s.", s.Name, exp.Format(time.RFC3339)))
 }

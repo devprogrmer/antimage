@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/subjects"
@@ -88,7 +89,7 @@ func (d Deps) handleSubjectConfigs(w http.ResponseWriter, r *http.Request) {
 	resp := configsResponse{
 		SubjectID: subj.ID,
 		Name:      subj.Name,
-		Status:    string(subj.Status(d.now())),
+		Status:    subjectStatusString(subj),
 		QuotaUsed: 0,
 	}
 	if subj.ExpiresAt != nil {
@@ -276,4 +277,19 @@ func (d Deps) buildSubjectConfigs(
 		configs = append(configs, cfg)
 	}
 	return configs, skipped, rows.Err()
+}
+
+// subjectStatusString derives the operator-visible status from the columns
+// that already govern service. Kept in one place so every response agrees;
+// a stored status would be a second source of truth for the same question.
+func subjectStatusString(s *subjects.Subject) string {
+	switch {
+	case s.FrozenAt != nil:
+		return "frozen"
+	case !s.Enabled:
+		return "disabled"
+	case s.ExpiresAt != nil && !s.ExpiresAt.IsZero() && s.ExpiresAt.Before(time.Now()):
+		return "expired"
+	}
+	return "active"
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/amyrm/antimage/internal/panel/resellers"
 	"github.com/amyrm/antimage/internal/panel/service"
 	"github.com/amyrm/antimage/internal/panel/subjects"
-	"github.com/amyrm/antimage/internal/panel/templates"
 )
 
 // subjectDTO is the wire shape of a subject.
@@ -24,34 +23,28 @@ import (
 // captures response bodies, and in every browser cache. They are fetched one
 // at a time through an explicitly authorized, audited reveal.
 type subjectDTO struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Enabled   bool   `json:"enabled"`
-	ExpiresAt *int64 `json:"expires_at"`
-	ExpiredAt *int64 `json:"expired_at"`
-	// Frozen state, which the DTO did not carry at all. The detail screen
-	// gated its Freeze/Unfreeze buttons on `enabled` for want of anything
-	// better -- and freezing does not change `enabled`, so once a subject was
-	// frozen the Unfreeze button never appeared and the operator could not
-	// undo their own revocation from the UI.
-	FrozenAt     *int64 `json:"frozen_at"`
-	FrozenReason string `json:"frozen_reason,omitempty"`
-	// Status is DERIVED from the fields above, not stored. It is sent so the
-	// UI renders one agreed word rather than each screen re-deriving its own
-	// precedence from four columns and disagreeing about which wins.
-	Status string `json:"status"`
-	// OnHoldSeconds is how long the plan runs once it starts. Non-null means
-	// it has not started.
-	OnHoldSeconds   *int64 `json:"on_hold_seconds"`
-	StatusChangedAt *int64 `json:"status_changed_at"`
-	CreatedAt       int64  `json:"created_at"`
-	Note            string `json:"note"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	ExpiresAt      *int64 `json:"expires_at"`
+	ExpiredAt      *int64 `json:"expired_at"`
+	CreatedAt      int64  `json:"created_at"`
+	Note           string `json:"note"`
+	QuotaBytes     *int64 `json:"quota_bytes"`
+	QuotaUsedBytes int64  `json:"quota_used_bytes"`
+	Frozen         bool   `json:"frozen"`
+	MaxDevices     *int64 `json:"max_devices"`
+	MaxIPs         *int64 `json:"max_ips"`
+	MaxConnections *int64 `json:"max_connections"`
 }
 
 func toSubjectDTO(s subjects.Subject) subjectDTO {
 	dto := subjectDTO{
 		ID: s.ID, Name: s.Name, Enabled: s.Enabled,
 		CreatedAt: s.CreatedAt.Unix(), Note: s.Note,
+		QuotaBytes: s.QuotaBytes, QuotaUsedBytes: s.QuotaUsedBytes,
+		Frozen:     s.FrozenAt != nil,
+		MaxDevices: s.MaxDevices, MaxIPs: s.MaxIPs, MaxConnections: s.MaxConnections,
 	}
 	if s.ExpiresAt != nil {
 		v := s.ExpiresAt.Unix()
@@ -61,20 +54,6 @@ func toSubjectDTO(s subjects.Subject) subjectDTO {
 		v := s.ExpiredAt.Unix()
 		dto.ExpiredAt = &v
 	}
-	if s.FrozenAt != nil {
-		v := s.FrozenAt.Unix()
-		dto.FrozenAt = &v
-		dto.FrozenReason = s.FrozenReason
-	}
-	if s.OnHoldSeconds != nil {
-		v := *s.OnHoldSeconds
-		dto.OnHoldSeconds = &v
-	}
-	if s.StatusChangedAt != nil {
-		v := s.StatusChangedAt.Unix()
-		dto.StatusChangedAt = &v
-	}
-	dto.Status = string(s.Status(time.Now().UTC()))
 	return dto
 }
 
@@ -128,13 +107,6 @@ func (d Deps) writeServiceError(
 		WriteError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, rbac.ErrForbidden):
 		WriteError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
-	// 403 with the real reason, not the generic one. This refusal is not about
-	// the actor's permissions -- they hold subject:write -- it is about how much
-	// traffic this particular customer has carried, and an operator who is told
-	// "insufficient permissions" will go asking for a role change that would
-	// not help.
-	case errors.Is(err, service.ErrDeleteCapExceeded):
-		WriteError(w, http.StatusForbidden, "delete_cap_exceeded", err.Error())
 	default:
 		// Denied attempts are audited here, per invariant 9.
 		d.rejectSubject(w, r, actor, action, err)
@@ -236,15 +208,13 @@ type createSubjectRequest struct {
 	Note string `json:"note"`
 	// ExpiresAt is a unix timestamp. Null means the subject never expires.
 	ExpiresAt *int64 `json:"expires_at"`
-	// OnHoldSeconds sells the subject without starting it: no expiry yet, and
-	// the plan runs for this long from their first use. Rejected alongside
-	// ExpiresAt, because a plan cannot both end on a fixed date and not have
-	// begun.
-	OnHoldSeconds *int64 `json:"on_hold_seconds"`
-	// PresetID applies a saved plan: its quota, its validity, whether it starts
-	// on first use, and the services it auto-assigns. Anything the caller sets
-	// explicitly wins, so a plan is a starting point rather than a cage.
-	PresetID *int64 `json:"preset_id"`
+	// ExpireDays is a convenience for the UI: N days from now.
+	ExpireDays *int `json:"expire_days"`
+	// QuotaBytes is nil/0 for unlimited.
+	QuotaBytes     *int64 `json:"quota_bytes"`
+	MaxDevices     *int64 `json:"max_devices"`
+	MaxIPs         *int64 `json:"max_ips"`
+	MaxConnections *int64 `json:"max_connections"`
 	// ServiceIDs the subject may use. Each one's node has its revision bumped.
 	ServiceIDs []int64 `json:"service_ids"`
 	// Credentials to import from an existing deployment, keyed by kind.
@@ -275,36 +245,21 @@ func (d Deps) handleCreateSubject(w http.ResponseWriter, r *http.Request) {
 
 	in := subjects.CreateInput{
 		Name: req.Name, Note: req.Note,
-		ServiceIDs:  req.ServiceIDs,
-		Credentials: map[subjects.CredentialKind]string{},
+		ServiceIDs:     req.ServiceIDs,
+		Credentials:    map[subjects.CredentialKind]string{},
+		QuotaBytes:     nilIfZero(req.QuotaBytes),
+		MaxDevices:     nilIfZero(req.MaxDevices),
+		MaxIPs:         nilIfZero(req.MaxIPs),
+		MaxConnections: nilIfZero(req.MaxConnections),
 	}
-	if req.ExpiresAt != nil {
+	switch {
+	case req.ExpiresAt != nil:
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
 		in.ExpiresAt = &t
+	case req.ExpireDays != nil && *req.ExpireDays > 0:
+		t := d.now().Add(time.Duration(*req.ExpireDays) * 24 * time.Hour)
+		in.ExpiresAt = &t
 	}
-	in.OnHoldSeconds = req.OnHoldSeconds
-
-	// A plan fills in what the caller left blank.
-	//
-	// GetPreset enforces ownership -- public, or created by this admin -- so a
-	// reseller cannot apply a competitor's private plan by guessing its id, and
-	// an unknown id is refused rather than silently ignored: a subject created
-	// on no plan when one was named is a billing discrepancy, not a default.
-	if req.PresetID != nil {
-		preset, err := templates.GetPreset(r.Context(), d.Store, *actor, *req.PresetID)
-		if err != nil {
-			WriteError(w, http.StatusBadRequest, "unknown_preset", err.Error())
-			return
-		}
-		applyPreset(&in, preset)
-	}
-
-	if in.ExpiresAt != nil && in.OnHoldSeconds != nil {
-		WriteError(w, http.StatusBadRequest, "bad_request",
-			"a subject cannot be on hold and have a fixed expiry")
-		return
-	}
-
 	for kind, value := range req.Credentials {
 		k := subjects.CredentialKind(kind)
 		if err := subjects.ValidateCredential(k, value); err != nil {
@@ -320,41 +275,6 @@ func (d Deps) handleCreateSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]any{"id": subjectID})
-}
-
-// applyPreset fills in what the caller left blank from a saved plan.
-//
-// EXPLICIT VALUES WIN. A plan is the default for a sale, not a constraint on
-// it: an operator who names a plan and also sets a longer expiry means the
-// longer expiry. Overwriting what they typed would make the plan dropdown a
-// trap, because the field they had just filled in would silently revert.
-//
-// Validity is applied as one of two things, never both. A plan marked on_hold
-// contributes a DURATION that starts at first use; an ordinary one contributes
-// an expiry counted from now. That is the whole difference between the two, and
-// it is decided here rather than in the store so the store keeps its rule that
-// the pair is mutually exclusive.
-func applyPreset(in *subjects.CreateInput, p templates.UserPreset) {
-	if p.ValidityDays != nil && in.ExpiresAt == nil && in.OnHoldSeconds == nil {
-		seconds := int64(*p.ValidityDays) * 24 * 60 * 60
-		if p.OnHold {
-			in.OnHoldSeconds = &seconds
-		} else {
-			end := time.Now().UTC().Add(time.Duration(seconds) * time.Second)
-			in.ExpiresAt = &end
-		}
-	}
-	if len(in.ServiceIDs) == 0 && len(p.AutoAssignServicesJSON) > 0 {
-		var ids []int64
-		// A malformed services list is ignored rather than failing the sale:
-		// the column is free-form JSON that predates any validation, and
-		// refusing to create the customer over it would be a worse outcome
-		// than creating them with no services and letting the operator add
-		// them. The subject is still auditable either way.
-		if err := json.Unmarshal(p.AutoAssignServicesJSON, &ids); err == nil {
-			in.ServiceIDs = ids
-		}
-	}
 }
 
 type updateSubjectRequest struct {
@@ -507,4 +427,74 @@ func (d Deps) rejectSubject(
 		After: map[string]any{"reason": cause.Error()},
 	})
 	WriteError(w, http.StatusUnprocessableEntity, "validation", cause.Error())
+}
+
+func nilIfZero(v *int64) *int64 {
+	if v == nil || *v == 0 {
+		return nil
+	}
+	return v
+}
+
+func (d Deps) handleSubjectSubscription(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathInt64(r, "subjectID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectRead, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
+	token, err := subjects.EnsureToken(r.Context(), d.Store, id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not issue subscription")
+		return
+	}
+	base := d.publicBaseURL(r)
+	url := base + "/api/v1/subscribe/" + token
+	audit.BestEffort(r.Context(), d.Store, RequestID(r.Context()), d.actorAudit(actor, r), audit.Record{
+		Action: "subject.subscription", TargetType: "subject",
+		TargetID: sql.NullInt64{Int64: id, Valid: true}, Result: "ok",
+	})
+	w.Header().Set("Cache-Control", "no-store")
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"url":         url,
+		"clash_url":   url + "?format=clash",
+		"singbox_url": url + "?format=singbox",
+		"qr_url":      "/api/v1/subscribe/" + token + "/qr",
+	})
+}
+
+func (d Deps) handleRevokeSubjectSubscription(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathInt64(r, "subjectID")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid subject id")
+		return
+	}
+	if !d.authorize(w, r, actor, rbac.PermSubjectWrite, rbac.Target{Kind: rbac.TargetNone}) {
+		return
+	}
+	if !d.requireSubjectInScope(w, r, actor, id) {
+		return
+	}
+	if _, err := subjects.RevokeToken(r.Context(), d.Store, id); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not rotate subscription")
+		return
+	}
+	audit.BestEffort(r.Context(), d.Store, RequestID(r.Context()), d.actorAudit(actor, r), audit.Record{
+		Action: "subject.subscription_revoke", TargetType: "subject",
+		TargetID: sql.NullInt64{Int64: id, Valid: true}, Result: "ok",
+	})
+	w.WriteHeader(http.StatusNoContent)
 }

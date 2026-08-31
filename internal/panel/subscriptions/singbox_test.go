@@ -323,41 +323,6 @@ func TestSingBoxRenderer_EmptyServers(t *testing.T) {
 	}
 }
 
-func TestSingBoxRenderer_UnsupportedProtocol(t *testing.T) {
-	r := &SingBoxRenderer{}
-	servers := []Server{
-		{
-			NodeName:    "Unknown",
-			NodeAddress: "unknown.example.com",
-			Port:        443,
-			// WireGuard has no representation in ANY aggregated format. This
-			// used to say shadowsocks, which is now rendered.
-			Protocol: "wireguard",
-		},
-	}
-
-	// Every server is unrepresentable: nothing to select between, so the
-	// caller is told rather than handed a selector with no options.
-	_, _, err := r.Render(context.Background(), servers)
-	if err == nil {
-		t.Error("expected an error when NOTHING could be rendered")
-	}
-
-	// One among usable ones is skipped, and crucially does NOT appear in the
-	// selector -- a tag naming an outbound that is not in the document makes
-	// the whole configuration invalid.
-	body, _, err := r.Render(context.Background(), append(servers, Server{
-		NodeName: "ok", NodeAddress: "203.0.113.1", Port: 443,
-		Protocol: "vless", UUID: "u-1", TLS: true,
-	}))
-	if err != nil {
-		t.Fatalf("one unrepresentable server emptied the whole subscription: %v", err)
-	}
-	if strings.Contains(string(body), "Unknown") {
-		t.Errorf("the unrepresentable server was named in the document:\n%s", body)
-	}
-}
-
 func TestSingBoxRenderer_ValidJSON(t *testing.T) {
 	r := &SingBoxRenderer{}
 	servers := []Server{

@@ -143,7 +143,7 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 	// version selected eleven and scanned six, which is a guaranteed error
 	// even once the column names are real. subscription_token is deliberately
 	// absent: it is a credential, and a list endpoint must not hand one out.
-	baseQuery := "SELECT id, name, note, enabled, expires_at, expired_at, created_at FROM subjects WHERE " + whereClause
+	baseQuery := "SELECT id, name, note, enabled, expires_at, expired_at, created_at, quota_bytes, quota_used_bytes, frozen_at FROM subjects WHERE " + whereClause
 
 	// Count total
 	countQuery := "SELECT COUNT(*) FROM (" + baseQuery + ") AS filtered"
@@ -185,26 +185,29 @@ func (d Deps) handleListSubjectsV2(w http.ResponseWriter, r *http.Request) {
 
 	subjects := []subjectDTO{}
 	for rows.Next() {
-		var id, createdAt int64
+		var id, createdAt, quotaUsed int64
 		var name string
 		var enabled bool
-		var expiresAt, expiredAt *int64
+		var expiresAt, expiredAt, quotaBytes, frozenAt *int64
 		var note string
 
-		err := rows.Scan(&id, &name, &note, &enabled, &expiresAt, &expiredAt, &createdAt)
+		err := rows.Scan(&id, &name, &note, &enabled, &expiresAt, &expiredAt, &createdAt, &quotaBytes, &quotaUsed, &frozenAt)
 		if err != nil {
 			http.Error(w, "failed to scan subject", http.StatusInternalServerError)
 			return
 		}
 
 		subjects = append(subjects, subjectDTO{
-			ID:        id,
-			Name:      name,
-			Note:      note,
-			Enabled:   enabled,
-			ExpiresAt: expiresAt,
-			ExpiredAt: expiredAt,
-			CreatedAt: createdAt,
+			ID:             id,
+			Name:           name,
+			Note:           note,
+			Enabled:        enabled,
+			ExpiresAt:      expiresAt,
+			ExpiredAt:      expiredAt,
+			CreatedAt:      createdAt,
+			QuotaBytes:     quotaBytes,
+			QuotaUsedBytes: quotaUsed,
+			Frozen:         frozenAt != nil,
 		})
 	}
 

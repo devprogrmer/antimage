@@ -8,11 +8,13 @@ import {
   ScrollText,
   BookMarked,
   ShieldCheck,
-  KeyRound,
   UserCircle,
   Monitor,
   Moon,
   Sun,
+  Globe,
+  Settings,
+  Shield,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -56,10 +58,12 @@ const NAV: NavItem[] = [
   // worse than not offering it. The gate is a courtesy -- the server re-checks
   // regardless. A tenant reaches their own account through Profile instead.
   { to: "/resellers", label: "nav.resellers", icon: Building2, permission: "reseller:read" },
+  { to: "/hosts", label: "nav.hosts", icon: Globe, permission: "service:read" },
   { to: "/observability", label: "observability.title", icon: Activity },
   { to: "/audit", label: "nav.audit", icon: ScrollText, permission: "audit:read" },
-  { to: "/access", label: "access.title", icon: KeyRound, permission: "admin:manage" },
   { to: "/templates", label: "templates.title", icon: BookMarked },
+  { to: "/admins", label: "nav.admins", icon: Shield, permission: "admin:manage" },
+  { to: "/settings", label: "nav.settings", icon: Settings },
   { to: "/profile", label: "nav.profile", icon: UserCircle },
 ];
 

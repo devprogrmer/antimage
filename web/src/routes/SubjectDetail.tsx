@@ -6,6 +6,7 @@ import { EnforcementStatus } from "../components/EnforcementStatus";
 import { SubscriptionPanel } from "../components/SubscriptionPanel";
 import { ActivityTimeline } from "../components/ActivityTimeline";
 import { ActiveConnections } from "../components/ActiveConnections";
+import { QuotaBar, formatTraffic, daysLeft } from "../components/QuotaBar";
 import { MutationError } from "./Resellers";
 import { formatNumber, formatTimestamp, t } from "../i18n";
 
@@ -22,6 +23,9 @@ interface Subject {
   status_changed_at: number | null;
   created_at: number;
   note: string;
+  quota_bytes: number | null;
+  quota_used_bytes: number;
+  frozen: boolean;
 }
 
 const STATUS_LABEL = {
@@ -60,6 +64,22 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
     queryKey: ["subject", subjectId],
     queryFn: () => api.get<Subject>(`/api/v1/subjects/${subjectId}`),
   });
+
+  const subscription = useQuery({
+    queryKey: ["subject-sub", subjectId],
+    queryFn: () =>
+      api.get<{ url: string; clash_url: string; singbox_url: string; qr_url: string }>(
+        `/api/v1/subjects/${subjectId}/subscription`,
+      ),
+  });
+
+  const revokeSub = useMutation({
+    mutationFn: () => api.post(`/api/v1/subjects/${subjectId}/subscription/revoke`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["subject-sub", subjectId] }),
+  });
+
+  // Which copy button just copied, so only that one flashes its label.
+  const [copied, setCopied] = useState<string | null>(null);
 
   const devices = useQuery({
     queryKey: ["devices", subjectId],
@@ -240,6 +260,29 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
               <dd>{s.note}</dd>
             </div>
           )}
+          <div className="col-span-2">
+            <dt className="text-muted-foreground">{t("subject.quota")}</dt>
+            <dd>
+              {s.quota_bytes ? (
+                <div className="mt-1 flex flex-col gap-1">
+                  <QuotaBar used={s.quota_used_bytes} total={s.quota_bytes} />
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {formatTraffic(s.quota_used_bytes)} / {formatTraffic(s.quota_bytes)}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-xs">{t("filters.unlimited")}</span>
+              )}
+            </dd>
+          </div>
+          {s.expires_at && (
+            <div>
+              <dt className="text-muted-foreground">{t("subject.remaining")}</dt>
+              <dd className={`text-xs ${daysLeft(s.expires_at)! <= 3 ? "text-warning" : ""}`}>
+                {formatNumber(daysLeft(s.expires_at)!)} {t("subject.daysLeft")}
+              </dd>
+            </div>
+          )}
         </dl>
       </div>
 
@@ -250,6 +293,78 @@ export function SubjectDetail({ subjectId }: { subjectId: number }) {
       {/* The operator hands this to the customer, so it sits with the rest of
           what defines their access. */}
       <SubscriptionPanel subjectId={subjectId} />
+
+      <div className="rounded border border-border bg-card p-4">
+        <h3 className="mb-3 text-sm font-semibold">{t("subject.subscription")}</h3>
+        {subscription.data?.url ? (
+          <div className="flex flex-col gap-3 md:flex-row md:items-start">
+            <div className="min-w-0 flex-1 space-y-2">
+              <p className="break-all select-all font-mono text-xs">{subscription.data.url}</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(subscription.data!.url);
+                    setCopied("main");
+                    setTimeout(() => setCopied(null), 1500);
+                  }}
+                >
+                  {copied === "main" ? t("common.saved") : t("common.copy")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(subscription.data!.clash_url);
+                    setCopied("clash");
+                    setTimeout(() => setCopied(null), 1500);
+                  }}
+                >
+                  {copied === "clash" ? t("common.saved") : t("subject.copyClash")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded bg-secondary px-3 py-1 text-sm hover:bg-secondary/80"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(subscription.data!.singbox_url);
+                    setCopied("singbox");
+                    setTimeout(() => setCopied(null), 1500);
+                  }}
+                >
+                  {copied === "singbox" ? t("common.saved") : t("subject.copySingbox")}
+                </button>
+                <a
+                  href={subscription.data.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded bg-primary px-3 py-1 text-sm text-primary-foreground hover:bg-primary/90"
+                >
+                  {t("subject.openSubPage")}
+                </a>
+                <button
+                  type="button"
+                  className="rounded bg-destructive px-3 py-1 text-sm hover:bg-destructive/90"
+                  onClick={() => revokeSub.mutate()}
+                >
+                  {t("subject.revokeSub")}
+                </button>
+              </div>
+            </div>
+            {/* The QR inline rather than a link away: the operator holds a
+                phone up to the screen, which a navigation to a PNG breaks. */}
+            <img
+              src={subscription.data.qr_url}
+              alt={t("subject.qr")}
+              width={132}
+              height={132}
+              className="h-[132px] w-[132px] rounded border border-border bg-background p-1"
+            />
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
+        )}
+      </div>
 
       <div className="rounded border border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">{t("subject.credentials")}</h3>
