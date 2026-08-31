@@ -64,14 +64,15 @@ func (r *ClashRenderer) renderServer(srv Server) (map[string]interface{}, error)
 		return r.renderVMess(srv), nil
 	case "trojan":
 		return r.renderTrojan(srv), nil
-	case "hysteria2":
-		return clashHysteria2(srv)
-	case "shadowsocks":
-		return clashShadowsocks(srv)
 	default:
 		return nil, ErrNotRepresentable
 	}
 }
+
+// ErrNotRepresentable signals a protocol Clash cannot express. The renderer
+// skips these rather than aborting, so the operator still receives a valid
+// document for the protocols Clash does understand.
+var ErrNotRepresentable = fmt.Errorf("protocol not representable in this format")
 
 // renderVLESS generates a Clash VLESS proxy.
 func (r *ClashRenderer) renderVLESS(srv Server) map[string]interface{} {

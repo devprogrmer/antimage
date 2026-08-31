@@ -229,6 +229,12 @@ func renderConf(serviceID int64, p serviceParams, dir string) string {
 	// in this product expects.
 	b.WriteString("dev tun\n")
 
+	// OpenVPN 2.6+ no longer infers TLS mode from `server`; without an
+	// explicit tls-server declaration the daemon falls back to static-key
+	// mode and rejects the config asking for --secret. `client-config-dir`
+	// alone would also imply tls-server, but stating it is clearer than
+	// depending on that.
+	b.WriteString("tls-server\n")
 	b.WriteString("ca " + p.CA + "\n")
 	b.WriteString("cert " + p.ServerCert + "\n")
 	b.WriteString("key " + p.ServerKey + "\n")

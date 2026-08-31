@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"database/sql"
+	"errors"
 	"math"
 	"net/http"
 	"time"
@@ -264,13 +265,13 @@ func (d Deps) handleRevokeNodeCertificate(w http.ResponseWriter, r *http.Request
 		})
 	})
 	switch {
-	case err == errNoCertificate:
+	case errors.Is(err, errNoCertificate):
 		// Not an error state worth a 500: the node simply has nothing to
 		// revoke, and saying so is more useful than a generic failure.
 		WriteError(w, http.StatusConflict, "no_certificate",
 			"this node has no certificate to revoke")
 		return
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		WriteError(w, http.StatusNotFound, "not_found", "node not found")
 		return
 	case err != nil:

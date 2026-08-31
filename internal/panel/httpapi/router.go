@@ -293,18 +293,7 @@ func NewRouter(d Deps) http.Handler {
 			private.Get("/subjects/{subjectID}/subscription", d.handleSubjectSubscription)
 			private.Post("/subjects/{subjectID}/subscription/revoke", d.handleRevokeSubjectSubscription)
 
-			// Per-inbound client configs, including protocols no aggregated
-			// subscription format can carry (WireGuard native, OpenVPN, etc).
-			private.Get("/subjects/{subjectID}/configs", d.handleSubjectConfigs)
 			private.Post("/qr", d.handleQRCode)
-
-			// Subscription groups: the named protocol selection a subject's
-			// subscription is built from.
-			private.Get("/subscription-groups", d.handleListSubscriptionGroups)
-			private.Post("/subscription-groups", d.handleCreateSubscriptionGroup)
-			private.Put("/subscription-groups/{groupID}", d.handleUpdateSubscriptionGroup)
-			private.Delete("/subscription-groups/{groupID}", d.handleDeleteSubscriptionGroup)
-			private.Put("/subjects/{subjectID}/subscription-group", d.handleAssignSubscriptionGroup)
 			private.Get("/subjects/export", d.handleExportSubjects)
 			private.Post("/subjects/import", d.handleImportSubjects)
 			private.Post("/subjects/bulk/delete", d.handleBulkDeleteSubjects)
