@@ -135,6 +135,9 @@ func (d Deps) handleGetSubjectActivity(w http.ResponseWriter, r *http.Request) {
 					Details:   reason.String,
 				})
 			}
+			// rowserrcheck: silent mid-iteration failure returns a truncated
+			// list as if complete. Best-effort log path lives upstream.
+			_ = rows.Err()
 		}()
 	}
 
@@ -180,6 +183,7 @@ func (d Deps) handleGetSubjectActivity(w http.ResponseWriter, r *http.Request) {
 					Details:   auditMessage(actorType, actorLabel, action, result, afterJSON),
 				})
 			}
+			_ = rows.Err()
 		}()
 	}
 

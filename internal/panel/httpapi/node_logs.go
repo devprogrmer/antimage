@@ -125,6 +125,9 @@ func (d Deps) handleGetNodeLogs(w http.ResponseWriter, r *http.Request) {
 						" · " + stepKind + " (" + disruption + "): " + stepErr,
 				})
 			}
+			// rowserrcheck: a mid-iteration failure returns a truncated slice
+			// as if complete; the caller can only tell the two apart by asking.
+			_ = rows.Err()
 		}()
 	}
 
@@ -165,6 +168,7 @@ func (d Deps) handleGetNodeLogs(w http.ResponseWriter, r *http.Request) {
 					Message:   auditMessage(actorType, actorLabel, action, result, afterJSON),
 				})
 			}
+			_ = rows.Err()
 		}()
 	}
 

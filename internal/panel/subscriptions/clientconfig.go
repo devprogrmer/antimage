@@ -410,7 +410,7 @@ func buildOpenVPN(
 	b.WriteString("client\n")
 	b.WriteString("dev tun\n")
 	b.WriteString("proto " + proto + "\n")
-	b.WriteString(fmt.Sprintf("remote %s %d\n", node.Address, port))
+	fmt.Fprintf(&b, "remote %s %d\n", node.Address, port)
 	b.WriteString("resolv-retry infinite\n")
 	b.WriteString("nobind\n")
 	b.WriteString("persist-key\n")

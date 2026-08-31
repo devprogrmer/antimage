@@ -251,10 +251,10 @@ func (d Deps) handleCreateAdmin(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 	switch {
-	case err == errUnknownRole:
+	case errors.Is(err, errUnknownRole):
 		WriteError(w, http.StatusUnprocessableEntity, "unknown_role", "role_id does not exist")
 		return
-	case err == errUsernameTaken:
+	case errors.Is(err, errUsernameTaken):
 		WriteError(w, http.StatusConflict, "username_taken", "an admin with this username already exists")
 		return
 	case err != nil:
@@ -396,7 +396,7 @@ func (d Deps) handleUpdateAdmin(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, sql.ErrNoRows):
 		WriteError(w, http.StatusNotFound, "not_found", "admin not found")
 		return
-	case err == errUnknownRole:
+	case errors.Is(err, errUnknownRole):
 		WriteError(w, http.StatusUnprocessableEntity, "unknown_role", "role_id does not exist")
 		return
 	case err != nil:
