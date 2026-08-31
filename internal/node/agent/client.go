@@ -371,6 +371,29 @@ func (c *Client) handleCommand(ctx context.Context, cmd *pb.AgentCommand) *pb.Ag
 				UpdateGeoData: &pb.UpdateGeoDataResult{Outcomes: wire},
 			},
 		}
+	case *pb.AgentCommand_UpgradeCore:
+		uc := body.UpgradeCore
+		outcome := c.ads.UpgradeCore(ctx, uc.Kind, uc.BinaryUrl, uc.BinarySha256, uc.ExpectedVersion)
+		errText := ""
+		switch {
+		case !outcome.Found:
+			errText = fmt.Sprintf("this node runs no %q adapter", uc.Kind)
+		case !outcome.Capable:
+			errText = fmt.Sprintf("the %q adapter on this node has no core-version concept", uc.Kind)
+		case outcome.Err != nil:
+			errText = outcome.Err.Error()
+		}
+		return &pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_UpgradeCore{
+				UpgradeCore: &pb.UpgradeCoreResult{
+					Kind: uc.Kind, Ok: outcome.OK,
+					InstalledVersion: outcome.InstalledVersion,
+					RolledBack:       outcome.RolledBack,
+					Error:            errText,
+				},
+			},
+		}
 	default:
 		// Forward compatible: an agent build older than a newer command type
 		// tells the panel it does not understand rather than silently

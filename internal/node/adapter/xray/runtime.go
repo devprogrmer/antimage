@@ -47,6 +47,13 @@ type Runtime interface {
 
 	// QueryStats reads per-user cumulative traffic counters. SP3 accounting.
 	QueryStats(ctx context.Context) ([]UserStat, error)
+
+	// BinaryPath resolves the absolute path of the binary this runtime
+	// actually execs -- not just the bare name it was configured with.
+	// UpgradeCore needs the real file path to swap; Available already knows
+	// how to find it via exec.LookPath, and this is that same resolution
+	// exposed for a caller that needs the path itself, not just a yes/no.
+	BinaryPath(ctx context.Context) (string, error)
 }
 
 // ExecRuntime drives Xray through systemd and its gRPC management API.
@@ -110,6 +117,18 @@ func (r *ExecRuntime) Available(ctx context.Context) error {
 		return fmt.Errorf("%w: %s not found in PATH: %w", ErrRuntimeUnavailable, r.Binary, err)
 	}
 	return nil
+}
+
+// BinaryPath resolves r.Binary to the absolute file UpgradeCore needs to
+// replace. LookPath handles an already-absolute r.Binary correctly too (it
+// checks the path directly rather than consulting PATH), so this needs no
+// special case for that.
+func (r *ExecRuntime) BinaryPath(ctx context.Context) (string, error) {
+	path, err := exec.LookPath(r.Binary)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s not found in PATH: %w", ErrRuntimeUnavailable, r.Binary, err)
+	}
+	return path, nil
 }
 
 // HotAddSupported reports whether user mutation can avoid a restart. It is

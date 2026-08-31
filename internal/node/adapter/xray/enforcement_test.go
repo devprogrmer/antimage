@@ -74,6 +74,10 @@ func (m *mockRuntime) QueryStats(ctx context.Context) ([]UserStat, error) {
 	return out, nil
 }
 
+func (m *mockRuntime) BinaryPath(ctx context.Context) (string, error) {
+	return "/usr/local/bin/xray", nil
+}
+
 func TestConnectionTracker(t *testing.T) {
 	t.Run("registers new connection", func(t *testing.T) {
 		enforcer := enforcement.New()

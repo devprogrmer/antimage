@@ -77,6 +77,7 @@ message AgentCommand {
   oneof body {
     RestartAdapters restart_adapters = 2;
     UpdateGeoData update_geo_data = 3;
+    UpgradeCore upgrade_core = 4;
   }
 }
 
@@ -106,12 +107,53 @@ message UpdateGeoData {
   string geosite_sha256_url = 4;
 }
 
+// UpgradeCore asks the agent to install a SPECIFIC core binary, unlike
+// UpdateGeoData there is deliberately no "default source" anywhere in this
+// path: a data file that turns out wrong degrades routing accuracy, but an
+// executable that turns out wrong can take a node fully offline, and that
+// is not a choice this system makes on an operator's behalf. kind and
+// binary_sha256 are both required for the same reason -- kind picks which
+// adapter (a node can run xray and sing-box together, with unrelated
+// version cadences), and the checksum is not fetched from a companion URL
+// the way geo data's is: the panel resolves it once, from whatever
+// manifest format that release actually publishes, so the agent's own
+// verification logic never has to parse a new checksum format because an
+// upstream changed how it publishes one.
+message UpgradeCore {
+  string kind = 1;
+  string binary_url = 2;
+  string binary_sha256 = 3;
+  // expected_version is checked against `<binary> -version` output during
+  // the preflight, BEFORE the running installation is touched at all. Not
+  // exact-match -- Xray's own -version output carries a date and build
+  // tags around the number -- just Contains(), which is enough to catch
+  // "the URL served the wrong release" without the agent needing to parse
+  // a version string format that could change out from under it.
+  string expected_version = 4;
+}
+
 message AgentCommandResult {
   string command_id = 1;
   oneof body {
     RestartAdaptersResult restart_adapters = 2;
     UpdateGeoDataResult update_geo_data = 3;
+    UpgradeCoreResult upgrade_core = 4;
   }
+}
+
+// UpgradeCoreResult reports what is actually installed and running RIGHT
+// NOW, not just whether the download succeeded. RolledBack=true with
+// Ok=false means the new binary was installed, failed to come up healthy,
+// and the agent already reverted to the previous one and restarted it --
+// the node is not sitting broken waiting for a human, but the upgrade did
+// not take, and both facts have to reach the operator in one message.
+message UpgradeCoreResult {
+  string kind = 1;
+  bool ok = 2;
+  string installed_version = 3;
+  bool rolled_back = 4;
+  // Empty when ok.
+  string error = 5;
 }
 
 message UpdateGeoDataResult {

@@ -19,16 +19,26 @@ import (
 // fakeRuntime records what the adapter asked of Xray, so a test can assert
 // that a hot user add did NOT restart the process.
 type fakeRuntime struct {
-	mu        sync.Mutex
-	restarts  int
-	reloads   int
-	added     []string
-	removed   []string
-	available error
-	healthy   bool
-	detail    string
-	failAdd   error
-	failRst   error
+	mu            sync.Mutex
+	restarts      int
+	reloads       int
+	added         []string
+	removed       []string
+	available     error
+	healthy       bool
+	detail        string
+	failAdd       error
+	failRst       error
+	binaryPath    string
+	binaryPathErr error
+	// healthyAfterRestartN, when non-zero, overrides the static `healthy`
+	// field: Healthy() reports false until restarts >= this count. A
+	// rollback test sets this to 2 to simulate "the freshly installed
+	// binary's first restart comes up broken, and only the SECOND restart
+	// (rollback to the previous binary) comes up healthy" -- proving the
+	// orchestration actually reacts to a real health signal rather than
+	// assuming success once the restart call itself did not error.
+	healthyAfterRestartN int
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -71,11 +81,28 @@ func (f *fakeRuntime) Restart(context.Context) error {
 	return nil
 }
 
-func (f *fakeRuntime) Healthy(context.Context) (bool, string) { return f.healthy, f.detail }
+func (f *fakeRuntime) Healthy(context.Context) (bool, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.healthyAfterRestartN > 0 {
+		return f.restarts >= f.healthyAfterRestartN, f.detail
+	}
+	return f.healthy, f.detail
+}
 
 func (f *fakeRuntime) QueryStats(context.Context) ([]UserStat, error) {
 	// Tests that don't care about accounting can leave this empty.
 	return nil, nil
+}
+
+func (f *fakeRuntime) BinaryPath(context.Context) (string, error) {
+	if f.binaryPathErr != nil {
+		return "", f.binaryPathErr
+	}
+	if f.binaryPath != "" {
+		return f.binaryPath, nil
+	}
+	return "/usr/local/bin/xray", nil
 }
 
 func (f *fakeRuntime) counts() (restarts, reloads int, added, removed []string) {

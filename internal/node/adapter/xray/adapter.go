@@ -76,6 +76,14 @@ type Adapter struct {
 	// hotAdd mirrors the runtime's capability. Cached at construction because
 	// Descriptor is called on every Hello and must not shell out.
 	hotAdd bool
+
+	// coreHealthPollWindow/Interval bound UpgradeCore's post-restart health
+	// poll. Fields rather than package constants so a test can shrink them
+	// to prove the "give up and roll back" path without spending real
+	// seconds waiting out a window sized for production Xray startup times.
+	// Zero means "use the package defaults", set by NewWithAssetDir.
+	coreHealthPollWindow   time.Duration
+	coreHealthPollInterval time.Duration
 }
 
 // New returns an adapter writing into dir and driving rt, using
@@ -87,7 +95,11 @@ func New(dir string, rt Runtime, hotAdd bool) *Adapter {
 // NewWithAssetDir is New with an explicit geo-data directory, for a node
 // whose Xray was not installed by the official installer's convention.
 func NewWithAssetDir(dir string, rt Runtime, hotAdd bool, assetDir string) *Adapter {
-	return &Adapter{dir: dir, rt: rt, hotAdd: hotAdd, assetDir: assetDir}
+	return &Adapter{
+		dir: dir, rt: rt, hotAdd: hotAdd, assetDir: assetDir,
+		coreHealthPollWindow:   coreHealthPollWindow,
+		coreHealthPollInterval: coreHealthPollInterval,
+	}
 }
 
 // serviceSchema is published to the panel, which validates operator input

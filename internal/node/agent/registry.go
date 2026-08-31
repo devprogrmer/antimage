@@ -218,6 +218,50 @@ func (r *Registry) UpdateGeoData(
 	return out
 }
 
+// CoreVersionOutcome answers an UpgradeCore call against one named adapter
+// kind, with THREE distinguishable "no" outcomes the caller renders as
+// different messages: no adapter of this kind exists on the node at all
+// (Found=false), one exists but has no core-version concept
+// (Found=true, Capable=false), or one exists, is capable, and ran
+// (Found=true, Capable=true, and OK/Err/RolledBack describe what happened).
+// Collapsing these into one boolean would leave an operator who typed the
+// wrong kind and one who correctly named an adapter that simply cannot be
+// upgraded this way looking at the identical response.
+type CoreVersionOutcome struct {
+	Found            bool
+	Capable          bool
+	OK               bool
+	InstalledVersion string
+	RolledBack       bool
+	Err              error
+}
+
+// UpgradeCore targets exactly ONE named adapter kind -- unlike RestartAll
+// and UpdateGeoData, which broadcast to everything matching, a core upgrade
+// names one specific binary for one specific process; a node running xray
+// and sing-box together has two unrelated version cadences, and "upgrade
+// the core" with no kind specified would not have a single correct meaning.
+func (r *Registry) UpgradeCore(ctx context.Context, kind, binaryURL, binarySHA256, expectedVersion string) CoreVersionOutcome {
+	if r == nil {
+		return CoreVersionOutcome{}
+	}
+	for _, ad := range r.adapters {
+		if string(ad.Descriptor().Kind) != kind {
+			continue
+		}
+		manager, ok := ad.(adapter.CoreVersionManager)
+		if !ok {
+			return CoreVersionOutcome{Found: true, Capable: false}
+		}
+		result, err := manager.UpgradeCore(ctx, binaryURL, binarySHA256, expectedVersion)
+		return CoreVersionOutcome{
+			Found: true, Capable: true, OK: err == nil,
+			InstalledVersion: result.InstalledVersion, RolledBack: result.RolledBack, Err: err,
+		}
+	}
+	return CoreVersionOutcome{}
+}
+
 // UsageReporters returns the adapters that account for their own traffic.
 //
 // Not every adapter does -- Caps.SelfAccounting says whether it claims to, and

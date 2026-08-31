@@ -754,5 +754,10 @@
   "node.restartOK": "已重启",
   "node.updateGeoData": "更新地理数据",
   "node.updateGeoDataOK": "已更新",
-  "node.geoDataUpdatedAt": "地理数据更新时间"
+  "node.geoDataUpdatedAt": "地理数据更新时间",
+  "node.coreUpgradedAt": "通过面板升级核心",
+  "node.coreVersionPicker": "核心版本",
+  "node.chooseVersion": "选择版本",
+  "node.upgradeCore": "升级核心",
+  "node.coreUpgraded": "已升级"
 }
