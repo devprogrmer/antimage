@@ -66,6 +66,16 @@ func (s *Store) migrate() error {
 	return nil
 }
 
+// ReadDB returns the pooled read handle for concurrent queries.
+func (s *Store) ReadDB() *sql.DB {
+	return s.read
+}
+
+// WriteDB returns the serialized write handle for mutations.
+func (s *Store) WriteDB() *sql.DB {
+	return s.write
+}
+
 // Read returns the pooled read-only handle. Never write through it.
 func (s *Store) Read() *sql.DB { return s.read }
 

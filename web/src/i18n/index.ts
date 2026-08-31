@@ -57,9 +57,27 @@ export function localeFromTag(tag: string): Locale {
 }
 
 /** Returns the key itself when a translation is missing, so gaps are visible
- *  in the UI rather than rendering as blanks. */
-export function t(key: TranslationKey): string {
-  return catalogs[current][key] ?? key;
+ *  in the UI rather than rendering as blanks.
+ *
+ *  Optional params substitute {placeholders}. The catalogues already carried
+ *  keys like "Expires in {days} days" while t() had no way to fill them, so
+ *  those strings would have rendered with the braces showing. Substitution is
+ *  positional-by-name rather than index-based because word order differs
+ *  between the five locales: Persian and Arabic put the count elsewhere in the
+ *  sentence, and a positional scheme would silently reorder their arguments.
+ *
+ *  An unmatched placeholder is left as-is rather than blanked, for the same
+ *  reason a missing key returns the key: a visible defect beats an invisible
+ *  one. */
+export function t(
+  key: TranslationKey,
+  params?: Record<string, string | number>,
+): string {
+  const raw = catalogs[current][key] ?? key;
+  if (!params) return raw;
+  return raw.replace(/\{(\w+)\}/g, (whole, name: string) =>
+    name in params ? String(params[name]) : whole,
+  );
 }
 
 /** BCP 47 tag for Intl. Kept in one place so digit systems -- Persian and
@@ -83,6 +101,22 @@ function intlTag(locale: Locale): string {
  *  one place instead of scattered toLocaleString calls. */
 export function formatNumber(value: number, locale: Locale = current): string {
   return new Intl.NumberFormat(intlTag(locale)).format(value);
+}
+
+/** Relative time ("5 minutes ago") via Intl, which knows that Arabic puts the
+ *  marker before the quantity while Persian, Russian and Chinese put it after.
+ *  Assembling this by hand from a number and an "ago" string produces word
+ *  salad in at least one of our five locales, so it is never done that way.
+ *  Anything older than a week falls back to an absolute timestamp. */
+export function formatRelativeTime(unixSeconds: number, locale: Locale = current): string {
+  const rtf = new Intl.RelativeTimeFormat(intlTag(locale), { numeric: "auto" });
+  const deltaSeconds = Math.round(unixSeconds - Date.now() / 1000);
+  const magnitude = Math.abs(deltaSeconds);
+  if (magnitude < 60) return rtf.format(deltaSeconds, "second");
+  if (magnitude < 3600) return rtf.format(Math.round(deltaSeconds / 60), "minute");
+  if (magnitude < 86400) return rtf.format(Math.round(deltaSeconds / 3600), "hour");
+  if (magnitude < 604800) return rtf.format(Math.round(deltaSeconds / 86400), "day");
+  return formatTimestamp(unixSeconds, locale);
 }
 
 export function formatTimestamp(unixSeconds: number | null, locale: Locale = current): string {

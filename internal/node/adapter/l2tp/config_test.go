@@ -306,10 +306,10 @@ func TestIsManaged(t *testing.T) {
 
 func TestParseMarker(t *testing.T) {
 	tests := []struct {
-		line           string
-		wantServiceID  int64
-		wantChecksum   string
-		wantOK         bool
+		line          string
+		wantServiceID int64
+		wantChecksum  string
+		wantOK        bool
 	}{
 		{
 			line:          markerPrefix + " service_id=123 checksum=abc123def",

@@ -52,11 +52,11 @@ func (a *Adapter) applyInstallConfigs(ctx context.Context, step adapter.Step) er
 
 	// Write all config files.
 	configs := map[string]string{
-		"strongswan/ipsec.conf":      renderIPsecConf(step.ServiceID, params),
-		"strongswan/ipsec.secrets":   renderIPsecSecrets(step.ServiceID, params),
-		"xl2tpd/xl2tpd.conf":         renderXL2TPDConf(step.ServiceID, params),
-		"ppp/chap-secrets":           renderCHAPSecrets(step.ServiceID, payload.Subjects),
-		"ppp/options.xl2tpd":         renderPPPOptions(step.ServiceID, params),
+		"strongswan/ipsec.conf":    renderIPsecConf(step.ServiceID, params),
+		"strongswan/ipsec.secrets": renderIPsecSecrets(step.ServiceID, params),
+		"xl2tpd/xl2tpd.conf":       renderXL2TPDConf(step.ServiceID, params),
+		"ppp/chap-secrets":         renderCHAPSecrets(step.ServiceID, payload.Subjects),
+		"ppp/options.xl2tpd":       renderPPPOptions(step.ServiceID, params),
 	}
 
 	for relPath, content := range configs {

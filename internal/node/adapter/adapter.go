@@ -14,6 +14,8 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -53,6 +55,7 @@ const (
 	CredUUID     CredentialKind = "uuid"
 	CredX509     CredentialKind = "x509"
 	CredPassword CredentialKind = "password"
+	CredKeypair  CredentialKind = "keypair" // WireGuard public/private key pair
 )
 
 // Caps lets the panel and later sub-projects adapt without hardcoding
@@ -67,6 +70,43 @@ type Caps struct {
 	// form from it, so adding a protocol means adding an adapter rather than
 	// editing panel code.
 	ServiceSchema json.RawMessage `json:"service_schema"`
+
+	// SupportsOutbounds and SupportsRouting declare whether this adapter can
+	// apply the egress half of a v3 document.
+	//
+	// Fail closed. An adapter that declares false must never be sent outbounds
+	// or routing, because the alternative is a panel that shows an operator an
+	// egress policy the node is not enforcing. WireGuard, Hysteria2 and L2TP
+	// have no routing engine at all; only the multiplexing proxies do.
+	//
+	// Declaring true is a promise the contract test enforces.
+	SupportsOutbounds bool `json:"supports_outbounds"`
+	SupportsRouting   bool `json:"supports_routing"`
+
+	// OutboundSchema is to Outbound.Params what ServiceSchema is to
+	// Service.Params. Required when SupportsOutbounds is true.
+	OutboundSchema json.RawMessage `json:"outbound_schema,omitempty"`
+
+	// OutboundKinds are the Outbound.Kind values this adapter can render.
+	//
+	// Published so the UI can offer exactly these and no more. A frontend with
+	// its own hardcoded list is the fake feature layer this design exists to
+	// prevent: it would let an operator pick a kind the adapter refuses, and a
+	// refused outbound is not a validation error on the node -- it is a proxy
+	// that will not start, taking every working inbound with it.
+	OutboundKinds []string `json:"outbound_kinds,omitempty"`
+
+	// BuiltinOutboundTags are outbounds the adapter provides on its own, which
+	// a routing rule may reference without a corresponding panel row.
+	//
+	// Xray's accounting configuration defines "direct", so a rule may send
+	// traffic straight out without anybody creating an outbound for it. The
+	// panel needs to know: a rule naming a tag that resolves nowhere makes the
+	// adapter refuse to render, which fails Plan for the WHOLE node -- one bad
+	// rule would stop it converging on anything, including its inbounds.
+	// Publishing the list is what lets the panel refuse that rule at the API
+	// instead.
+	BuiltinOutboundTags []string `json:"builtin_outbound_tags,omitempty"`
 }
 
 type Descriptor struct {
@@ -81,9 +121,16 @@ type Credential struct {
 }
 
 // Subject is wired but empty in SP1; SP2 populates it.
+// Schema v2 adds enforcement policies.
 type Subject struct {
 	ID          int64        `json:"id"`
 	Credentials []Credential `json:"credentials"`
+	// Enforcement policies (schema v2+)
+	MaxDevices         *int64 `json:"max_devices,omitempty"`
+	MaxIPs             *int64 `json:"max_ips,omitempty"`
+	MaxConnections     *int64 `json:"max_connections,omitempty"`
+	SpeedLimitUpKbps   *int64 `json:"speed_limit_up_kbps,omitempty"`
+	SpeedLimitDownKbps *int64 `json:"speed_limit_down_kbps,omitempty"`
 }
 
 type Service struct {
@@ -91,6 +138,45 @@ type Service struct {
 	Kind    string          `json:"kind"`
 	Enabled bool            `json:"enabled"`
 	Params  json.RawMessage `json:"params"`
+}
+
+// MaxSchemaVersion is the highest document version this agent understands.
+//
+// A document above it is REFUSED, never partially applied. The difference
+// matters: the fields a newer version adds are omitempty, so an old agent
+// decoding a new document succeeds and silently drops what it did not know
+// about. For egress that would mean an operator configuring an outbound, the
+// panel reporting convergence, and the node routing traffic somewhere else
+// entirely. Refusing is the only safe reading of "I do not understand this".
+const MaxSchemaVersion = 3
+
+// Outbound mirrors the panel's Outbound. Schema v3+.
+type Outbound struct {
+	ID     int64           `json:"id"`
+	Tag    string          `json:"tag"`
+	Kind   string          `json:"kind"`
+	Params json.RawMessage `json:"params"`
+}
+
+// RoutingRule mirrors the panel's RoutingRule. Schema v3+.
+type RoutingRule struct {
+	ID          int64    `json:"id"`
+	Priority    int      `json:"priority"`
+	Domains     []string `json:"domains,omitempty"`
+	IPCIDRs     []string `json:"ip_cidrs,omitempty"`
+	GeoIP       []string `json:"geoip,omitempty"`
+	GeoSite     []string `json:"geosite,omitempty"`
+	Ports       []string `json:"ports,omitempty"`
+	Network     string   `json:"network,omitempty"`
+	InboundTags []string `json:"inbound_tags,omitempty"`
+	SubjectIDs  []int64  `json:"subject_ids,omitempty"`
+	OutboundTag string   `json:"outbound_tag"`
+}
+
+// Routing mirrors the panel's Routing. Schema v3+.
+type Routing struct {
+	Rules              []RoutingRule `json:"rules"`
+	DefaultOutboundTag string        `json:"default_outbound_tag,omitempty"`
 }
 
 // Desired mirrors the panel's document type field-for-field. It is declared
@@ -102,6 +188,29 @@ type Desired struct {
 	NodeID        int64     `json:"node_id"`
 	Services      []Service `json:"services"`
 	Subjects      []Subject `json:"subjects"`
+
+	// Egress (schema v3+).
+	Outbounds []Outbound `json:"outbounds,omitempty"`
+	Routing   *Routing   `json:"routing,omitempty"`
+}
+
+// CheckSchemaVersion refuses a document this agent cannot fully apply.
+//
+// Called before convergence, so an unsupported document produces a reported
+// error and no partial apply. A version of zero is treated as unsupported
+// rather than defaulted: it means the field was absent, and guessing which
+// version a document without one intended is exactly the ambiguity this
+// refuses to resolve silently.
+func CheckSchemaVersion(v int) error {
+	if v <= 0 {
+		return fmt.Errorf("desired document carries no schema version")
+	}
+	if v > MaxSchemaVersion {
+		return fmt.Errorf(
+			"desired document is schema v%d; this agent understands up to v%d -- upgrade the agent",
+			v, MaxSchemaVersion)
+	}
+	return nil
 }
 
 // ObservedService is the adapter's reading of one service on the host.
@@ -120,6 +229,27 @@ type ObservedService struct {
 
 type Observed struct {
 	Services []ObservedService
+	// Egress is this adapter's reading of the outbound and routing document.
+	//
+	// Nil means the adapter does not manage egress at all -- either it declares
+	// SupportsOutbounds=false, or it has never written one. That is different
+	// from a present-but-empty egress document, which is a deliberate statement
+	// that the node should route nowhere in particular, and which Plan must be
+	// able to tell apart from "never configured" so it does not rewrite a file
+	// on every pass.
+	Egress *ObservedEgress
+}
+
+// ObservedEgress is the adapter's reading of the node's egress configuration.
+//
+// Managed and Checksum carry the same meaning as on ObservedService: Managed
+// separates a file antimage wrote from one a human created, and Checksum is
+// computed from what is on disk right now rather than read from the marker, so
+// comparing the two is what catches a hand edit.
+type ObservedEgress struct {
+	Present  bool
+	Managed  bool
+	Checksum string
 }
 
 type Step struct {
@@ -190,13 +320,40 @@ type Adapter interface {
 
 	// Probe is a cheap liveness check run on the health cadence.
 	Probe(ctx context.Context) (Health, error)
+
+	// Restart bounces the service ON DEMAND, outside the desired-state
+	// reconciliation loop. It exists because "sync" (converge toward the
+	// desired document) and "restart" (bounce the running process even
+	// though nothing changed) are different operator intents: an operator
+	// investigating a wedged process wants the second even when the first
+	// would be a no-op.
+	//
+	// An adapter with no restartable daemon -- nothing today, but the
+	// interface has to say what "no" looks like for the ones that might
+	// arrive later -- returns ErrRestartUnsupported rather than nil, so a
+	// caller cannot mistake "there was nothing to restart" for "the restart
+	// happened."
+	Restart(ctx context.Context) error
 }
+
+// ErrRestartUnsupported is what Adapter.Restart returns for an adapter with
+// no restartable daemon of its own. Checked with errors.Is, not a type
+// assertion, because a future adapter is free to wrap it with more detail.
+var ErrRestartUnsupported = errors.New("restart not supported by this adapter")
 
 // UsageSample is one subject's traffic delta since the last report. SP3
 // design decision 1: the agent computes deltas; the panel never sees raw
 // cumulative counters.
 type UsageSample struct {
-	SubjectID     int64
+	SubjectID int64
+	// ServiceID is which service the traffic went through, or 0 when the
+	// adapter cannot attribute it (C2).
+	//
+	// Zero is a real answer, not a failure. An adapter whose counters are
+	// per-interface rather than per-inbound genuinely does not know, and
+	// forcing it to guess would put a confident wrong number into a bill. The
+	// panel stores 0 as NULL and the traffic still counts against the subject.
+	ServiceID     int64
 	UplinkBytes   uint64
 	DownlinkBytes uint64
 }
@@ -208,4 +365,81 @@ type UsageReporter interface {
 	// Usage reads traffic deltas since the last successful call. It is the
 	// adapter's responsibility to persist cursors and detect restarts.
 	Usage(ctx context.Context) ([]UsageSample, error)
+}
+
+// GeoDataUpdater is an optional capability for adapters whose routing rules
+// can reference geoip/geosite categories, and which therefore need a local
+// geo database kept current. Unlike Restart, this is NOT part of the base
+// Adapter interface: most protocols this codebase drives (WireGuard,
+// OpenVPN, L2TP/IPsec, Hysteria2, ocserv) have no domain/IP category
+// routing concept at all, and forcing all of them to answer "unsupported"
+// for a question that does not apply to them would be noise rather than a
+// truthful "no". Type-assert the adapter to this interface to check.
+type GeoDataUpdater interface {
+	// UpdateGeoData fetches geoipURL/geositeURL, verifies each against the
+	// hex digest published at its matching *SHA256Url, and only then
+	// replaces the adapter's local copy and restarts it to load the new
+	// data. A checksum mismatch or fetch failure must leave the adapter's
+	// existing geo data untouched -- a routing rule that resolved a moment
+	// ago must not start failing because an update attempt fell over
+	// halfway through.
+	UpdateGeoData(ctx context.Context, geoipURL, geoipSHA256URL, geositeURL, geositeSHA256URL string) (GeoDataResult, error)
+}
+
+// GeoDataResult reports what was actually applied, so the operator sees the
+// same checksum the source published rather than trusting the update
+// silently.
+type GeoDataResult struct {
+	GeoIPSHA256   string
+	GeoSiteSHA256 string
+}
+
+// CoreVersionManager is an optional capability for adapters that drive a
+// core process whose exact binary version an operator may want to pin or
+// upgrade -- Xray and sing-box, not the other five protocols this codebase
+// drives, which are either OS-packaged (ocserv, OpenVPN, L2TP/IPsec) or
+// have no separate "core" distinct from the kernel/tool itself (WireGuard,
+// Hysteria2). Type-assert the adapter to this interface to check.
+type CoreVersionManager interface {
+	// UpgradeCore installs a SPECIFIC binary, never "latest" resolved by
+	// the adapter itself -- binaryURL and binarySHA256 name an exact
+	// artifact the caller already chose. The implementation MUST verify
+	// the checksum and run the downloaded binary's own -version output
+	// BEFORE touching the currently-installed one (the "preflight"), and
+	// MUST roll back to the previous binary and restart it if the newly
+	// installed one fails to come up healthy -- an upgrade that leaves a
+	// node down with no working core is a worse failure than the upgrade
+	// simply not happening.
+	UpgradeCore(ctx context.Context, binaryURL, binarySHA256, expectedVersion string) (CoreVersionResult, error)
+}
+
+// LogReader is an optional capability for adapters that can return their
+// own recent runtime log output on demand -- today, xray via journald.
+// Unlike Restart, this is NOT part of the base Adapter interface, for the
+// same reason GeoDataUpdater is not: most of the protocols this codebase
+// drives are OS-packaged services (ocserv, OpenVPN, L2TP/IPsec) or kernel
+// facilities (WireGuard) whose logging this codebase neither configures
+// nor owns. Type-assert the adapter to this interface to check.
+type LogReader interface {
+	// ReadLogs returns the last `lines` lines of this adapter's own
+	// runtime log output, newest last (the convention `tail` and
+	// `journalctl` both already follow). The implementation clamps lines
+	// to its own sane maximum rather than trusting the caller not to ask
+	// for everything the log source has ever recorded.
+	ReadLogs(ctx context.Context, lines int) (string, error)
+}
+
+// CoreVersionResult reports what is actually running after the call
+// returns, not merely whether the download succeeded.
+type CoreVersionResult struct {
+	// InstalledVersion is read back from the binary that ended up in
+	// place -- the new one on success, the restored previous one after a
+	// rollback -- never assumed from what the caller asked to install.
+	InstalledVersion string
+	// RolledBack is true when the new binary was installed, failed its
+	// post-restart health check, and the adapter already reverted to the
+	// previous binary and restarted it. The caller must report this
+	// alongside any error: the node is not left broken, but the upgrade
+	// did not take.
+	RolledBack bool
 }

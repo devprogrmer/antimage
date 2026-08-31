@@ -43,11 +43,29 @@ const (
 	statsConfigFile = "antimage-stats.json"
 )
 
+// DefaultAssetDir is where the official Xray installer
+// (github.com/XTLS/Xray-install) places geoip.dat/geosite.dat and points
+// XRAY_LOCATION_ASSET at in the systemd unit it writes. Antimage does not
+// provision that unit -- Xray itself is installed by whatever means the
+// operator chose -- so this default only holds if the node followed that
+// convention, which the overwhelming majority of real installs do. New's
+// assetDir parameter exists precisely so a node that did not can be pointed
+// elsewhere without an agent rebuild.
+const DefaultAssetDir = "/usr/local/share/xray"
+
 // Adapter implements the adapter contract for Xray-core.
 type Adapter struct {
 	// dir is Xray's confdir. Each service becomes one file in it.
 	dir string
 	rt  Runtime
+
+	// assetDir is where geoip.dat/geosite.dat live -- wherever
+	// XRAY_LOCATION_ASSET on this host's xray unit actually points, NOT
+	// necessarily confdir. Conflating the two would silently write geo data
+	// into a directory Xray never reads if a node's unit sets the env var
+	// to somewhere else, which is common on hosts that installed Xray
+	// before antimage ever touched them.
+	assetDir string
 
 	// shapes records, per service, the checksum of the inbound rendered with
 	// NO users, as read by the last Observe. Plan compares it against the
@@ -58,11 +76,30 @@ type Adapter struct {
 	// hotAdd mirrors the runtime's capability. Cached at construction because
 	// Descriptor is called on every Hello and must not shell out.
 	hotAdd bool
+
+	// coreHealthPollWindow/Interval bound UpgradeCore's post-restart health
+	// poll. Fields rather than package constants so a test can shrink them
+	// to prove the "give up and roll back" path without spending real
+	// seconds waiting out a window sized for production Xray startup times.
+	// Zero means "use the package defaults", set by NewWithAssetDir.
+	coreHealthPollWindow   time.Duration
+	coreHealthPollInterval time.Duration
 }
 
-// New returns an adapter writing into dir and driving rt.
+// New returns an adapter writing into dir and driving rt, using
+// DefaultAssetDir for geo data.
 func New(dir string, rt Runtime, hotAdd bool) *Adapter {
-	return &Adapter{dir: dir, rt: rt, hotAdd: hotAdd}
+	return NewWithAssetDir(dir, rt, hotAdd, DefaultAssetDir)
+}
+
+// NewWithAssetDir is New with an explicit geo-data directory, for a node
+// whose Xray was not installed by the official installer's convention.
+func NewWithAssetDir(dir string, rt Runtime, hotAdd bool, assetDir string) *Adapter {
+	return &Adapter{
+		dir: dir, rt: rt, hotAdd: hotAdd, assetDir: assetDir,
+		coreHealthPollWindow:   coreHealthPollWindow,
+		coreHealthPollInterval: coreHealthPollInterval,
+	}
 }
 
 // serviceSchema is published to the panel, which validates operator input
@@ -87,11 +124,51 @@ var serviceSchema = json.RawMessage(`{
   }
 }`)
 
+// outboundSchema validates Outbound.Params, exactly as serviceSchema validates
+// Service.Params.
+//
+// The kind enum is the honest list: these are the five Xray outbound protocols
+// this adapter renders. An operator cannot select one the adapter would refuse,
+// because a refused outbound is not a validation error at the panel -- it is an
+// Xray process that fails to start, taking every working inbound on the node
+// down with it.
+var outboundSchema = json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "address":         {"type": "string"},
+    "port":            {"type": "integer", "minimum": 1, "maximum": 65535},
+    "username":        {"type": "string"},
+    "password":        {"type": "string", "writeOnly": true},
+    "private_key":     {"type": "string", "writeOnly": true},
+    "peer_public_key": {"type": "string"},
+    "endpoint":        {"type": "string"},
+    "local_addresses": {"type": "array", "items": {"type": "string"}},
+    "mtu":             {"type": "integer", "minimum": 576, "maximum": 9000}
+  }
+}`)
+
+// OutboundKinds is the set of Outbound.Kind values this adapter can render.
+// Published so the panel can offer exactly these and no more.
+var OutboundKinds = []string{"direct", "block", "socks", "http", "wireguard"}
+
 func (a *Adapter) Descriptor() adapter.Descriptor {
 	return adapter.Descriptor{
 		Kind:    Kind,
 		Version: "1",
 		Caps: adapter.Caps{
+			// Xray has a full routing engine and named outbounds, so it can
+			// apply the egress half of a v3 document.
+			SupportsOutbounds: true,
+			SupportsRouting:   true,
+			OutboundSchema:    outboundSchema,
+			// GenerateStatsConfig defines "direct" (freedom), so a rule may
+			// send traffic straight out with no outbound row behind it. "api"
+			// is deliberately absent: it is internal plumbing for the stats
+			// endpoint, and an operator rule pointing at it would blackhole
+			// whatever it matched.
+			OutboundKinds:       OutboundKinds,
+			BuiltinOutboundTags: []string{tagDirect},
 			// Declared from the runtime's actual capability, not hardcoded.
 			// The panel records this at Hello so the UI can tell an operator
 			// BEFORE they click whether adding a user drops sessions.
@@ -249,6 +326,26 @@ func (a *Adapter) Observe(ctx context.Context) (adapter.Observed, error) {
 			!strings.HasSuffix(name, fileSuffix) || strings.HasSuffix(name, appliedSuffix) {
 			continue
 		}
+		// Egress is node-scoped, so it carries no service id and must not go
+		// through the per-service path below -- which would try to parse
+		// "egress" as an int64, fail, and drop the file silently, leaving a
+		// hand edit to the routing table permanently undetected.
+		if name == egressFile {
+			raw, err := os.ReadFile(filepath.Join(a.dir, name))
+			if err != nil {
+				return obs, fmt.Errorf("read %s: %w", name, err)
+			}
+			body := string(raw)
+			_, managed := parseEgressMarker(body)
+			obs.Egress = &adapter.ObservedEgress{
+				Present: true,
+				Managed: managed,
+				// Computed from disk, not read from the marker: comparing the
+				// two is what catches an edit.
+				Checksum: checksumOf([]byte(payloadOf(body))),
+			}
+			continue
+		}
 		raw, err := os.ReadFile(filepath.Join(a.dir, name))
 		if err != nil {
 			return obs, fmt.Errorf("read %s: %w", name, err)
@@ -303,6 +400,8 @@ type stepPayload struct {
 	// Users is the tag set this config serves, carried through to the applied
 	// sidecar so a later Plan can tell whether anybody is being removed.
 	Users []string `json:"users,omitempty"`
+	// PolicyConfig is the speed limit policy configuration (enforcement).
+	PolicyConfig string `json:"policy_config,omitempty"`
 }
 
 // Step kinds. These reach the panel's node_apply_steps.step_kind and are what
@@ -316,6 +415,10 @@ const (
 	// StepRestartService reapplies a config already on disk that the runtime
 	// never successfully loaded.
 	StepRestartService = "restart_service"
+	// Egress steps are node-scoped: they carry no ServiceID, because outbounds
+	// and routing belong to the node rather than to any one inbound.
+	StepWriteEgress  = "write_egress"
+	StepRemoveEgress = "remove_egress"
 )
 
 // Plan diffs desired against observed. It is pure and repeatable: it performs
@@ -333,10 +436,25 @@ func (a *Adapter) Plan(
 
 	// Subjects are node-wide in the document; every enabled service serves
 	// every subject granted to it, and the panel has already filtered to the
-	// ones entitled here.
-	users, err := usersFrom(desired)
-	if err != nil {
+	// ones entitled here. The user LIST is now built per service inside the
+	// loop below, because since C2 each user's Xray tag carries the service id.
+	//
+	// Built once here anyway, purely to fail fast: a subject with no usable
+	// credential is an error about the document, not about any one service, and
+	// discovering it on the first service would report it as that service's
+	// fault.
+	if _, err := usersFor(desired, 0); err != nil {
 		return plan, err
+	}
+
+	// Generate policy configuration for speed limits (if any subjects have limits)
+	var policyConfigData string
+	if len(desired.Subjects) > 0 {
+		policyBytes, err := GeneratePolicyConfig(desired.Subjects)
+		if err != nil {
+			return plan, fmt.Errorf("generate policy config: %w", err)
+		}
+		policyConfigData = string(policyBytes)
 	}
 
 	desiredIDs := make(map[int64]struct{}, len(desired.Services))
@@ -368,6 +486,13 @@ func (a *Adapter) Plan(
 		if err != nil {
 			return adapter.Plan{}, fmt.Errorf("service %d: %w", svc.ID, err)
 		}
+		// Per service: each user's tag carries this service's id, so Xray keeps
+		// one counter per (subject, service) and the usage report can say which
+		// inbound earned the traffic.
+		users, err := usersFor(desired, svc.ID)
+		if err != nil {
+			return adapter.Plan{}, fmt.Errorf("service %d: %w", svc.ID, err)
+		}
 		rendered, err := in.Generate(users)
 		if err != nil {
 			return adapter.Plan{}, fmt.Errorf("service %d: %w", svc.ID, err)
@@ -382,7 +507,7 @@ func (a *Adapter) Plan(
 			// New inbound: a new listener cannot appear without a restart.
 			seq++
 			plan.Steps = append(plan.Steps,
-				a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users))
+				a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users, policyConfigData))
 
 		case !o.Managed:
 			// Somebody else's file occupies our name. Refusing is safer than
@@ -399,7 +524,7 @@ func (a *Adapter) Plan(
 				Seq: seq, Kind: StepRestartService,
 				Disruption: adapter.DisruptRestart, ServiceID: svc.ID,
 				Payload: mustPayload(stepPayload{
-					Config: string(rendered), Shape: want, Users: userTags(users),
+					Config: string(rendered), Shape: want, Users: userTags(users), PolicyConfig: policyConfigData,
 				}),
 			})
 
@@ -436,11 +561,11 @@ func (a *Adapter) Plan(
 				// the users were added through the API; the file is brought
 				// into line so the next Observe does not report drift.
 				plan.Steps = append(plan.Steps,
-					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptNone, users))
+					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptNone, users, policyConfigData))
 			} else {
 				seq++
 				plan.Steps = append(plan.Steps,
-					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users))
+					a.writeStep(seq, svc.ID, in, rendered, adapter.DisruptRestart, users, policyConfigData))
 			}
 		}
 	}
@@ -462,7 +587,75 @@ func (a *Adapter) Plan(
 		})
 	}
 
+	egressStep, err := a.planEgress(desired, observed, seq)
+	if err != nil {
+		return adapter.Plan{}, err
+	}
+	if egressStep != nil {
+		plan.Steps = append(plan.Steps, *egressStep)
+	}
+
 	return plan, nil
+}
+
+// planEgress diffs the node's outbound and routing document.
+//
+// Every outcome is restart-class. Xray reads its confdir once at startup and
+// exposes no runtime API for outbounds or routing, so a change here is only
+// live after the process restarts. Reporting anything cheaper would tell the
+// panel a routing change had taken effect while traffic still followed the old
+// table.
+func (a *Adapter) planEgress(
+	desired adapter.Desired, observed adapter.Observed, seq int,
+) (*adapter.Step, error) {
+	// A rule naming a subject matches them on every inbound they are on, and
+	// since C2 that means one email per service. The renderer needs the service
+	// list to expand them; enabled services only, because a disabled one has no
+	// inbound for a rule to match against.
+	var serviceIDs []int64
+	for _, svc := range desired.Services {
+		if svc.Kind == string(Kind) && svc.Enabled {
+			serviceIDs = append(serviceIDs, svc.ID)
+		}
+	}
+
+	rendered, err := GenerateEgressConfig(desired.Outbounds, desired.Routing, serviceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("generate egress config: %w", err)
+	}
+
+	// Nothing desired.
+	if rendered == nil {
+		if observed.Egress != nil && observed.Egress.Present && observed.Egress.Managed {
+			return &adapter.Step{
+				Seq: seq + 1, Kind: StepRemoveEgress,
+				Disruption: adapter.DisruptRestart,
+			}, nil
+		}
+		// Absent, or present but not ours. An unmanaged egress file is left
+		// alone for the same reason an unmanaged service file is: this adapter
+		// never overwrites something a human put there.
+		return nil, nil
+	}
+
+	want := checksumOf(rendered)
+
+	if observed.Egress != nil && observed.Egress.Present {
+		if !observed.Egress.Managed {
+			return nil, fmt.Errorf(
+				"%s exists but was not written by antimage; refusing to overwrite it. "+
+					"Move it aside to let the panel manage egress on this node", egressFile)
+		}
+		if observed.Egress.Checksum == want {
+			return nil, nil // converged
+		}
+	}
+
+	return &adapter.Step{
+		Seq: seq + 1, Kind: StepWriteEgress,
+		Disruption: adapter.DisruptRestart,
+		Payload:    mustPayload(stepPayload{Config: string(rendered)}),
+	}, nil
 }
 
 // userDelta reports whether the only difference is the user set, and what
@@ -491,7 +684,7 @@ func (a *Adapter) userOnlyChange(serviceID int64, in Inbound) bool {
 }
 
 func (a *Adapter) writeStep(
-	seq int, serviceID int64, in Inbound, rendered []byte, d adapter.Disruption, users []User,
+	seq int, serviceID int64, in Inbound, rendered []byte, d adapter.Disruption, users []User, policyConfig string,
 ) adapter.Step {
 	shell, err := in.Generate(nil)
 	shape := ""
@@ -499,9 +692,12 @@ func (a *Adapter) writeStep(
 		shape = checksumOf(shell)
 	}
 	return adapter.Step{
-		Seq: seq, Kind: StepWriteService, Disruption: d, ServiceID: serviceID,
+		Seq:        seq,
+		Kind:       StepWriteService,
+		Disruption: d,
+		ServiceID:  serviceID,
 		Payload: mustPayload(stepPayload{
-			Config: string(rendered), Tag: in.Tag(), Shape: shape, Users: userTags(users),
+			Config: string(rendered), Shape: shape, Users: userTags(users), PolicyConfig: policyConfig,
 		}),
 	}
 }
@@ -536,11 +732,18 @@ func mustPayload(p stepPayload) json.RawMessage {
 	return raw
 }
 
-// usersFrom projects the document's subjects into the per-inbound user list.
-func usersFrom(desired adapter.Desired) ([]User, error) {
+// usersFor projects the document's subjects into one inbound's user list.
+//
+// The email is per-SERVICE, which is what makes C2 attribution possible at all.
+// Xray keeps one counter per email, so a subject carrying the same email on two
+// inbounds has their traffic summed into a single counter and there is no way
+// to tell afterwards which inbound earned it. Deriving the email from both ids
+// gives one counter per (subject, service) pair, which is exactly the grain the
+// usage report needs.
+func usersFor(desired adapter.Desired, serviceID int64) ([]User, error) {
 	users := make([]User, 0, len(desired.Subjects))
 	for _, s := range desired.Subjects {
-		u := User{SubjectID: s.ID, Email: subjectEmail(s.ID)}
+		u := User{SubjectID: s.ID, ServiceID: serviceID, Email: subjectEmail(s.ID, serviceID)}
 		for _, c := range s.Credentials {
 			// Prefer uuid; trojan inbounds pick password at render time.
 			if c.Kind == "uuid" {
@@ -560,10 +763,22 @@ func usersFrom(desired adapter.Desired) ([]User, error) {
 }
 
 // subjectEmail is the per-user tag inside Xray. It is derived from the subject
-// id rather than a name so it is stable across renames, which matters because
-// SP3 will aggregate traffic by it.
-func subjectEmail(id int64) string {
-	return fmt.Sprintf("subject-%d@antimage", id)
+// and service ids rather than a name so it is stable across renames, which
+// matters because accounting aggregates by it.
+//
+// The service id is in the tag because Xray's stats are keyed by email alone.
+// Without it every inbound a subject is on shares one counter, and C2's
+// question -- which service earned this traffic -- has no answer at the edge to
+// carry inward.
+//
+// serviceID 0 renders the legacy node-wide form. Nothing in production asks for
+// it; it exists so the routing rules in egress.go, which match a subject across
+// every inbound, keep a tag to build from.
+func subjectEmail(subjectID, serviceID int64) string {
+	if serviceID == 0 {
+		return fmt.Sprintf("subject-%d@antimage", subjectID)
+	}
+	return fmt.Sprintf("subject-%d.svc-%d@antimage", subjectID, serviceID)
 }
 
 // Apply executes exactly one step. Every branch is idempotent, because the
@@ -597,6 +812,12 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 			if err := a.ensureStatsConfig(ctx); err != nil {
 				return fail(fmt.Errorf("ensure stats config: %w", err))
 			}
+			// Ensure policy config is present before restart (enforcement).
+			if p.PolicyConfig != "" {
+				if err := a.ensurePolicyConfig(ctx, []byte(p.PolicyConfig)); err != nil {
+					return fail(fmt.Errorf("ensure policy config: %w", err))
+				}
+			}
 			if err := a.rt.Restart(ctx); err != nil {
 				return fail(fmt.Errorf("restart after writing service %d: %w", step.ServiceID, err))
 			}
@@ -606,10 +827,42 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 			return fail(fmt.Errorf("record applied state for service %d: %w", step.ServiceID, err))
 		}
 
+	case StepWriteEgress:
+		if err := a.writeEgress([]byte(p.Config)); err != nil {
+			return fail(err)
+		}
+		// Xray reads outbounds and routing once, at startup. Without the
+		// restart the file is correct and the running process still routes by
+		// the previous table, which is the failure mode the applied sidecar
+		// exists to prevent elsewhere: converged on disk, wrong in memory.
+		if err := a.ensureStatsConfig(ctx); err != nil {
+			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
+		if err := a.rt.Restart(ctx); err != nil {
+			return fail(fmt.Errorf("restart after writing egress: %w", err))
+		}
+
+	case StepRemoveEgress:
+		if err := os.Remove(filepath.Join(a.dir, egressFile)); err != nil && !os.IsNotExist(err) {
+			return fail(fmt.Errorf("remove %s: %w", egressFile, err))
+		}
+		if err := a.ensureStatsConfig(ctx); err != nil {
+			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
+		if err := a.rt.Restart(ctx); err != nil {
+			return fail(fmt.Errorf("restart after removing egress: %w", err))
+		}
+
 	case StepRestartService:
 		// Ensure stats config is present before restart (SP3).
 		if err := a.ensureStatsConfig(ctx); err != nil {
 			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
+		// Ensure policy config is present before restart (enforcement).
+		if p.PolicyConfig != "" {
+			if err := a.ensurePolicyConfig(ctx, []byte(p.PolicyConfig)); err != nil {
+				return fail(fmt.Errorf("ensure policy config: %w", err))
+			}
 		}
 		if err := a.rt.Restart(ctx); err != nil {
 			return fail(fmt.Errorf("restart service %d: %w", step.ServiceID, err))
@@ -629,6 +882,12 @@ func (a *Adapter) Apply(ctx context.Context, step adapter.Step) (adapter.StepRes
 		// Ensure stats config is present before restart (SP3).
 		if err := a.ensureStatsConfig(ctx); err != nil {
 			return fail(fmt.Errorf("ensure stats config: %w", err))
+		}
+		// Ensure policy config is present before restart (enforcement).
+		if p.PolicyConfig != "" {
+			if err := a.ensurePolicyConfig(ctx, []byte(p.PolicyConfig)); err != nil {
+				return fail(fmt.Errorf("ensure policy config: %w", err))
+			}
 		}
 		if err := a.rt.Restart(ctx); err != nil {
 			return fail(fmt.Errorf("restart after removing service %d: %w", step.ServiceID, err))
@@ -759,5 +1018,52 @@ func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: ok, Detail: detail}, nil
 }
 
+// Restart bounces the running process on demand, independent of whether the
+// desired document changed. It reuses the same runtime call the reconciler
+// itself uses for a DisruptRestart step, so an on-demand restart and a
+// config-triggered one behave identically.
+func (a *Adapter) Restart(ctx context.Context) error {
+	return a.rt.Restart(ctx)
+}
+
 // compile-time proof that the contract is satisfied.
 var _ adapter.Adapter = (*Adapter)(nil)
+
+// writeEgress installs the node-scoped outbound and routing document.
+//
+// Same atomic write as writeService -- temp file, sync, chmod, rename -- so a
+// crash mid-write leaves either the old document or the new one, never a
+// truncated file that would stop Xray from starting and take every inbound on
+// the node down with it.
+func (a *Adapter) writeEgress(rendered []byte) error {
+	if err := os.MkdirAll(a.dir, 0o700); err != nil {
+		return fmt.Errorf("create xray confdir: %w", err)
+	}
+	body := egressMarker(checksumOf(rendered)) + "\n" + string(rendered)
+
+	tmp, err := os.CreateTemp(a.dir, filePrefix+"*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp egress config: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed
+
+	if _, err := tmp.WriteString(body); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp egress config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temp egress config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp egress config: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		return fmt.Errorf("chmod temp egress config: %w", err)
+	}
+	if err := os.Rename(tmpName, filepath.Join(a.dir, egressFile)); err != nil {
+		return fmt.Errorf("install egress config: %w", err)
+	}
+	return nil
+}

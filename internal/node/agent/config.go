@@ -32,6 +32,52 @@ type Config struct {
 	CAFingerprint string `yaml:"ca_fingerprint"`
 	StateDir      string `yaml:"state_dir"`
 	NodeID        int64  `yaml:"node_id"`
+	// Adapters declares which protocols this host runs. A node serves several
+	// at once, each handling the services of its own kind, so this is a list.
+	//
+	// It is the operator's statement of what is actually installed here, and
+	// nothing else can supply it: the panel cannot know whether this machine
+	// has an xray binary, and guessing would produce a node that accepts
+	// services it can never apply. What the node reports at Hello is built from
+	// this, so the panel -- and any editor above it -- offers exactly the
+	// protocols this host can execute.
+	Adapters []AdapterConfig `yaml:"adapters"`
+}
+
+// AdapterConfig is one adapter's placement on this host.
+//
+// Every field except Kind has a default, so a host that installed a protocol in
+// the usual place declares only its kind. The fields exist because "the usual
+// place" is a distribution's opinion, not a fact.
+type AdapterConfig struct {
+	// Kind selects the adapter: xray, singbox, wireguard, hysteria2, l2tp, stub.
+	Kind string `yaml:"kind"`
+	// Binary is the executable, for adapters that shell out to one. Empty means
+	// the adapter's own default, which is normally the bare name resolved
+	// through PATH.
+	Binary string `yaml:"binary,omitempty"`
+	// ConfigDir is where this adapter writes protocol configuration. Empty
+	// means the adapter's documented system location.
+	ConfigDir string `yaml:"config_dir,omitempty"`
+	// Unit is the systemd unit that owns the process, for adapters that manage
+	// one. Empty means the adapter's default.
+	Unit string `yaml:"unit,omitempty"`
+	// APIAddress is the protocol's own management API, where it has one.
+	//
+	// Only Xray uses it, and it is what decides whether that node can add a
+	// user without a restart: Caps.HotUserAdd is reported per NODE, not per
+	// adapter type, precisely because it depends on this being configured here.
+	// Leaving it empty is a supported choice and costs a restart per user
+	// change; it is not a degraded mode.
+	APIAddress string `yaml:"api_address,omitempty"`
+	// AssetDir is where geo data (geoip.dat/geosite.dat) lives, for adapters
+	// that have any. Only Xray uses it today. Empty means the adapter's own
+	// documented default -- for Xray, wherever the official installer's
+	// systemd unit points XRAY_LOCATION_ASSET, which is xray.DefaultAssetDir
+	// on a host that followed that convention. A host whose Xray predates
+	// antimage and lives elsewhere sets this explicitly rather than needing
+	// an agent rebuild.
+	AssetDir string `yaml:"asset_dir,omitempty"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -51,6 +97,11 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.StateDir == "" {
 		cfg.StateDir = DefaultStateDir
+	}
+	for i, ad := range cfg.Adapters {
+		if strings.TrimSpace(ad.Kind) == "" {
+			return nil, fmt.Errorf("adapters[%d]: kind is required", i)
+		}
 	}
 	// Resolve the dial target now so a malformed panel_url is a startup
 	// failure with a readable message, rather than an Unavailable on every

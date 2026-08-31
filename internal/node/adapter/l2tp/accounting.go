@@ -17,8 +17,8 @@ import (
 // accountingCursor persists the last poll time and counter values.
 // This enables delta computation and survives agent restarts.
 type accountingCursor struct {
-	LastPoll int64                       `json:"last_poll"`
-	Counters map[string]trafficCounter   `json:"counters"`
+	LastPoll int64                     `json:"last_poll"`
+	Counters map[string]trafficCounter `json:"counters"`
 }
 
 type trafficCounter struct {

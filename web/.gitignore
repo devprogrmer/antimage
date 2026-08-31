@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Temporary test outputs and workspace state
+fix_alert_tests.sh
+openclaw-workspace-state.json
+test-output.txt
+test-results.txt

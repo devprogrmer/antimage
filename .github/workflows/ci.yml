@@ -1,5 +1,15 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [master]
+
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   go:
     runs-on: ubuntu-latest
@@ -10,13 +20,20 @@ jobs:
       - run: go build ./...
       - run: make check-imports
       - run: make check-rtl
+      - run: make check-tokens
       - run: go vet ./...
       # v8 installs golangci-lint v2. v6 pinned v1.64.8, which is built with
       # Go 1.24 and refuses to run against a module targeting 1.25.
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
-      - run: go test ./... -race -count=1
+      # An explicit timeout, because the default is 10m PER PACKAGE and
+      # internal/panel/httpapi now sits right at it under -race: run
+      # 32851759291 on master failed at 600.104s with the test then running
+      # only 1s in, so it was the suite outgrowing the limit rather than
+      # anything hanging. The e2e line below already states its own timeout;
+      # this one was relying on a default nobody had chosen.
+      - run: go test ./... -race -count=1 -timeout 25m
       # The acceptance suite for the definition of done. It needs no daemon:
       # a real panel and a real agent talk over loopback with genuine mTLS.
       - run: go test ./test/e2e/... -tags e2e -count=1 -timeout 15m
@@ -43,6 +60,7 @@ jobs:
     env:
       XRAY_VERSION: v26.3.27
       SINGBOX_VERSION: 1.13.19
+      HYSTERIA_VERSION: 2.6.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -62,13 +80,61 @@ jobs:
           chmod +x "$HOME/bin/xray"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
+      # WireGuard and Hysteria2 (AD-3). Both adapters shipped with Apply
+      # returning "not yet implemented", so nothing had ever executed their
+      # ExecRuntime. Installing the real tooling is what makes that testable.
+      #
+      # ocserv is here too rather than in a step of its own, because it needs
+      # the same apt-get update: installing it first would run against whatever
+      # package lists the runner image happened to ship with.
+      - name: install wireguard, hysteria, ocserv and openvpn
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wireguard-tools ocserv openvpn
+          curl -sSL -o "$HOME/bin/hysteria" \
+            "https://github.com/apernet/hysteria/releases/download/app%2Fv${HYSTERIA_VERSION}/hysteria-linux-amd64"
+          chmod +x "$HOME/bin/hysteria"
+
       - name: prove the binaries are real
         run: |
           xray version
           sing-box version
+          wg --version
+          wg-quick --help 2>&1 | head -1
+          openvpn --version | head -1
+          hysteria version
+          ocpasswd --help 2>&1 | head -1
+
+      # The ocserv adapter's real-runtime test lives in its own package rather
+      # than test/e2e, because it drives the adapter's own passwd parser -- a
+      # test that reimplemented that parser would assert against a copy of the
+      # code it is meant to check. It therefore needs its own run line: the e2e
+      # line below would not reach it.
+      - name: real-runtime ocserv user database
+        run: go test ./internal/node/adapter/ocserv/ -tags realruntime -run TestRealRuntime -v -count=1
+
+      # Two things only the real thing can answer: whether openvpn accepts the
+      # generated config, and whether the login script -- which IS the
+      # authentication decision -- behaves under a real shell.
+      - name: real-runtime openvpn config and login script
+        run: go test ./internal/node/adapter/openvpn/ -tags realruntime -run TestRealRuntime -v -count=1
 
       - name: real-runtime lifecycle for both adapters
-        run: go test ./test/e2e/... -tags "e2e realruntime" -run TestRealRuntime -v -count=1 -timeout 15m
+        # Excludes the WireGuard interface lifecycle: it needs root and runs in
+        # its own sudo step below. Without the exclusion it runs here too and
+        # fails by design, which is what it is built to do without privileges.
+        run: go test ./test/e2e/... -tags "e2e realruntime" -run "TestRealRuntime" -skip "TestRealRuntimeWireGuardLifecycle" -v -count=1 -timeout 15m
+
+      # The WireGuard lifecycle brings up a real interface, which needs root and
+      # the kernel module. It is a separate step because it needs sudo, and it
+      # FAILS rather than skips without privileges -- an install path that has
+      # never actually run is precisely what AD-3 was about.
+      - name: real-runtime wireguard interface lifecycle (root)
+        run: |
+          sudo -E env "PATH=$PATH" \
+            go test ./test/e2e/... -tags "e2e realruntime" \
+              -run TestRealRuntimeWireGuardLifecycle -v -count=1 -timeout 10m
 
   # The go job runs check-rtl, which is pure grep and needs no toolchain. The
   # i18n tests and the UI build do need Node, and without this job neither is

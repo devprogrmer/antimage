@@ -44,6 +44,7 @@ message AgentMessage {
     Heartbeat heartbeat = 2;
     ApplyReport apply_report = 3;
     UsageReport usage_report = 4;
+    AgentCommandResult command_result = 5;
   }
 }
 
@@ -52,7 +53,178 @@ message PanelMessage {
     RevisionBump revision_bump = 1;
     FetchNow fetch_now = 2;
     UpgradeRequired upgrade_required = 3;
+    AgentCommand command = 4;
   }
+}
+
+// AgentCommand is the panel asking the agent to do something ON DEMAND,
+// outside the desired-state reconciliation loop -- restarting a service the
+// operator clicked, pulling a fresh geo database, installing a precise core
+// version, or fetching a log tail. It exists separately from
+// RevisionBump/FetchNow because those two both mean
+// "converge toward the desired document", and an on-demand action is not a
+// convergence request: a restart with no config change has nothing to
+// converge, and this command is what asks for it anyway.
+//
+// command_id correlates this to its AgentCommandResult. It is a string
+// rather than reusing the desired_revision or any DB primary key, because a
+// command is not a row anywhere -- the panel's Hub only needs to remember it
+// long enough to wake whichever HTTP request is waiting, and does not
+// persist it. A UUID generated per HTTP request satisfies that with no
+// coordination against any other id space.
+message AgentCommand {
+  string command_id = 1;
+  oneof body {
+    RestartAdapters restart_adapters = 2;
+    UpdateGeoData update_geo_data = 3;
+    UpgradeCore upgrade_core = 4;
+    FetchLogs fetch_logs = 5;
+  }
+}
+
+// RestartAdapters names which adapter kinds to restart. Empty means every
+// adapter this node currently runs -- explicit rather than a sentinel value,
+// so a caller who really does mean "just xray" is not one typo away from
+// restarting everything.
+message RestartAdapters {
+  repeated string kinds = 1;
+}
+
+// UpdateGeoData asks the agent to fetch fresh geoip/geosite databases and
+// restart whichever adapter uses them. The panel supplies the URLs rather
+// than the agent hardcoding an upstream: an operator behind a mirror or
+// firewall can point at their own copy without an agent upgrade, and there
+// is exactly one place -- the panel -- that decides which source a fleet
+// trusts.
+//
+// Xray reads geo data once at process start, not on SIGHUP/reload, so
+// "update" without a restart would download a file nothing reads; the
+// agent restarts the adapter itself once the new files verify, using the
+// same Adapter.Restart path RestartAdapters uses.
+message UpdateGeoData {
+  string geoip_url = 1;
+  string geoip_sha256_url = 2;
+  string geosite_url = 3;
+  string geosite_sha256_url = 4;
+}
+
+// UpgradeCore asks the agent to install a SPECIFIC core binary, unlike
+// UpdateGeoData there is deliberately no "default source" anywhere in this
+// path: a data file that turns out wrong degrades routing accuracy, but an
+// executable that turns out wrong can take a node fully offline, and that
+// is not a choice this system makes on an operator's behalf. kind and
+// binary_sha256 are both required for the same reason -- kind picks which
+// adapter (a node can run xray and sing-box together, with unrelated
+// version cadences), and the checksum is not fetched from a companion URL
+// the way geo data's is: the panel resolves it once, from whatever
+// manifest format that release actually publishes, so the agent's own
+// verification logic never has to parse a new checksum format because an
+// upstream changed how it publishes one.
+message UpgradeCore {
+  string kind = 1;
+  string binary_url = 2;
+  string binary_sha256 = 3;
+  // expected_version is checked against `<binary> -version` output during
+  // the preflight, BEFORE the running installation is touched at all. Not
+  // exact-match -- Xray's own -version output carries a date and build
+  // tags around the number -- just Contains(), which is enough to catch
+  // "the URL served the wrong release" without the agent needing to parse
+  // a version string format that could change out from under it.
+  string expected_version = 4;
+}
+
+message AgentCommandResult {
+  string command_id = 1;
+  oneof body {
+    RestartAdaptersResult restart_adapters = 2;
+    UpdateGeoDataResult update_geo_data = 3;
+    UpgradeCoreResult upgrade_core = 4;
+    FetchLogsResult fetch_logs = 5;
+  }
+}
+
+// FetchLogs asks the agent for the tail of ONE named adapter's own recent
+// runtime log output. Targets exactly one kind, the same reasoning as
+// UpgradeCore: a node running xray and sing-box together has two unrelated
+// log streams, and "fetch logs" with no kind specified would not have a
+// single correct meaning.
+message FetchLogs {
+  string kind = 1;
+  // lines is how many trailing lines to return. The agent clamps this to
+  // its own sane maximum rather than trusting the panel not to ask for
+  // everything the log source has ever recorded.
+  int32 lines = 2;
+}
+
+// FetchLogsResult carries one adapter's raw recent log text, newest last
+// (the convention `tail`/`journalctl` already follow), or an error
+// explaining why there is none. Unlike UpgradeCoreResult there is no
+// separate Found/Capable distinction on the wire -- see
+// Registry.ReadLogs, which folds both into one error string here because,
+// unlike a core upgrade, nothing was attempted that could partially
+// succeed: either a readable adapter of this kind exists, or it does not.
+message FetchLogsResult {
+  string kind = 1;
+  bool ok = 2;
+  string logs = 3;
+  // Empty when ok.
+  string error = 4;
+}
+
+// UpgradeCoreResult reports what is actually installed and running RIGHT
+// NOW, not just whether the download succeeded. RolledBack=true with
+// Ok=false means the new binary was installed, failed to come up healthy,
+// and the agent already reverted to the previous one and restarted it --
+// the node is not sitting broken waiting for a human, but the upgrade did
+// not take, and both facts have to reach the operator in one message.
+message UpgradeCoreResult {
+  string kind = 1;
+  bool ok = 2;
+  string installed_version = 3;
+  bool rolled_back = 4;
+  // Empty when ok.
+  string error = 5;
+}
+
+message UpdateGeoDataResult {
+  repeated AdapterGeoUpdateOutcome outcomes = 1;
+}
+
+// AdapterGeoUpdateOutcome is per adapter kind, so a node running xray
+// alongside wireguard reports xray's real outcome without wireguard's
+// unrelated presence changing anything about it.
+//
+// Unlike AdapterRestartOutcome, adapters with no geo-database concept at
+// all do NOT get a row here -- most of the protocols this codebase drives
+// have no domain/IP category routing, and listing five "unsupported" rows
+// for a node that only runs xray would be noise, not signal. An empty
+// outcomes list means no adapter on this node has geo data to update at
+// all, which the caller reports as its own clear condition rather than as
+// a silent no-op success.
+message AdapterGeoUpdateOutcome {
+  string kind = 1;
+  bool ok = 2;
+  string geoip_sha256 = 3;
+  string geosite_sha256 = 4;
+  // Empty when ok.
+  string error = 5;
+}
+
+message RestartAdaptersResult {
+  repeated AdapterRestartOutcome outcomes = 1;
+}
+
+// AdapterRestartOutcome is per adapter kind, because a node running xray and
+// wireguard together can have one restart and the other refuse -- wireguard
+// has no restartable daemon in the systemd sense, and reporting that
+// truthfully as unsupported is the whole point of doing this per-kind rather
+// than collapsing to one ok/error for the node.
+message AdapterRestartOutcome {
+  string kind = 1;
+  bool ok = 2;
+  // Empty when ok. "unsupported: <reason>" when the adapter kind has no
+  // restart concept, never silently ok.
+  string error = 3;
 }
 
 message Hello {
@@ -143,9 +315,19 @@ message UsageReport {
   repeated UsageSample samples = 3;
 }
 
-// UsageSample is one subject's traffic delta since the last report.
+// UsageSample is one subject's traffic delta on one service since the last
+// report.
 message UsageSample {
   int64 subject_id = 1;
   uint64 uplink_bytes = 2;
   uint64 downlink_bytes = 3;
+  // Which service the traffic went through, when the adapter can attribute it
+  // (C2). Zero means "not attributed", which the panel stores as NULL rather
+  // than guessing: a node running one adapter that cannot attribute, or an
+  // agent older than this field, both send zero and must keep accounting.
+  //
+  // Deliberately not optional. Proto3 scalar presence would distinguish "the
+  // agent said zero" from "the agent said nothing", and there is nothing the
+  // panel would do differently: both mean the same NULL.
+  int64 service_id = 4;
 }

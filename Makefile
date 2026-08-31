@@ -2,7 +2,7 @@ GO      ?= go
 LDFLAGS := -X github.com/amyrm/antimage/internal/shared/version.Version=$(shell git describe --tags --always --dirty)
 BUILD   := CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)"
 
-.PHONY: test lint build check-imports check-rtl web proto proto-lint sync-install clean
+.PHONY: test lint build check-imports check-rtl check-tokens web proto proto-lint sync-install clean
 
 # buf is installed with `go install github.com/bufbuild/buf/cmd/buf@latest`,
 # which places it in $(go env GOPATH)/bin. Put that directory on PATH rather
@@ -32,6 +32,9 @@ check-imports:
 
 check-rtl:
 	./scripts/check-rtl.sh
+
+check-tokens:
+	./scripts/check-tokens.sh
 
 # Vite writes into internal/panel/webui/dist, which is where go:embed reads
 # from, so `build` depends on this: a released binary always carries a UI

@@ -20,3 +20,16 @@ graphify-out/
 # Release artifacts built by scripts/release.sh; published to GitHub Releases,
 # never committed.
 dist/
+antimage-node.exe
+antimage-panel.exe
+*.exe
+
+# Machine-local Claude Code configuration. Claude.reg in the repo root carries
+# an inference-gateway API key; committing it would publish a live credential.
+*.reg
+
+# Temporary test outputs and workspace state files
+fix_alert_tests.sh
+openclaw-workspace-state.json
+test-output.txt
+test-results.txt

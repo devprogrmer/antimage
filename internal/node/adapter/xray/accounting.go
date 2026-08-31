@@ -19,17 +19,18 @@ import (
 // and the delta is then the new absolute value rather than a negative number.
 func (a *Adapter) Usage(ctx context.Context) ([]adapter.UsageSample, error) {
 	if !a.hotAdd {
-		// No accounting capability.
+		// No accounting capability. hotAdd is set from HotAddSupported(), which
+		// is exactly "the management API address is configured" -- and that
+		// address is what QueryStats reads through, so this one check answers
+		// both questions.
 		return nil, nil
 	}
 
-	rt, ok := a.rt.(*ExecRuntime)
-	if !ok || rt.APIAddress == "" {
-		return nil, nil
-	}
-
-	// Query current cumulative stats from Xray.
-	stats, err := rt.QueryStats(ctx)
+	// Through the Runtime interface rather than a *ExecRuntime assertion.
+	// QueryStats is on the interface, so the concrete type was never needed,
+	// and requiring it made the accounting path -- where C2's attribution is
+	// recovered -- impossible to exercise without launching a real Xray.
+	stats, err := a.rt.QueryStats(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query xray stats: %w", err)
 	}
@@ -44,8 +45,10 @@ func (a *Adapter) Usage(ctx context.Context) ([]adapter.UsageSample, error) {
 	newCursors := make(map[string]userCursor, len(stats))
 
 	for _, stat := range stats {
-		// Extract subject ID from email (format: subject-<id>@antimage).
-		subjectID, err := parseSubjectEmail(stat.Email)
+		// Extract subject and service from the tag. Xray keys one counter per
+		// email and the email carries both ids, so this is where C2's
+		// attribution is recovered.
+		subjectID, serviceID, err := parseSubjectEmail(stat.Email)
 		if err != nil {
 			// Skip entries that don't match our format (shouldn't happen).
 			continue
@@ -69,6 +72,7 @@ func (a *Adapter) Usage(ctx context.Context) ([]adapter.UsageSample, error) {
 		if uplink > 0 || downlink > 0 {
 			samples = append(samples, adapter.UsageSample{
 				SubjectID:     subjectID,
+				ServiceID:     serviceID,
 				UplinkBytes:   uplink,
 				DownlinkBytes: downlink,
 			})
@@ -132,17 +136,47 @@ func (a *Adapter) saveCursors(cursors map[string]userCursor) error {
 	return os.WriteFile(a.cursorsPath(), raw, 0o600)
 }
 
-// parseSubjectEmail extracts the subject ID from "subject-<id>@antimage".
-func parseSubjectEmail(email string) (int64, error) {
+// parseSubjectEmail extracts the subject and service ids from an Xray user tag.
+//
+// Two shapes are accepted:
+//
+//	subject-<sid>.svc-<svcid>@antimage   the C2 form, attributed
+//	subject-<sid>@antimage               the legacy form, service id 0
+//
+// The legacy form is still parsed on purpose. Emails only change when the
+// inbound is rewritten, so between an agent upgrade and the next convergence
+// Xray is still counting against the old tags. Rejecting them there would throw
+// away real traffic for the sake of a format, and unattributed traffic is worth
+// far more than none.
+//
+// A trailing suffix on the domain ("@antimage-2") is tolerated as before.
+func parseSubjectEmail(email string) (subjectID, serviceID int64, err error) {
 	const prefix = "subject-"
-	const suffix = "@antimage"
-	if !strings.HasPrefix(email, prefix) || !strings.HasSuffix(email, suffix) {
-		return 0, fmt.Errorf("invalid subject email format: %q", email)
+	const domain = "@antimage"
+
+	if !strings.HasPrefix(email, prefix) {
+		return 0, 0, fmt.Errorf("invalid subject email format: %q", email)
 	}
-	idStr := strings.TrimSuffix(strings.TrimPrefix(email, prefix), suffix)
-	var id int64
-	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		return 0, fmt.Errorf("parse subject id from %q: %w", email, err)
+	atIndex := strings.Index(email, domain)
+	if atIndex == -1 {
+		return 0, 0, fmt.Errorf("invalid subject email format: %q", email)
 	}
-	return id, nil
+
+	// Everything between "subject-" and "@antimage": either "<sid>" or
+	// "<sid>.svc-<svcid>".
+	body := email[len(prefix):atIndex]
+	idStr, svcStr, hasService := strings.Cut(body, ".svc-")
+
+	if _, err := fmt.Sscanf(idStr, "%d", &subjectID); err != nil {
+		return 0, 0, fmt.Errorf("parse subject id from %q: %w", email, err)
+	}
+	if hasService {
+		if _, err := fmt.Sscanf(svcStr, "%d", &serviceID); err != nil {
+			// The subject id parsed, so the traffic is still attributable to a
+			// person. Losing the service is a smaller loss than losing the
+			// sample, so report it unattributed rather than failing.
+			return subjectID, 0, nil
+		}
+	}
+	return subjectID, serviceID, nil
 }

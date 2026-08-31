@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/amyrm/antimage/internal/node/adapter"
+	"github.com/amyrm/antimage/internal/node/enforcement"
 	"github.com/amyrm/antimage/internal/node/sysinfo"
 	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
 	"github.com/amyrm/antimage/internal/shared/version"
@@ -76,18 +77,26 @@ func jitter(d time.Duration) time.Duration {
 
 // Client holds the control stream and drives reconciliation.
 type Client struct {
-	cfg   *Config
-	ad    adapter.Adapter
-	clk   Clock
-	rec   *Reconciler
-	cert  tls.Certificate
-	caDER []byte
+	cfg      *Config
+	ads      *Registry
+	clk      Clock
+	rec      *Reconciler
+	cert     tls.Certificate
+	caDER    []byte
+	enforcer *enforcement.Enforcer
 }
 
-func NewClient(cfg *Config, ad adapter.Adapter, clk Clock, cert tls.Certificate, caDER []byte) *Client {
+// NewClient builds an agent driving every adapter in the registry.
+//
+// A node serves several protocols at once, each by its own adapter over the one
+// desired document. What the node reports at Hello is therefore a set, and the
+// panel learns exactly which protocols this node can execute -- which is what
+// lets an editor offer those and only those.
+func NewClient(cfg *Config, ads *Registry, clk Clock, cert tls.Certificate, caDER []byte) *Client {
 	return &Client{
-		cfg: cfg, ad: ad, clk: clk, cert: cert, caDER: caDER,
-		rec: NewReconciler(ad, clk, ReconcileOptions{MaxRetries: 3, RetryBase: 2 * time.Second}),
+		cfg: cfg, ads: ads, clk: clk, cert: cert, caDER: caDER,
+		rec:      NewReconciler(ads, clk, ReconcileOptions{MaxRetries: 3, RetryBase: 2 * time.Second}),
+		enforcer: enforcement.New(),
 	}
 }
 
@@ -178,15 +187,25 @@ func (c *Client) runSession(
 		return fmt.Errorf("open stream: %w", err)
 	}
 
-	desc := c.ad.Descriptor()
-	if err := stream.Send(&pb.AgentMessage{Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{
-		NodeId: c.cfg.NodeID, AgentVersion: version.Version,
-		ProtocolVersion: version.Protocol,
-		Adapters: []*pb.AdapterDescriptor{{
+	// Every adapter this node runs, not just the first. Hello's Adapters field
+	// has always been repeated; it only ever carried one entry because the node
+	// only ever held one adapter. Each descriptor brings its own ServiceSchema,
+	// so the panel learns what this node can execute AND what each protocol
+	// needs, from the node itself rather than from what the panel was compiled
+	// to know about.
+	descs := c.ads.Descriptors()
+	pbAdapters := make([]*pb.AdapterDescriptor, 0, len(descs))
+	for _, desc := range descs {
+		pbAdapters = append(pbAdapters, &pb.AdapterDescriptor{
 			Kind: string(desc.Kind), Version: desc.Version,
 			HotUserAdd: desc.Caps.HotUserAdd, SelfAccounting: desc.Caps.SelfAccounting,
 			RequiresPki: desc.Caps.RequiresPKI, ServiceSchema: desc.Caps.ServiceSchema,
-		}},
+		})
+	}
+	if err := stream.Send(&pb.AgentMessage{Payload: &pb.AgentMessage_Hello{Hello: &pb.Hello{
+		NodeId: c.cfg.NodeID, AgentVersion: version.Version,
+		ProtocolVersion: version.Protocol,
+		Adapters:        pbAdapters,
 	}}}); err != nil {
 		return fmt.Errorf("send hello: %w", err)
 	}
@@ -227,9 +246,19 @@ func (c *Client) runSession(
 	reconcile := c.clk.After(jitter(ReconcileInterval))
 
 	// Start accounting loop if the adapter supports it (SP3).
-	if _, ok := c.ad.(adapter.UsageReporter); ok {
+	// Any adapter that accounts for its own traffic starts the loop; the loop
+	// itself polls every such adapter. A node running Xray beside WireGuard has
+	// two of them, and reporting only the first would silently lose the other's
+	// traffic.
+	if len(c.ads.UsageReporters()) > 0 {
 		go c.AccountingLoop(sessionCtx, stream, 30*time.Second)
 	}
+
+	// Start enforcement stats loop.
+	go c.EnforcementStatsLoop(sessionCtx, stream, 60*time.Second)
+
+	// Start Xray enforcement loop if adapter is Xray (SP7).
+	c.startXrayEnforcementIfSupported(sessionCtx)
 
 	for {
 		select {
@@ -257,13 +286,27 @@ func (c *Client) runSession(
 					return errors.New("stream closed")
 				}
 			}
-			switch msg.Payload.(type) {
+			switch p := msg.Payload.(type) {
 			case *pb.PanelMessage_RevisionBump, *pb.PanelMessage_FetchNow:
 				if err := c.reconcileOnce(sessionCtx, client, stream); err != nil {
 					slog.ErrorContext(sessionCtx, "reconcile failed", "error", err)
 				}
 			case *pb.PanelMessage_UpgradeRequired:
 				return errors.New("panel requires an agent upgrade")
+			case *pb.PanelMessage_Command:
+				// Handled inline rather than in its own goroutine: a command
+				// this slow to answer (RestartAdapters bounding on a wedged
+				// systemctl, say) SHOULD stall the loop, because reconcile
+				// and heartbeat are the two things this agent has to keep
+				// doing regardless -- and both already tolerate a late tick,
+				// the same way a slow reconcile today delays the next
+				// heartbeat rather than running one concurrently with it.
+				result := c.handleCommand(sessionCtx, p.Command)
+				if err := stream.Send(&pb.AgentMessage{
+					Payload: &pb.AgentMessage_CommandResult{CommandResult: result},
+				}); err != nil {
+					return fmt.Errorf("send command result: %w", err)
+				}
 			}
 
 		case <-heartbeat:
@@ -281,6 +324,109 @@ func (c *Client) runSession(
 	}
 }
 
+// handleCommand executes an on-demand AgentCommand and always returns a
+// result carrying the same command_id -- never an error return, because the
+// caller (the stream loop) has nothing useful to do with a Go error here
+// beyond what it already does with a failed restart: report it back to the
+// panel. A malformed or unrecognised command body is reported the same way,
+// through the result, rather than by killing the stream over a message this
+// agent simply does not understand yet.
+func (c *Client) handleCommand(ctx context.Context, cmd *pb.AgentCommand) *pb.AgentCommandResult {
+	switch body := cmd.Body.(type) {
+	case *pb.AgentCommand_RestartAdapters:
+		outcomes := c.ads.RestartAll(ctx, body.RestartAdapters.Kinds)
+		wire := make([]*pb.AdapterRestartOutcome, 0, len(outcomes))
+		for _, o := range outcomes {
+			errText := ""
+			if o.Err != nil {
+				errText = o.Err.Error()
+			}
+			wire = append(wire, &pb.AdapterRestartOutcome{
+				Kind: string(o.Kind), Ok: o.OK, Error: errText,
+			})
+		}
+		return &pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_RestartAdapters{
+				RestartAdapters: &pb.RestartAdaptersResult{Outcomes: wire},
+			},
+		}
+	case *pb.AgentCommand_UpdateGeoData:
+		g := body.UpdateGeoData
+		outcomes := c.ads.UpdateGeoData(ctx, g.GeoipUrl, g.GeoipSha256Url, g.GeositeUrl, g.GeositeSha256Url)
+		wire := make([]*pb.AdapterGeoUpdateOutcome, 0, len(outcomes))
+		for _, o := range outcomes {
+			errText := ""
+			if o.Err != nil {
+				errText = o.Err.Error()
+			}
+			wire = append(wire, &pb.AdapterGeoUpdateOutcome{
+				Kind: string(o.Kind), Ok: o.OK, Error: errText,
+				GeoipSha256: o.GeoIPSHA256, GeositeSha256: o.GeoSiteSHA256,
+			})
+		}
+		return &pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_UpdateGeoData{
+				UpdateGeoData: &pb.UpdateGeoDataResult{Outcomes: wire},
+			},
+		}
+	case *pb.AgentCommand_UpgradeCore:
+		uc := body.UpgradeCore
+		outcome := c.ads.UpgradeCore(ctx, uc.Kind, uc.BinaryUrl, uc.BinarySha256, uc.ExpectedVersion)
+		errText := ""
+		switch {
+		case !outcome.Found:
+			errText = fmt.Sprintf("this node runs no %q adapter", uc.Kind)
+		case !outcome.Capable:
+			errText = fmt.Sprintf("the %q adapter on this node has no core-version concept", uc.Kind)
+		case outcome.Err != nil:
+			errText = outcome.Err.Error()
+		}
+		return &pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_UpgradeCore{
+				UpgradeCore: &pb.UpgradeCoreResult{
+					Kind: uc.Kind, Ok: outcome.OK,
+					InstalledVersion: outcome.InstalledVersion,
+					RolledBack:       outcome.RolledBack,
+					Error:            errText,
+				},
+			},
+		}
+	case *pb.AgentCommand_FetchLogs:
+		fl := body.FetchLogs
+		outcome := c.ads.ReadLogs(ctx, fl.Kind, int(fl.Lines))
+		errText := ""
+		switch {
+		case !outcome.Found:
+			errText = fmt.Sprintf("this node runs no %q adapter", fl.Kind)
+		case !outcome.Capable:
+			errText = fmt.Sprintf("the %q adapter on this node has no log-reading concept", fl.Kind)
+		case outcome.Err != nil:
+			errText = outcome.Err.Error()
+		}
+		return &pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_FetchLogs{
+				FetchLogs: &pb.FetchLogsResult{
+					Kind: fl.Kind, Ok: outcome.OK, Logs: outcome.Logs, Error: errText,
+				},
+			},
+		}
+	default:
+		// Forward compatible: an agent build older than a newer command type
+		// tells the panel it does not understand rather than silently
+		// dropping the command the operator was waiting on. There is no
+		// dedicated "unknown command" wire shape -- an empty
+		// RestartAdaptersResult would lie about which command ran -- so this
+		// is deliberately the one place command_id round-trips with no body
+		// set at all, and the panel's Hub.SendCommand caller has to treat an
+		// empty Body as failure rather than as "nothing to report".
+		return &pb.AgentCommandResult{CommandId: cmd.CommandId}
+	}
+}
+
 func (c *Client) reconcileOnce(ctx context.Context, client pb.ControlClient, stream pb.Control_StreamClient) error {
 	snap, err := client.GetDesiredSnapshot(ctx, &pb.SnapshotRequest{NodeId: c.cfg.NodeID})
 	if err != nil {
@@ -294,6 +440,30 @@ func (c *Client) reconcileOnce(ctx context.Context, client pb.ControlClient, str
 	if err := json.Unmarshal(snap.Document, &desired); err != nil {
 		return fmt.Errorf("decode desired document: %w", err)
 	}
+
+	// Refuse a document from the future BEFORE converging on part of it.
+	//
+	// Decoding cannot detect this: fields added by a newer schema are
+	// omitempty, so an old agent parses a new document cleanly and silently
+	// ignores what it did not recognise. Converging on the remainder would
+	// report success for a state the node is not actually in.
+	if err := adapter.CheckSchemaVersion(desired.SchemaVersion); err != nil {
+		report := &pb.ApplyReport{
+			TargetRevision: snap.Revision, Converged: false,
+			Error: err.Error(), DocSha256: snap.Sha256,
+		}
+		if sendErr := stream.Send(&pb.AgentMessage{
+			Payload: &pb.AgentMessage_ApplyReport{ApplyReport: report},
+		}); sendErr != nil {
+			return fmt.Errorf("report unsupported schema: %w", sendErr)
+		}
+		// Not a transport failure, so the stream stays up: the operator sees a
+		// node reporting a clear reason rather than one that keeps dropping.
+		return nil
+	}
+
+	// Sync enforcement policies before convergence
+	c.syncEnforcement(desired)
 
 	run, runErr := c.rec.Converge(ctx, desired)
 
@@ -321,17 +491,21 @@ func (c *Client) reconcileOnce(ctx context.Context, client pb.ControlClient, str
 }
 
 func (c *Client) sendHeartbeat(ctx context.Context, stream pb.Control_StreamClient) error {
-	health, err := c.ad.Probe(ctx)
-	if err != nil {
-		health = adapter.Health{OK: false, Detail: err.Error()}
+	// Health is per adapter. An operator needs to know WHICH protocol is down,
+	// not merely that something on the node is, and one unwell adapter must not
+	// suppress the report for the healthy ones.
+	probes := c.ads.Probe(ctx)
+	pbHealth := make([]*pb.AdapterHealth, 0, len(probes))
+	for _, p := range probes {
+		pbHealth = append(pbHealth, &pb.AdapterHealth{
+			Kind: string(p.Kind), Ok: p.Health.OK, Detail: p.Health.Detail,
+		})
 	}
 	sample := sysinfo.Sample()
 	return stream.Send(&pb.AgentMessage{Payload: &pb.AgentMessage_Heartbeat{
 		Heartbeat: &pb.Heartbeat{
 			Load1: sample.Load1, MemUsedBytes: sample.MemUsed, UptimeSeconds: sample.UptimeS,
-			AdapterHealth: []*pb.AdapterHealth{{
-				Kind: string(c.ad.Descriptor().Kind), Ok: health.OK, Detail: health.Detail,
-			}},
+			AdapterHealth: pbHealth,
 		},
 	}})
 }

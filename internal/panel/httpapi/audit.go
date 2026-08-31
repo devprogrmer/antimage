@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/amyrm/antimage/internal/panel/rbac"
 )
@@ -26,6 +29,16 @@ type auditEntryDTO struct {
 	TargetType string `json:"target_type"`
 	TargetID   int64  `json:"target_id"`
 	Result     string `json:"result"`
+	// The state either side of the change, as recorded. audit_log has carried
+	// before_json and after_json since SP1 and the query never selected them,
+	// so "what actually changed" was written down and unreadable.
+	//
+	// No payload written anywhere in the panel carries a credential -- the
+	// keys are ids, names, counts and reasons -- so these are returned to a
+	// holder of audit:read rather than redacted. A payload that ever does
+	// carry one must be redacted at the point it is WRITTEN, not here.
+	Before json.RawMessage `json:"before,omitempty"`
+	After  json.RawMessage `json:"after,omitempty"`
 }
 
 // handleListAudit returns the audit log newest-first.
@@ -55,13 +68,43 @@ func (d Deps) handleListAudit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Every filter is a bound parameter. An audit search assembled by string
+	// concatenation is a search whose results can be rewritten by whoever
+	// types into it, which is the one thing an audit log must not allow.
+	where := []string{"1=1"}
+	args := []any{}
+	if v := strings.TrimSpace(r.URL.Query().Get("action")); v != "" {
+		where = append(where, "a.action = ?")
+		args = append(args, v)
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("result")); v != "" {
+		where = append(where, "a.result = ?")
+		args = append(args, v)
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("target_type")); v != "" {
+		where = append(where, "a.target_type = ?")
+		args = append(args, v)
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("request_id")); v != "" {
+		// The id an operator quotes from a failure screen, which is the whole
+		// reason WriteError returns it.
+		where = append(where, "a.request_id = ?")
+		args = append(args, v)
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("actor")); v != "" {
+		where = append(where, "(ad.username = ? OR a.actor_label = ?)")
+		args = append(args, v, v)
+	}
+	args = append(args, limit)
+
 	rows, err := d.Store.Read().QueryContext(r.Context(),
 		`SELECT a.id, a.at, a.actor_type, COALESCE(ad.username,''), a.actor_label,
 		        a.actor_ip, a.request_id, a.action, a.target_type,
-		        COALESCE(a.target_id,0), a.result
+		        COALESCE(a.target_id,0), a.result, a.before_json, a.after_json
 		   FROM audit_log a
 		   LEFT JOIN admins ad ON ad.id = a.actor_admin_id
-		  ORDER BY a.id DESC LIMIT ?`, limit)
+		  WHERE `+strings.Join(where, " AND ")+`
+		  ORDER BY a.id DESC LIMIT ?`, args...)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "could not list audit entries")
 		return
@@ -71,10 +114,21 @@ func (d Deps) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	entries := []auditEntryDTO{}
 	for rows.Next() {
 		var e auditEntryDTO
+		var before, after sql.NullString
 		if err := rows.Scan(&e.ID, &e.At, &e.ActorType, &e.ActorName, &e.ActorLabel,
-			&e.ActorIP, &e.RequestID, &e.Action, &e.TargetType, &e.TargetID, &e.Result); err != nil {
+			&e.ActorIP, &e.RequestID, &e.Action, &e.TargetType, &e.TargetID, &e.Result,
+			&before, &after); err != nil {
 			WriteError(w, http.StatusInternalServerError, "internal", "could not read audit entries")
 			return
+		}
+		// NULL stays absent rather than becoming "null": an action with no
+		// recorded before-state is different from one whose before-state was
+		// the JSON literal null.
+		if before.Valid {
+			e.Before = json.RawMessage(before.String)
+		}
+		if after.Valid {
+			e.After = json.RawMessage(after.String)
 		}
 		entries = append(entries, e)
 	}

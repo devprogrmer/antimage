@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -47,6 +48,22 @@ type Runtime interface {
 
 	// QueryStats reads per-user cumulative traffic counters. SP3 accounting.
 	QueryStats(ctx context.Context) ([]UserStat, error)
+
+	// BinaryPath resolves the absolute path of the binary this runtime
+	// actually execs -- not just the bare name it was configured with.
+	// UpgradeCore needs the real file path to swap; Available already knows
+	// how to find it via exec.LookPath, and this is that same resolution
+	// exposed for a caller that needs the path itself, not just a yes/no.
+	BinaryPath(ctx context.Context) (string, error)
+
+	// ReadLog returns the systemd unit's recent journal output, newest
+	// last. Xray's own log object is left at its defaults (nothing in this
+	// codebase configures an access/error file path for it -- see
+	// adapter.go's config builder), so stdout/stderr captured by systemd is
+	// the only log surface that reliably exists regardless of how a given
+	// node's Xray was installed, and it is the same source Healthy already
+	// trusts for liveness.
+	ReadLog(ctx context.Context, lines int) (string, error)
 }
 
 // ExecRuntime drives Xray through systemd and its gRPC management API.
@@ -110,6 +127,27 @@ func (r *ExecRuntime) Available(ctx context.Context) error {
 		return fmt.Errorf("%w: %s not found in PATH: %w", ErrRuntimeUnavailable, r.Binary, err)
 	}
 	return nil
+}
+
+// BinaryPath resolves r.Binary to the absolute file UpgradeCore needs to
+// replace. LookPath handles an already-absolute r.Binary correctly too (it
+// checks the path directly rather than consulting PATH), so this needs no
+// special case for that.
+func (r *ExecRuntime) BinaryPath(ctx context.Context) (string, error) {
+	path, err := exec.LookPath(r.Binary)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s not found in PATH: %w", ErrRuntimeUnavailable, r.Binary, err)
+	}
+	return path, nil
+}
+
+// ReadLog runs journalctl for r.Unit and returns its combined output
+// verbatim. --no-pager is required -- without it journalctl invokes a
+// pager, which blocks forever waiting for a terminal that will never come
+// when run under exec.CommandContext.
+func (r *ExecRuntime) ReadLog(ctx context.Context, lines int) (string, error) {
+	return r.run(ctx, "journalctl", "-u", r.Unit, "-n", strconv.Itoa(lines),
+		"--no-pager", "--output=short-iso")
 }
 
 // HotAddSupported reports whether user mutation can avoid a restart. It is
@@ -181,8 +219,9 @@ func (r *ExecRuntime) Healthy(ctx context.Context) (bool, string) {
 
 // QueryStats queries Xray's StatsService for per-user traffic counters.
 // Output format from `xray api statsquery` is one line per counter:
-//   user>>>subject-1@antimage>>>traffic>>>uplink       12345
-//   user>>>subject-1@antimage>>>traffic>>>downlink     67890
+//
+//	user>>>subject-1@antimage>>>traffic>>>uplink       12345
+//	user>>>subject-1@antimage>>>traffic>>>downlink     67890
 func (r *ExecRuntime) QueryStats(ctx context.Context) ([]UserStat, error) {
 	if r.APIAddress == "" {
 		return nil, fmt.Errorf("%w: no management API address configured", ErrRuntimeUnavailable)

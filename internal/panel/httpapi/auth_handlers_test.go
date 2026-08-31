@@ -77,7 +77,10 @@ func TestLoginFailureIsGenericAndAudited(t *testing.T) {
 	if unknown.Code != http.StatusUnauthorized || wrong.Code != http.StatusUnauthorized {
 		t.Fatalf("status codes = %d/%d, want 401/401", unknown.Code, wrong.Code)
 	}
-	if unknown.Body.String() != wrong.Body.String() {
+	// Compared without the per-request id, which differs by design and reveals
+	// nothing about whether the username exists. Everything else must match.
+	if indistinguishableError(t, unknown.Body.Bytes()) !=
+		indistinguishableError(t, wrong.Body.Bytes()) {
 		t.Errorf("responses differ, so username existence leaks:\n%s\n%s",
 			unknown.Body.String(), wrong.Body.String())
 	}

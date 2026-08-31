@@ -63,6 +63,16 @@ func (r *sp2Runtime) QueryStats(context.Context) ([]xray.UserStat, error) {
 	// SP3 accounting: mock runtime returns empty stats (tests don't exercise accounting).
 	return nil, nil
 }
+func (r *sp2Runtime) BinaryPath(context.Context) (string, error) {
+	// Not exercised by any e2e test here -- UpgradeCore is covered in
+	// internal/node/adapter/xray/coreversion_test.go instead.
+	return "/usr/bin/xray", nil
+}
+func (r *sp2Runtime) ReadLog(context.Context, int) (string, error) {
+	// Not exercised by any e2e test here -- ReadLogs is covered in
+	// internal/node/adapter/xray/logs_test.go instead.
+	return "", nil
+}
 
 // singboxRuntime is the restart-only counterpart.
 type singboxRuntime struct{ restarts int }

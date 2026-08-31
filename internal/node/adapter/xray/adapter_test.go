@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,16 +20,29 @@ import (
 // fakeRuntime records what the adapter asked of Xray, so a test can assert
 // that a hot user add did NOT restart the process.
 type fakeRuntime struct {
-	mu        sync.Mutex
-	restarts  int
-	reloads   int
-	added     []string
-	removed   []string
-	available error
-	healthy   bool
-	detail    string
-	failAdd   error
-	failRst   error
+	mu             sync.Mutex
+	restarts       int
+	reloads        int
+	added          []string
+	removed        []string
+	available      error
+	healthy        bool
+	detail         string
+	failAdd        error
+	failRst        error
+	binaryPath     string
+	binaryPathErr  error
+	logOutput      string
+	logErr         error
+	lastLinesAsked int
+	// healthyAfterRestartN, when non-zero, overrides the static `healthy`
+	// field: Healthy() reports false until restarts >= this count. A
+	// rollback test sets this to 2 to simulate "the freshly installed
+	// binary's first restart comes up broken, and only the SECOND restart
+	// (rollback to the previous binary) comes up healthy" -- proving the
+	// orchestration actually reacts to a real health signal rather than
+	// assuming success once the restart call itself did not error.
+	healthyAfterRestartN int
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -71,11 +85,41 @@ func (f *fakeRuntime) Restart(context.Context) error {
 	return nil
 }
 
-func (f *fakeRuntime) Healthy(context.Context) (bool, string) { return f.healthy, f.detail }
+func (f *fakeRuntime) Healthy(context.Context) (bool, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.healthyAfterRestartN > 0 {
+		return f.restarts >= f.healthyAfterRestartN, f.detail
+	}
+	return f.healthy, f.detail
+}
 
 func (f *fakeRuntime) QueryStats(context.Context) ([]UserStat, error) {
 	// Tests that don't care about accounting can leave this empty.
 	return nil, nil
+}
+
+func (f *fakeRuntime) BinaryPath(context.Context) (string, error) {
+	if f.binaryPathErr != nil {
+		return "", f.binaryPathErr
+	}
+	if f.binaryPath != "" {
+		return f.binaryPath, nil
+	}
+	return "/usr/local/bin/xray", nil
+}
+
+func (f *fakeRuntime) ReadLog(_ context.Context, lines int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastLinesAsked = lines
+	if f.logErr != nil {
+		return "", f.logErr
+	}
+	if f.logOutput != "" {
+		return f.logOutput, nil
+	}
+	return fmt.Sprintf("fake journal output (%d lines requested)", lines), nil
 }
 
 func (f *fakeRuntime) counts() (restarts, reloads int, added, removed []string) {
@@ -637,7 +681,9 @@ func TestAppliedStateRecordsTheUserSet(t *testing.T) {
 	if st.Checksum == "" {
 		t.Error("applied sidecar records no checksum")
 	}
-	want := []string{"subject-1@antimage", "subject-2@antimage"}
+	// Service-scoped tags since C2: Xray counts per email, so the same subject
+	// on another inbound must not share this one's counter.
+	want := []string{subjectEmail(1, 10), subjectEmail(2, 10)}
 	if !reflect.DeepEqual(st.Users, want) {
 		t.Errorf("applied users = %v, want %v; Plan cannot detect a removal without them",
 			st.Users, want)
@@ -794,7 +840,7 @@ func TestRevocationDoesNotConvergeUntilTheRestartSucceeds(t *testing.T) {
 	// IS still serving them. Recording the revocation here on the strength of a
 	// restart that failed is what would make the next Plan believe nobody was
 	// removed, quietly downgrading the retry to the hot path.
-	if got := a.applied(10); !slices.Contains(got.Users, "subject-2@antimage") {
+	if got := a.applied(10); !slices.Contains(got.Users, subjectEmail(2, 10)) {
 		t.Errorf("applied state = %v; it dropped the revoked user after a FAILED "+
 			"restart, so the next Plan would no longer see a removal", got.Users)
 	}
@@ -819,7 +865,7 @@ func TestRevocationDoesNotConvergeUntilTheRestartSucceeds(t *testing.T) {
 
 	// Applied state now reflects the smaller set.
 	final := a.applied(10)
-	want := []string{"subject-1@antimage"}
+	want := []string{subjectEmail(1, 10)}
 	if !reflect.DeepEqual(final.Users, want) {
 		t.Errorf("applied users = %v, want %v", final.Users, want)
 	}
@@ -837,5 +883,19 @@ func TestRevocationDoesNotConvergeUntilTheRestartSucceeds(t *testing.T) {
 		if !again.IsEmpty() {
 			t.Fatalf("not idempotent; pass %d still plans %+v", i, again.Steps)
 		}
+	}
+}
+
+// Restart is a direct forward to the runtime: xray runs as one process
+// multiplexing every inbound, so there is exactly one thing to bounce.
+func TestRestart_ForwardsToRuntime(t *testing.T) {
+	rt := newFakeRuntime()
+	a := New(t.TempDir(), rt, false)
+
+	if err := a.Restart(context.Background()); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if restarts, _, _, _ := rt.counts(); restarts != 1 {
+		t.Errorf("restarts = %d, want 1", restarts)
 	}
 }

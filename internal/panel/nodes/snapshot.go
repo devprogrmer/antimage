@@ -23,6 +23,30 @@ func sortServices(services []Service) {
 	sort.Slice(services, func(i, j int) bool { return services[i].ID < services[j].ID })
 }
 
+// sortOutbounds orders egress paths by id, for the same reason services are:
+// canonical serialization is only deterministic if the slice order is, and a
+// non-deterministic document hashes differently on every build, so the node
+// never reaches convergence.
+func sortOutbounds(outbounds []Outbound) {
+	sort.Slice(outbounds, func(i, j int) bool { return outbounds[i].ID < outbounds[j].ID })
+}
+
+// sortRoutingRules orders by priority, then by id.
+//
+// Priority is the evaluation order the operator chose, so it has to lead. The
+// id tiebreak is not cosmetic: two rules sharing a priority would otherwise
+// order however the query happened to return them, which makes the document
+// hash unstable AND makes rule evaluation order differ between builds. Ties are
+// legal, so the tiebreak has to be total.
+func sortRoutingRules(rules []RoutingRule) {
+	sort.Slice(rules, func(i, j int) bool {
+		if rules[i].Priority != rules[j].Priority {
+			return rules[i].Priority < rules[j].Priority
+		}
+		return rules[i].ID < rules[j].ID
+	})
+}
+
 // BuildDesiredSnapshot is the one authoritative reader of desired state
 // (invariant 5).
 //
@@ -101,13 +125,30 @@ func BuildDesiredSnapshot(
 		return nil, err
 	}
 
-	doc := Document{
-		SchemaVersion: DocumentSchemaVersion,
-		Revision:      revision,
-		NodeID:        nodeID,
-		Services:      services,
-		Subjects:      subjects,
+	outbounds, err := buildOutbounds(ctx, tx, nodeID, options.unsealer)
+	if err != nil {
+		return nil, err
 	}
+	routing, err := buildRouting(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	doc := Document{
+		Revision:  revision,
+		NodeID:    nodeID,
+		Services:  services,
+		Subjects:  subjects,
+		Outbounds: outbounds,
+		Routing:   routing,
+	}
+	sortOutbounds(doc.Outbounds)
+	if doc.Routing != nil {
+		sortRoutingRules(doc.Routing.Rules)
+	}
+	// Derived from content, not from the panel's maximum: a node given no
+	// egress state keeps declaring v2 and its hash does not move.
+	doc.SchemaVersion = effectiveSchemaVersion(doc)
 
 	bytes, sum, err := canonical.Hash(doc)
 	if err != nil {
@@ -119,11 +160,19 @@ func BuildDesiredSnapshot(
 // buildSubjects assembles the subjects entitled to service on this node.
 //
 // A subject appears exactly once, carrying every credential kind it holds,
-// and only if it is enabled and unexpired. Expiry is enforced here rather
-// than in generated protocol config: an expired subject simply stops being
-// part of desired state, so the ordinary convergence path removes them and
-// the removal is hash-verified like any other change. See the SP2 decision
+// and only if it is enabled, unfrozen and unexpired. Expiry is enforced here
+// rather than in generated protocol config: an expired subject simply stops
+// being part of desired state, so the ordinary convergence path removes them
+// and the removal is hash-verified like any other change. See the SP2 decision
 // record, decision 2.
+//
+// frozen_at is checked here for the same reason, and it was missing. Freezing
+// is documented as a revocation on the admin path (service.Subjects.SetFrozen)
+// and is how quota exhaustion cuts a subject off, but subjects.Store.Freeze
+// writes frozen_at without touching enabled -- so a frozen subject was rebuilt
+// straight back into the document. SetFrozen republishes correctly, which made
+// it worse rather than better: the node was promptly handed a NEW revision
+// that still served the user the operator had just revoked.
 //
 // Ordering is by subject id and then credential kind so the canonical
 // document is byte-identical across builds; invariant 3 depends on it.
@@ -137,6 +186,7 @@ func buildSubjects(
 		   JOIN services sv         ON sv.id = ss.service_id
 		  WHERE sv.node_id = ?
 		    AND s.enabled = 1
+		    AND s.frozen_at IS NULL
 		    AND (s.expires_at IS NULL OR s.expires_at > ?)
 		  ORDER BY s.id`, nodeID, nowUnix())
 	if err != nil {
@@ -173,7 +223,36 @@ func buildSubjects(
 		if err != nil {
 			return nil, err
 		}
-		subjects = append(subjects, Subject{ID: id, Credentials: creds})
+
+		// Fetch enforcement policies (schema v2)
+		var maxDevices, maxIPs, maxConns, speedUp, speedDown sql.NullInt64
+		err = tx.QueryRowContext(ctx,
+			`SELECT max_devices, max_ips, max_connections,
+			        speed_limit_up_kbps, speed_limit_down_kbps
+			 FROM subjects WHERE id = ?`, id).
+			Scan(&maxDevices, &maxIPs, &maxConns, &speedUp, &speedDown)
+		if err != nil {
+			return nil, fmt.Errorf("read enforcement policies for subject %d: %w", id, err)
+		}
+
+		subj := Subject{ID: id, Credentials: creds}
+		if maxDevices.Valid {
+			subj.MaxDevices = &maxDevices.Int64
+		}
+		if maxIPs.Valid {
+			subj.MaxIPs = &maxIPs.Int64
+		}
+		if maxConns.Valid {
+			subj.MaxConnections = &maxConns.Int64
+		}
+		if speedUp.Valid {
+			subj.SpeedLimitUpKbps = &speedUp.Int64
+		}
+		if speedDown.Valid {
+			subj.SpeedLimitDownKbps = &speedDown.Int64
+		}
+
+		subjects = append(subjects, subj)
 	}
 	return subjects, nil
 }

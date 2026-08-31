@@ -12,6 +12,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/shared/secrets"
+	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
 // TestSP3AccountingEndToEnd verifies the complete accounting flow:
@@ -434,7 +435,7 @@ func TestSP3SubjectFrozenOmittedFromDocument(t *testing.T) {
 
 func mustOpenStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	st, err := storetest.OpenCopy(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

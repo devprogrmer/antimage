@@ -77,7 +77,7 @@ func TestApplyReportPreservesStepKindAndDisruption(t *testing.T) {
 		PanelURL: "panel.example:8443", CAFingerprint: "dead",
 		StateDir: dir, NodeID: 7,
 	}
-	c := NewClient(cfg, stub.New(filepath.Join(dir, "services")), SystemClock{}, tls.Certificate{}, nil)
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
 
 	doc, err := json.Marshal(adapter.Desired{
 		SchemaVersion: 1, Revision: 3, NodeID: 7,
@@ -128,6 +128,156 @@ func TestApplyReportPreservesStepKindAndDisruption(t *testing.T) {
 	}
 }
 
+// handleCommand's result must always carry the command's own id back,
+// regardless of outcome -- it is what lets the panel's Hub correlate the
+// reply to whichever HTTP request is waiting, and a reply with the wrong id
+// wakes the wrong caller (or none at all). The stub adapter's Restart
+// returns ErrRestartUnsupported (it manages plain files, no daemon), which
+// this also uses to prove a failing adapter's reason reaches the wire result
+// rather than being swallowed.
+func TestHandleCommand_RestartAdapters_EchoesCommandID(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{
+		CommandId: "cmd-42",
+		Body:      &pb.AgentCommand_RestartAdapters{RestartAdapters: &pb.RestartAdapters{}},
+	})
+
+	if result.CommandId != "cmd-42" {
+		t.Errorf("result command id = %q, want cmd-42", result.CommandId)
+	}
+	restart, ok := result.Body.(*pb.AgentCommandResult_RestartAdapters)
+	if !ok {
+		t.Fatalf("result body = %T, want *AgentCommandResult_RestartAdapters", result.Body)
+	}
+	if len(restart.RestartAdapters.Outcomes) != 1 {
+		t.Fatalf("got %d outcomes, want 1 (the stub adapter)", len(restart.RestartAdapters.Outcomes))
+	}
+	outcome := restart.RestartAdapters.Outcomes[0]
+	if outcome.Kind != "stub" {
+		t.Errorf("outcome kind = %q, want stub", outcome.Kind)
+	}
+	if outcome.Ok {
+		t.Error("stub adapter reported Ok=true; it has no daemon to restart")
+	}
+	if outcome.Error == "" {
+		t.Error("failing outcome carries no error text")
+	}
+}
+
+// The stub adapter has no geo-data concept (it implements Restart, not
+// GeoDataUpdater), so this proves the dispatch path threads an
+// UpdateGeoData command through to the registry and back onto the wire
+// correctly even when the answer is "nothing on this node has geo data" --
+// an empty outcomes list, not an error and not a crash.
+func TestHandleCommand_UpdateGeoData_NoCapableAdapterIsEmptyNotError(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{
+		CommandId: "cmd-geo-1",
+		Body: &pb.AgentCommand_UpdateGeoData{UpdateGeoData: &pb.UpdateGeoData{
+			GeoipUrl: "https://example.invalid/geoip.dat", GeoipSha256Url: "https://example.invalid/geoip.dat.sha256sum",
+			GeositeUrl: "https://example.invalid/geosite.dat", GeositeSha256Url: "https://example.invalid/geosite.dat.sha256sum",
+		}},
+	})
+
+	if result.CommandId != "cmd-geo-1" {
+		t.Errorf("result command id = %q, want cmd-geo-1", result.CommandId)
+	}
+	geo, ok := result.Body.(*pb.AgentCommandResult_UpdateGeoData)
+	if !ok {
+		t.Fatalf("result body = %T, want *AgentCommandResult_UpdateGeoData", result.Body)
+	}
+	if len(geo.UpdateGeoData.Outcomes) != 0 {
+		t.Errorf("got %d outcomes for a registry with no geo-capable adapter, want 0", len(geo.UpdateGeoData.Outcomes))
+	}
+}
+
+// The stub adapter runs no core process an upgrade concept applies to, so
+// this proves the dispatch reaches the registry, distinguishes "no such
+// adapter kind" from a real failure, and reports it through the error text
+// rather than crashing or silently dropping the command.
+func TestHandleCommand_UpgradeCore_UnknownKindIsReportedNotCrashed(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{
+		CommandId: "cmd-core-1",
+		Body: &pb.AgentCommand_UpgradeCore{UpgradeCore: &pb.UpgradeCore{
+			Kind: "xray", BinaryUrl: "https://example.invalid/xray.zip",
+			BinarySha256: "aaaa", ExpectedVersion: "1.9.0",
+		}},
+	})
+
+	if result.CommandId != "cmd-core-1" {
+		t.Errorf("result command id = %q, want cmd-core-1", result.CommandId)
+	}
+	core, ok := result.Body.(*pb.AgentCommandResult_UpgradeCore)
+	if !ok {
+		t.Fatalf("result body = %T, want *AgentCommandResult_UpgradeCore", result.Body)
+	}
+	if core.UpgradeCore.Ok {
+		t.Error("Ok = true for a node with no xray adapter at all")
+	}
+	if core.UpgradeCore.Error == "" {
+		t.Error("no error text for a node with no xray adapter at all")
+	}
+	if core.UpgradeCore.Kind != "xray" {
+		t.Errorf("Kind = %q, want it echoed back as xray", core.UpgradeCore.Kind)
+	}
+}
+
+func TestHandleCommand_FetchLogs_UnknownKindIsReportedNotCrashed(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{
+		CommandId: "cmd-logs-1",
+		Body:      &pb.AgentCommand_FetchLogs{FetchLogs: &pb.FetchLogs{Kind: "xray", Lines: 100}},
+	})
+
+	if result.CommandId != "cmd-logs-1" {
+		t.Errorf("result command id = %q, want cmd-logs-1", result.CommandId)
+	}
+	logs, ok := result.Body.(*pb.AgentCommandResult_FetchLogs)
+	if !ok {
+		t.Fatalf("result body = %T, want *AgentCommandResult_FetchLogs", result.Body)
+	}
+	if logs.FetchLogs.Ok {
+		t.Error("Ok = true for a node with no xray adapter at all")
+	}
+	if logs.FetchLogs.Error == "" {
+		t.Error("no error text for a node with no xray adapter at all")
+	}
+	if logs.FetchLogs.Kind != "xray" {
+		t.Errorf("Kind = %q, want it echoed back as xray", logs.FetchLogs.Kind)
+	}
+}
+
+// An unrecognised command body must not crash the agent or drop the
+// command silently -- it echoes the id with no body set, which the panel
+// side treats as a failure (see the SendCommand contract) rather than as
+// success with nothing to report.
+func TestHandleCommand_UnknownBody_StillEchoesCommandID(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{CommandId: "cmd-99"})
+	if result.CommandId != "cmd-99" {
+		t.Errorf("result command id = %q, want cmd-99", result.CommandId)
+	}
+	if result.Body != nil {
+		t.Errorf("body = %v, want nil for an unrecognised command", result.Body)
+	}
+}
+
 // The receive goroutine parks on the incoming channel whenever the session
 // loop is not reading it, and the loop stops reading the moment it returns.
 // A session that ends for any reason other than cancellation or a recv error
@@ -139,7 +289,7 @@ func TestSessionReleasesReceiveGoroutineOnSendFailure(t *testing.T) {
 		StateDir: t.TempDir(), NodeID: 1,
 	}
 	clk := NewFakeClock(time.Unix(1_700_000_000, 0).UTC())
-	c := NewClient(cfg, stub.New(t.TempDir()), clk, tls.Certificate{}, nil)
+	c := NewClient(cfg, MustRegistry(stub.New(t.TempDir())), clk, tls.Certificate{}, nil)
 
 	before := runtime.NumGoroutine()
 
@@ -315,7 +465,7 @@ func TestSessionReportsTheRealStreamFailure(t *testing.T) {
 			PanelURL: "panel.example:8443", CAFingerprint: "dead",
 			StateDir: t.TempDir(), NodeID: 1,
 		}
-		c := NewClient(cfg, stub.New(t.TempDir()),
+		c := NewClient(cfg, MustRegistry(stub.New(t.TempDir())),
 			NewFakeClock(time.Unix(1_700_000_000, 0).UTC()), tls.Certificate{}, nil)
 
 		err := c.runSession(context.Background(), &fakeControlClient{},

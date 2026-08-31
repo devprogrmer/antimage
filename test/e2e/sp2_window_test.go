@@ -46,7 +46,7 @@ func TestSP2MaintenanceWindowDefersRevocationUntilItOpens(t *testing.T) {
 
 	windowOpen := true
 	clk := agent.NewFakeClock(time.Unix(1_700_000_000, 0).UTC())
-	rec := agent.NewReconciler(e.adapter, clk, agent.ReconcileOptions{
+	rec := agent.NewReconciler(agent.MustRegistry(e.adapter), clk, agent.ReconcileOptions{
 		MaxRetries:      3,
 		RetryBase:       time.Millisecond,
 		AllowDisruptive: func(time.Time) bool { return windowOpen },

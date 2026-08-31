@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// SingBoxRenderer renders sing-box-format JSON subscriptions.
+// SingBoxRenderer renders sing-box format JSON subscriptions.
 type SingBoxRenderer struct{}
 
 // Render returns sing-box JSON config and content-type.
@@ -16,16 +16,53 @@ func (r *SingBoxRenderer) Render(ctx context.Context, servers []Server) ([]byte,
 	}
 
 	var outbounds []map[string]interface{}
+
 	for _, srv := range servers {
 		outbound, err := r.renderServer(srv)
 		if err != nil {
-			return nil, "", fmt.Errorf("render server %s: %w", srv.NodeName, err)
+			return nil, "", fmt.Errorf("render server %s: %w", srv.Label(), err)
 		}
 		outbounds = append(outbounds, outbound)
 	}
 
+	var outboundTags []string
+	for _, srv := range servers {
+		outboundTags = append(outboundTags, srv.Label())
+	}
+
+	selector := map[string]interface{}{
+		"type":      "selector",
+		"tag":       "proxy",
+		"outbounds": outboundTags,
+		"default":   outboundTags[0],
+	}
+
+	outbounds = append([]map[string]interface{}{selector}, outbounds...)
+
+	outbounds = append(outbounds,
+		map[string]interface{}{"type": "direct", "tag": "direct"},
+		map[string]interface{}{"type": "block", "tag": "block"},
+	)
+
 	config := map[string]interface{}{
 		"outbounds": outbounds,
+		"route": map[string]interface{}{
+			"rules": []map[string]interface{}{
+				{
+					"geoip":    []string{"private"},
+					"outbound": "direct",
+				},
+				{
+					"geoip":    []string{"cn"},
+					"outbound": "direct",
+				},
+				{
+					"geosite":  []string{"cn"},
+					"outbound": "direct",
+				},
+			},
+			"final": "proxy",
+		},
 	}
 
 	jsonBytes, err := json.MarshalIndent(config, "", "  ")
@@ -36,7 +73,6 @@ func (r *SingBoxRenderer) Render(ctx context.Context, servers []Server) ([]byte,
 	return jsonBytes, "application/json; charset=utf-8", nil
 }
 
-// renderServer converts a Server to a sing-box outbound.
 func (r *SingBoxRenderer) renderServer(srv Server) (map[string]interface{}, error) {
 	switch srv.Protocol {
 	case "vless":
@@ -50,66 +86,33 @@ func (r *SingBoxRenderer) renderServer(srv Server) (map[string]interface{}, erro
 	}
 }
 
-// renderVLESS generates a sing-box VLESS outbound.
 func (r *SingBoxRenderer) renderVLESS(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
 		"type":        "vless",
-		"tag":         srv.NodeName,
+		"tag":         srv.Label(),
 		"server":      srv.NodeAddress,
 		"server_port": srv.Port,
 		"uuid":        srv.UUID,
 	}
 
-	// Network type
 	network := srv.Network
 	if network == "" {
 		network = "tcp"
 	}
 	outbound["network"] = network
-
-	// TLS configuration
-	if srv.TLS {
-		tls := map[string]interface{}{
-			"enabled":  true,
-			"insecure": false,
-		}
-		if srv.SNI != "" {
-			tls["server_name"] = srv.SNI
-		}
-		if len(srv.ALPN) > 0 {
-			tls["alpn"] = srv.ALPN
-		}
-		outbound["tls"] = tls
+	if srv.Flow != "" {
+		outbound["flow"] = srv.Flow
 	}
 
-	// Transport configuration
-	switch network {
-	case "ws":
-		transport := map[string]interface{}{
-			"type": "ws",
-		}
-		if srv.Path != "" {
-			transport["path"] = srv.Path
-		}
-		outbound["transport"] = transport
-	case "grpc":
-		transport := map[string]interface{}{
-			"type": "grpc",
-		}
-		if srv.Path != "" {
-			transport["service_name"] = srv.Path
-		}
-		outbound["transport"] = transport
-	}
-
+	applySingBoxTLS(outbound, srv)
+	applySingBoxTransport(outbound, srv, network)
 	return outbound
 }
 
-// renderVMess generates a sing-box VMess outbound.
 func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
 		"type":        "vmess",
-		"tag":         srv.NodeName,
+		"tag":         srv.Label(),
 		"server":      srv.NodeAddress,
 		"server_port": srv.Port,
 		"uuid":        srv.UUID,
@@ -117,75 +120,81 @@ func (r *SingBoxRenderer) renderVMess(srv Server) map[string]interface{} {
 		"security":    "auto",
 	}
 
-	// Network type
 	network := srv.Network
 	if network == "" {
 		network = "tcp"
 	}
 	outbound["network"] = network
 
-	// TLS configuration
-	if srv.TLS {
-		tls := map[string]interface{}{
-			"enabled":  true,
-			"insecure": false,
-		}
-		if srv.SNI != "" {
-			tls["server_name"] = srv.SNI
-		}
-		if len(srv.ALPN) > 0 {
-			tls["alpn"] = srv.ALPN
-		}
-		outbound["tls"] = tls
-	}
-
-	// Transport configuration
-	switch network {
-	case "ws":
-		transport := map[string]interface{}{
-			"type": "ws",
-		}
-		if srv.Path != "" {
-			transport["path"] = srv.Path
-		}
-		outbound["transport"] = transport
-	case "grpc":
-		transport := map[string]interface{}{
-			"type": "grpc",
-		}
-		if srv.Path != "" {
-			transport["service_name"] = srv.Path
-		}
-		outbound["transport"] = transport
-	}
-
+	applySingBoxTLS(outbound, srv)
+	applySingBoxTransport(outbound, srv, network)
 	return outbound
 }
 
-// renderTrojan generates a sing-box Trojan outbound.
 func (r *SingBoxRenderer) renderTrojan(srv Server) map[string]interface{} {
 	outbound := map[string]interface{}{
 		"type":        "trojan",
-		"tag":         srv.NodeName,
+		"tag":         srv.Label(),
 		"server":      srv.NodeAddress,
 		"server_port": srv.Port,
 		"password":    srv.Password,
 	}
 
-	// Trojan typically requires TLS
-	if srv.TLS {
-		tls := map[string]interface{}{
-			"enabled":  true,
-			"insecure": false,
-		}
-		if srv.SNI != "" {
-			tls["server_name"] = srv.SNI
-		}
-		if len(srv.ALPN) > 0 {
-			tls["alpn"] = srv.ALPN
-		}
-		outbound["tls"] = tls
-	}
-
+	applySingBoxTLS(outbound, srv)
 	return outbound
+}
+
+func applySingBoxTransport(outbound map[string]interface{}, srv Server, network string) {
+	switch network {
+	case "ws":
+		transport := map[string]interface{}{"type": "ws"}
+		if srv.Path != "" {
+			transport["path"] = srv.Path
+		}
+		if srv.Host != "" {
+			transport["headers"] = map[string]interface{}{"Host": srv.Host}
+		}
+		outbound["transport"] = transport
+	case "grpc":
+		transport := map[string]interface{}{"type": "grpc"}
+		if srv.Path != "" {
+			transport["service_name"] = srv.Path
+		}
+		outbound["transport"] = transport
+	}
+}
+
+func applySingBoxTLS(outbound map[string]interface{}, srv Server) {
+	sec := srv.security()
+	if sec != "tls" && sec != "reality" {
+		return
+	}
+	tls := map[string]interface{}{"enabled": true}
+	if srv.SNI != "" {
+		tls["server_name"] = srv.SNI
+	}
+	if len(srv.ALPN) > 0 {
+		tls["alpn"] = srv.ALPN
+	}
+	if srv.AllowInsecure {
+		tls["insecure"] = true
+	}
+	if sec == "reality" {
+		reality := map[string]interface{}{"enabled": true}
+		if srv.PublicKey != "" {
+			reality["public_key"] = srv.PublicKey
+		}
+		if srv.ShortID != "" {
+			reality["short_id"] = srv.ShortID
+		}
+		tls["reality"] = reality
+		fp := srv.Fingerprint
+		if fp == "" {
+			fp = "chrome"
+		}
+		tls["utls"] = map[string]interface{}{"enabled": true, "fingerprint": fp}
+	} else if srv.Fingerprint != "" {
+		tls["utls"] = map[string]interface{}{"enabled": true, "fingerprint": srv.Fingerprint}
+	}
+	outbound["tls"] = tls
 }

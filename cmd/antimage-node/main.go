@@ -12,9 +12,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
-	"github.com/amyrm/antimage/internal/node/adapter/stub"
+	"github.com/amyrm/antimage/internal/node/adapterfactory"
 	"github.com/amyrm/antimage/internal/node/agent"
 	"github.com/amyrm/antimage/internal/shared/version"
 )
@@ -45,10 +46,29 @@ func main() {
 	}
 	cfg.NodeID = nodeID
 
-	ad := stub.New(filepath.Join(cfg.StateDir, "services"))
-	client := agent.NewClient(cfg, ad, agent.SystemClock{}, cert, caDER)
+	// The adapters this host declares in node.yaml. A node serves several
+	// protocols at once, each handling the services of its own kind over the
+	// one desired document.
+	ads, err := adapterfactory.Build(cfg)
+	if err != nil {
+		slog.Error("build adapter registry", "error", err)
+		os.Exit(1)
+	}
+	kinds := make([]string, 0, ads.Len())
+	for _, d := range ads.Descriptors() {
+		kinds = append(kinds, string(d.Kind))
+	}
+	if adapterfactory.NoAdaptersConfigured(cfg) {
+		// Not fatal -- an enrolled but unprovisioned host is a real state, and
+		// refusing to start would strand it. But a node that quietly serves
+		// nothing is exactly the failure worth being loud about.
+		slog.Warn("no adapters configured in node.yaml; this node will serve no traffic",
+			"supported", strings.Join(adapterfactory.SupportedKinds(), ", "))
+	}
+	client := agent.NewClient(cfg, ads, agent.SystemClock{}, cert, caDER)
 
-	slog.Info("antimage-node starting", "version", version.Version, "node_id", nodeID)
+	slog.Info("antimage-node starting", "version", version.Version, "node_id", nodeID,
+		"adapters", strings.Join(kinds, ","))
 	if err := client.Run(ctx); err != nil && ctx.Err() == nil {
 		slog.Error("agent stopped", "error", err)
 		os.Exit(1)

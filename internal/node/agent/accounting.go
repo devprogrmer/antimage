@@ -20,7 +20,7 @@ import (
 
 // AccountingState persists deltas and sequence numbers between polls.
 type AccountingState struct {
-	Sequence int64                   `json:"sequence"`
+	Sequence int64                     `json:"sequence"`
 	Pending  []*antimagev1.UsageSample `json:"pending"`
 }
 
@@ -49,21 +49,49 @@ func (c *Client) AccountingLoop(ctx context.Context, stream antimagev1.Control_S
 	}
 }
 
-func (c *Client) pollAndReport(ctx context.Context, stream antimagev1.Control_StreamClient) error {
-	// Check if the adapter supports accounting.
-	reporter, ok := c.ad.(adapter.UsageReporter)
-	if !ok {
-		// Adapter doesn't support self-accounting.
-		return nil
+// protoSamplesFrom puts adapter samples on the wire.
+//
+// A function rather than a loop inside pollAndReport so it can be tested
+// without a stream. That is not cosmetic: this is the hop where C2's
+// attribution is easiest to lose -- dropping ServiceID here would silently NULL
+// every attribution on the platform while the adapter still computed it
+// correctly and the panel still stored whatever it was given.
+func protoSamplesFrom(samples []adapter.UsageSample) []*antimagev1.UsageSample {
+	out := make([]*antimagev1.UsageSample, len(samples))
+	for i, s := range samples {
+		out[i] = &antimagev1.UsageSample{
+			SubjectId: s.SubjectID,
+			// Zero when the adapter could not attribute the traffic; the panel
+			// stores that as NULL. Carried verbatim rather than defaulted to
+			// anything, because the agent knows less than the adapter did.
+			ServiceId:     s.ServiceID,
+			UplinkBytes:   s.UplinkBytes,
+			DownlinkBytes: s.DownlinkBytes,
+		}
 	}
+	return out
+}
 
-	samples, err := reporter.Usage(ctx)
-	if err != nil {
-		return fmt.Errorf("adapter usage query failed: %w", err)
+func (c *Client) pollAndReport(ctx context.Context, stream antimagev1.Control_StreamClient) error {
+	// Poll EVERY adapter that accounts for its own traffic.
+	//
+	// A node runs several protocols at once and more than one of them may
+	// report usage -- Xray and WireGuard both do. Taking only the first would
+	// silently drop the rest of the node's traffic, and silently is the worst
+	// way to lose accounting data: the totals still look plausible.
+	var samples []adapter.UsageSample
+	for _, reporter := range c.ads.UsageReporters() {
+		got, err := reporter.Usage(ctx)
+		if err != nil {
+			// One adapter's failure must not discard the samples already
+			// collected from the others; those are real traffic that happened.
+			return fmt.Errorf("adapter usage query failed: %w", err)
+		}
+		samples = append(samples, got...)
 	}
 
 	if len(samples) == 0 {
-		// No traffic since last poll.
+		// No traffic since last poll, or no adapter accounts for itself.
 		return nil
 	}
 
@@ -74,14 +102,7 @@ func (c *Client) pollAndReport(ctx context.Context, stream antimagev1.Control_St
 	}
 
 	// Convert to protobuf samples.
-	protoSamples := make([]*antimagev1.UsageSample, len(samples))
-	for i, s := range samples {
-		protoSamples[i] = &antimagev1.UsageSample{
-			SubjectId:     s.SubjectID,
-			UplinkBytes:   s.UplinkBytes,
-			DownlinkBytes: s.DownlinkBytes,
-		}
-	}
+	protoSamples := protoSamplesFrom(samples)
 
 	// Add new samples to pending.
 	state.Pending = append(state.Pending, protoSamples...)

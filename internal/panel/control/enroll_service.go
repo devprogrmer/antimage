@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"crypto/x509"
 	"database/sql"
 	"fmt"
 	"time"
@@ -97,10 +98,25 @@ func (s *EnrollmentService) Enroll(ctx context.Context, req *pb.EnrollRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "sign CSR: %v", err)
 	}
 
+	// Recorded so the panel can warn before a certificate lapses. Parsed from
+	// the DER we just signed rather than recomputed from NodeCertLifetime: the
+	// serial is generated inside SignNodeCert and the expiry is derived there
+	// too, so anything reconstructed here would be a second opinion about a
+	// fact the certificate already states. A parse failure is not fatal -- the
+	// certificate is valid and the agent needs it; only the operator's warning
+	// is lost -- so the columns stay NULL and the API reports them as unknown.
+	var notAfter sql.NullInt64
+	var serial sql.NullString
+	if parsed, err := x509.ParseCertificate(certDER); err == nil {
+		notAfter = sql.NullInt64{Int64: parsed.NotAfter.Unix(), Valid: true}
+		serial = sql.NullString{String: parsed.SerialNumber.Text(16), Valid: true}
+	}
+
 	err = s.deps.Store.Write(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE nodes SET cert_fingerprint = ?, status = 'enrolling', enrolled_at = ?
-			  WHERE id = ?`, fingerprint, now.Unix(), nodeID); err != nil {
+			`UPDATE nodes SET cert_fingerprint = ?, status = 'enrolling', enrolled_at = ?,
+			        cert_not_after = ?, cert_serial = ?
+			  WHERE id = ?`, fingerprint, now.Unix(), notAfter, serial, nodeID); err != nil {
 			return fmt.Errorf("record fingerprint: %w", err)
 		}
 		return audit.InTx(ctx, tx, "", audit.SystemActor("enrollment"), audit.Record{

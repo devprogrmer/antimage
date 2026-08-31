@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/shared/secrets"
 )
@@ -49,13 +50,19 @@ const passwordBytes = 32
 // deliberately absent: they are fetched separately so a list can never leak
 // them.
 type Subject struct {
-	ID        int64
-	Name      string
-	Enabled   bool
-	ExpiresAt *time.Time
-	ExpiredAt *time.Time
-	CreatedAt time.Time
-	Note      string
+	ID             int64
+	Name           string
+	Enabled        bool
+	ExpiresAt      *time.Time
+	ExpiredAt      *time.Time
+	CreatedAt      time.Time
+	Note           string
+	QuotaBytes     *int64
+	QuotaUsedBytes int64
+	FrozenAt       *time.Time
+	MaxDevices     *int64
+	MaxIPs         *int64
+	MaxConnections *int64
 }
 
 // Expired reports whether the subject has passed its expiry at the given time.
@@ -139,6 +146,11 @@ type CreateInput struct {
 	ServiceIDs []int64
 	// Credentials to import. Absent kinds are generated.
 	Credentials map[CredentialKind]string
+	// QuotaBytes is nil for unlimited.
+	QuotaBytes     *int64
+	MaxDevices     *int64
+	MaxIPs         *int64
+	MaxConnections *int64
 }
 
 // Create inserts a subject, seals its credentials, and grants its services in
@@ -162,10 +174,16 @@ func (s *Store) Create(ctx context.Context, tx *sql.Tx, in CreateInput) (int64, 
 		expires = in.ExpiresAt.UTC().Unix()
 	}
 
+	token, err := GenerateToken()
+	if err != nil {
+		return 0, err
+	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO subjects (name, enabled, expires_at, created_at, note)
-		 VALUES (?, 1, ?, ?, ?)`,
-		name, expires, now.Unix(), in.Note)
+		`INSERT INTO subjects (name, enabled, expires_at, created_at, note,
+		                       quota_bytes, max_devices, max_ips, max_connections, subscription_token)
+		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, expires, now.Unix(), in.Note,
+		in.QuotaBytes, in.MaxDevices, in.MaxIPs, in.MaxConnections, token)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, fmt.Errorf("%w: %q", ErrNameTaken, name)
@@ -261,20 +279,39 @@ func (s *Store) Credential(ctx context.Context, subjectID int64, kind Credential
 	return string(plain), nil
 }
 
-// Get reads one subject without its credentials.
-func (s *Store) Get(ctx context.Context, id int64) (*Subject, error) {
+// Get reads one subject without its credentials, restricted to what this
+// caller may see.
+//
+// The scope is a required argument rather than an option, and there is no
+// unscoped variant. That is the whole design: a caller who wants every subject
+// has to pass rbac.Scope{IsSuper: true} explicitly, which is greppable in
+// review, whereas an unscoped Get sitting beside a scoped one gets reached for
+// by accident and leaks every tenant's customers.
+//
+// Returns sql.ErrNoRows for a subject that does not exist AND for one owned by
+// another reseller. The two must be indistinguishable, or a tenant can probe
+// the id space to count a competitor's customers.
+func (s *Store) Get(ctx context.Context, sc rbac.Scope, id int64) (*Subject, error) {
+	args := append([]any{id}, store.ScopeArgs(sc)...)
 	row := s.db.Read().QueryRowContext(ctx,
-		`SELECT id, name, enabled, expires_at, expired_at, created_at, note
-		   FROM subjects WHERE id = ?`, id)
+		`SELECT id, name, enabled, expires_at, expired_at, created_at, note,
+		        quota_bytes, quota_used_bytes, frozen_at, max_devices, max_ips, max_connections
+		   FROM subjects
+		  WHERE subjects.id = ? AND `+store.SubjectScopeSQL, args...)
 	return scanSubject(row)
 }
 
-// List returns every subject, newest first. Credentials are deliberately not
-// included: a list endpoint must not be able to leak them.
-func (s *Store) List(ctx context.Context) ([]Subject, error) {
+// List returns the subjects visible to this caller, newest first.
+//
+// Credentials are deliberately not included: a list endpoint must not be able
+// to leak them. Scope is required for the same reason as on Get.
+func (s *Store) List(ctx context.Context, sc rbac.Scope) ([]Subject, error) {
 	rows, err := s.db.Read().QueryContext(ctx,
-		`SELECT id, name, enabled, expires_at, expired_at, created_at, note
-		   FROM subjects ORDER BY id DESC`)
+		`SELECT id, name, enabled, expires_at, expired_at, created_at, note,
+		        quota_bytes, quota_used_bytes, frozen_at, max_devices, max_ips, max_connections
+		   FROM subjects
+		  WHERE `+store.SubjectScopeSQL+`
+		  ORDER BY id DESC`, store.ScopeArgs(sc)...)
 	if err != nil {
 		return nil, fmt.Errorf("list subjects: %w", err)
 	}
@@ -282,27 +319,11 @@ func (s *Store) List(ctx context.Context) ([]Subject, error) {
 
 	var out []Subject
 	for rows.Next() {
-		var (
-			s         Subject
-			enabled   int
-			expiresAt sql.NullInt64
-			expiredAt sql.NullInt64
-			createdAt int64
-		)
-		if err := rows.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note); err != nil {
+		s, err := scanSubject(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan subject: %w", err)
 		}
-		s.Enabled = enabled == 1
-		s.CreatedAt = time.Unix(createdAt, 0).UTC()
-		if expiresAt.Valid {
-			t := time.Unix(expiresAt.Int64, 0).UTC()
-			s.ExpiresAt = &t
-		}
-		if expiredAt.Valid {
-			t := time.Unix(expiredAt.Int64, 0).UTC()
-			s.ExpiredAt = &t
-		}
-		out = append(out, s)
+		out = append(out, *s)
 	}
 	// Without this a mid-iteration failure is served as a complete list.
 	return out, rows.Err()
@@ -314,13 +335,20 @@ type rowScanner interface {
 
 func scanSubject(row rowScanner) (*Subject, error) {
 	var (
-		s         Subject
-		enabled   int
-		expiresAt sql.NullInt64
-		expiredAt sql.NullInt64
-		createdAt int64
+		s              Subject
+		enabled        int
+		expiresAt      sql.NullInt64
+		expiredAt      sql.NullInt64
+		createdAt      int64
+		quotaBytes     sql.NullInt64
+		quotaUsed      int64
+		frozenAt       sql.NullInt64
+		maxDevices     sql.NullInt64
+		maxIPs         sql.NullInt64
+		maxConnections sql.NullInt64
 	)
-	err := row.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note)
+	err := row.Scan(&s.ID, &s.Name, &enabled, &expiresAt, &expiredAt, &createdAt, &s.Note,
+		&quotaBytes, &quotaUsed, &frozenAt, &maxDevices, &maxIPs, &maxConnections)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -329,6 +357,7 @@ func scanSubject(row rowScanner) (*Subject, error) {
 	}
 	s.Enabled = enabled == 1
 	s.CreatedAt = time.Unix(createdAt, 0).UTC()
+	s.QuotaUsedBytes = quotaUsed
 	if expiresAt.Valid {
 		t := time.Unix(expiresAt.Int64, 0).UTC()
 		s.ExpiresAt = &t
@@ -336,6 +365,26 @@ func scanSubject(row rowScanner) (*Subject, error) {
 	if expiredAt.Valid {
 		t := time.Unix(expiredAt.Int64, 0).UTC()
 		s.ExpiredAt = &t
+	}
+	if quotaBytes.Valid {
+		v := quotaBytes.Int64
+		s.QuotaBytes = &v
+	}
+	if frozenAt.Valid {
+		t := time.Unix(frozenAt.Int64, 0).UTC()
+		s.FrozenAt = &t
+	}
+	if maxDevices.Valid {
+		v := maxDevices.Int64
+		s.MaxDevices = &v
+	}
+	if maxIPs.Valid {
+		v := maxIPs.Int64
+		s.MaxIPs = &v
+	}
+	if maxConnections.Valid {
+		v := maxConnections.Int64
+		s.MaxConnections = &v
 	}
 	return &s, nil
 }
@@ -497,4 +546,80 @@ func (s *Store) NodeIDsForRead(ctx context.Context, subjectID int64) ([]int64, e
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// Freeze freezes a subject, preventing access until unfrozen.
+// Sets frozen_at timestamp and reason. Typically used for quota enforcement or violations.
+func (s *Store) Freeze(ctx context.Context, tx *sql.Tx, subjectID int64, reason string) error {
+	now := s.now().UTC().Unix()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE subjects SET frozen_at = ?, frozen_reason = ? WHERE id = ?`,
+		now, reason, subjectID)
+	if err != nil {
+		return fmt.Errorf("freeze subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// Unfreeze unfreezes a subject, restoring access.
+// Clears frozen_at and frozen_reason.
+func (s *Store) Unfreeze(ctx context.Context, tx *sql.Tx, subjectID int64) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE subjects SET frozen_at = NULL, frozen_reason = NULL WHERE id = ?`,
+		subjectID)
+	if err != nil {
+		return fmt.Errorf("unfreeze subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// Disable disables a subject, setting enabled = 0.
+// This is different from freeze: disable is manual admin action, freeze is automatic quota enforcement.
+func (s *Store) Disable(ctx context.Context, tx *sql.Tx, subjectID int64) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE subjects SET enabled = 0 WHERE id = ?`,
+		subjectID)
+	if err != nil {
+		return fmt.Errorf("disable subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// Enable enables a subject, setting enabled = 1 and clearing expired_at.
+func (s *Store) Enable(ctx context.Context, tx *sql.Tx, subjectID int64) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE subjects SET enabled = 1, expired_at = NULL WHERE id = ?`,
+		subjectID)
+	if err != nil {
+		return fmt.Errorf("enable subject: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

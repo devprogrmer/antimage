@@ -74,8 +74,13 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			// (swanctl --load-creds), and xl2tpd re-reads CHAP secrets on
 			// SIGHUP.
 			HotUserAdd: true,
-			// L2TP/IPsec has no accounting API; we use external nftables.
-			SelfAccounting: false,
+			// SelfAccounting declares that this adapter reports its own usage,
+			// not that the protocol ships an accounting API. L2TP has none, but
+			// the adapter implements UsageReporter on top of nftables counters,
+			// so the capability is true. Declaring false here told the panel
+			// this adapter could not account for itself while it was doing
+			// exactly that.
+			SelfAccounting: true,
 			RequiresPKI:    false,
 			// PPP authentication uses CHAP username/password.
 			CredentialKinds: []adapter.CredentialKind{adapter.CredPassword},

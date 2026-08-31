@@ -38,7 +38,7 @@ func itoa(i int) string {
 func newReconciler(t *testing.T) (*Reconciler, *FakeClock) {
 	t.Helper()
 	clk := NewFakeClock(time.Unix(1_700_000_000, 0).UTC())
-	r := NewReconciler(stub.New(t.TempDir()), clk, ReconcileOptions{
+	r := NewReconciler(MustRegistry(stub.New(t.TempDir())), clk, ReconcileOptions{
 		MaxRetries: 3, RetryBase: time.Second,
 	})
 	return r, clk
@@ -150,7 +150,7 @@ func TestConvergenceSettlesAcrossTransitions(t *testing.T) {
 // negligible with SystemClock.
 func TestFailingStepRetriesThenReportsDegraded(t *testing.T) {
 	fa := &flakyAdapter{failEvery: true}
-	r := NewReconciler(fa, SystemClock{}, ReconcileOptions{MaxRetries: 3, RetryBase: time.Millisecond})
+	r := NewReconciler(MustRegistry(fa), SystemClock{}, ReconcileOptions{MaxRetries: 3, RetryBase: time.Millisecond})
 
 	run, err := r.Converge(context.Background(), desired(1, 443))
 	if err == nil {
@@ -169,7 +169,7 @@ func TestFailingStepRetriesThenReportsDegraded(t *testing.T) {
 
 func TestDisruptiveStepsDeferOutsideMaintenanceWindow(t *testing.T) {
 	clk := NewFakeClock(time.Unix(1_700_000_000, 0).UTC())
-	r := NewReconciler(stub.New(t.TempDir()), clk, ReconcileOptions{
+	r := NewReconciler(MustRegistry(stub.New(t.TempDir())), clk, ReconcileOptions{
 		MaxRetries: 3,
 		RetryBase:  time.Millisecond,
 		// Window closed: no disruptive step may run.
@@ -194,7 +194,7 @@ func TestDisruptiveStepsDeferOutsideMaintenanceWindow(t *testing.T) {
 func TestNonDisruptiveStepsRunEvenWithWindowClosed(t *testing.T) {
 	clk := NewFakeClock(time.Unix(1_700_000_000, 0).UTC())
 	hot := &hotOnlyAdapter{}
-	r := NewReconciler(hot, clk, ReconcileOptions{
+	r := NewReconciler(MustRegistry(hot), clk, ReconcileOptions{
 		MaxRetries: 3, RetryBase: time.Millisecond,
 		AllowDisruptive: func(time.Time) bool { return false },
 	})
@@ -221,7 +221,7 @@ func TestNonDisruptiveStepsRunEvenWithWindowClosed(t *testing.T) {
 func TestConvergedRequiresConfirmationPlanToBeEmpty(t *testing.T) {
 	clk := NewFakeClock(time.Unix(1_700_000_000, 0).UTC())
 	sa := &staggeredAdapter{}
-	r := NewReconciler(sa, clk, ReconcileOptions{MaxRetries: 3, RetryBase: time.Millisecond})
+	r := NewReconciler(MustRegistry(sa), clk, ReconcileOptions{MaxRetries: 3, RetryBase: time.Millisecond})
 
 	run, err := r.Converge(context.Background(), desired(1, 443))
 	if err != nil {
@@ -266,6 +266,9 @@ func (f *flakyAdapter) Apply(context.Context, adapter.Step) (adapter.StepResult,
 func (f *flakyAdapter) Probe(context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: true}, nil
 }
+func (f *flakyAdapter) Restart(context.Context) error {
+	return adapter.ErrRestartUnsupported
+}
 
 type hotOnlyAdapter struct{ applied bool }
 
@@ -287,6 +290,9 @@ func (h *hotOnlyAdapter) Apply(context.Context, adapter.Step) (adapter.StepResul
 }
 func (h *hotOnlyAdapter) Probe(context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: true}, nil
+}
+func (h *hotOnlyAdapter) Restart(context.Context) error {
+	return adapter.ErrRestartUnsupported
 }
 
 // staggeredAdapter needs two Apply rounds to converge: Plan keeps reporting
@@ -313,4 +319,7 @@ func (s *staggeredAdapter) Apply(context.Context, adapter.Step) (adapter.StepRes
 }
 func (s *staggeredAdapter) Probe(context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: true}, nil
+}
+func (s *staggeredAdapter) Restart(context.Context) error {
+	return adapter.ErrRestartUnsupported
 }

@@ -1,0 +1,143 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"strconv"
+
+	"github.com/amyrm/antimage/internal/panel/rbac"
+	"github.com/go-chi/chi/v5"
+)
+
+// GET /api/v1/nodes/:id/reconciliation
+func (d Deps) handleGetNodeReconciliation(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract node ID
+	nodeIDStr := chi.URLParam(r, "nodeID")
+	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", "invalid node id")
+		return
+	}
+
+	// Authorization was absent entirely: any authenticated caller, including a
+	// reseller scoped to no node, could read this node's reconciliation state.
+	// TargetNode binds the scope -- a non-super actor's NodeIDs are exhaustive.
+	if !d.requirePermission(w, r, rbac.PermNodeRead,
+		rbac.Target{Kind: rbac.TargetNode, ID: nodeID}) {
+		return
+	}
+
+	// Authorization: nodes:read permission (handled by middleware)
+
+	// Get node with revision data
+	var (
+		nodeName        string
+		desiredRevision *int64
+		appliedRevision *int64
+		lastSyncAt      *int64
+		lastSyncError   *string
+		configDrift     *bool
+	)
+
+	err = d.Store.Read().QueryRowContext(ctx, `
+		SELECT name, desired_revision, applied_revision, last_sync_at, last_sync_error, config_drift
+		FROM nodes
+		WHERE id = ?
+	`, nodeID).Scan(&nodeName, &desiredRevision, &appliedRevision, &lastSyncAt, &lastSyncError, &configDrift)
+
+	if err != nil {
+		http.Error(w, "node not found", http.StatusNotFound)
+		return
+	}
+
+	// Calculate reconciliation status
+	status := "unknown"
+	driftDetected := false
+	needsSync := false
+
+	if desiredRevision != nil && appliedRevision != nil {
+		if *desiredRevision == *appliedRevision {
+			status = "converged"
+			driftDetected = configDrift != nil && *configDrift
+		} else if *appliedRevision < *desiredRevision {
+			status = "pending"
+			needsSync = true
+		} else {
+			status = "drift" // applied > desired (shouldn't happen)
+			driftDetected = true
+		}
+	} else if desiredRevision != nil {
+		status = "pending"
+		needsSync = true
+	}
+
+	// Get recent apply runs for this node
+	rows, err := d.Store.Read().QueryContext(ctx, `
+		SELECT id, target_revision, outcome, started_at, finished_at
+		FROM node_apply_runs
+		WHERE node_id = ?
+		ORDER BY started_at DESC
+		LIMIT 10
+	`, nodeID)
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = rows.Close() }()
+
+	var runs []map[string]interface{}
+	for rows.Next() {
+		var (
+			id         int64
+			revision   int64
+			outcome    string
+			startedAt  int64
+			finishedAt *int64
+		)
+		if err := rows.Scan(&id, &revision, &outcome, &startedAt, &finishedAt); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+
+		run := map[string]interface{}{
+			"id":         id,
+			"revision":   revision,
+			"outcome":    outcome,
+			"started_at": startedAt,
+		}
+		if finishedAt != nil {
+			run["finished_at"] = *finishedAt
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal", "could not read rows")
+		return
+	}
+
+	response := map[string]interface{}{
+		"node_id":          nodeID,
+		"node_name":        nodeName,
+		"status":           status,
+		"desired_revision": desiredRevision,
+		"applied_revision": appliedRevision,
+		"drift_detected":   driftDetected,
+		"needs_sync":       needsSync,
+		"recent_runs":      runs,
+	}
+
+	if lastSyncAt != nil {
+		response["last_sync_at"] = *lastSyncAt
+	}
+	if lastSyncError != nil {
+		response["last_sync_error"] = *lastSyncError
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.ErrorContext(r.Context(), "encode response", "error", err)
+	}
+}

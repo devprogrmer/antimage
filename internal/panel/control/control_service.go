@@ -65,7 +65,7 @@ func (s *ControlService) Stream(srv pb.Control_StreamServer) error {
 		return status.Error(codes.Unauthenticated, "not enrolled")
 	}
 
-	bumps, release := s.deps.Hub.Register(nodeID)
+	bumps, cmds, release := s.deps.Hub.Register(nodeID)
 	defer release()
 
 	// Receive loop feeds messages to the select below.
@@ -103,6 +103,17 @@ func (s *ControlService) Stream(srv pb.Control_StreamServer) error {
 				Payload: &pb.PanelMessage_RevisionBump{
 					RevisionBump: &pb.RevisionBump{Revision: revision},
 				},
+			}); err != nil {
+				return err
+			}
+
+		case cmd, ok := <-cmds:
+			if !ok {
+				// Same as the bumps channel: a superseded stream closes both.
+				return status.Error(codes.Aborted, "stream superseded")
+			}
+			if err := srv.Send(&pb.PanelMessage{
+				Payload: &pb.PanelMessage_Command{Command: cmd},
 			}); err != nil {
 				return err
 			}
@@ -151,6 +162,15 @@ func (s *ControlService) handle(
 	case *pb.AgentMessage_UsageReport:
 		return s.onUsageReport(ctx, nodeID, p.UsageReport)
 
+	case *pb.AgentMessage_CommandResult:
+		// Not a store write and not tied to nodeID's stream lifetime: the
+		// HTTP request that issued the command is what is actually waiting,
+		// and it may already have timed out. DeliverResult finds it if it
+		// is still listening and is a no-op if not -- either way this never
+		// blocks the stream loop.
+		s.deps.Hub.DeliverResult(p.CommandResult)
+		return nil
+
 	default:
 		return nil // forward compatible: ignore unknown payloads
 	}
@@ -163,6 +183,14 @@ func (s *ControlService) onHello(ctx context.Context, nodeID int64, h *pb.Hello,
 			Kind:         a.Kind,
 			Version:      a.Version,
 			Capabilities: a.Capabilities, // SP5: capture capabilities
+			// The schema and capability flags were already on the wire and
+			// discarded here. They are what lets the panel validate against what
+			// THIS node runs rather than what this build of the panel knows, and
+			// what lets an editor offer only protocols the node can execute.
+			ServiceSchema:  a.ServiceSchema,
+			HotUserAdd:     a.HotUserAdd,
+			SelfAccounting: a.SelfAccounting,
+			RequiresPKI:    a.RequiresPki,
 		})
 	}
 	if err := nodes.RecordHello(ctx, s.deps.Store, nodeID, adapters,
@@ -210,7 +238,11 @@ func (s *ControlService) onUsageReport(ctx context.Context, nodeID int64, r *pb.
 	samples := make([]nodes.UsageDelta, 0, len(r.Samples))
 	for _, sample := range r.Samples {
 		samples = append(samples, nodes.UsageDelta{
-			SubjectID:     sample.SubjectId,
+			SubjectID: sample.SubjectId,
+			// C2: 0 means the adapter could not attribute the traffic. It is
+			// carried in as-is and resolved during ingest, where the services
+			// table is in scope to say whether the id is real.
+			ServiceID:     sample.ServiceId,
 			UplinkBytes:   sample.UplinkBytes,
 			DownlinkBytes: sample.DownlinkBytes,
 		})

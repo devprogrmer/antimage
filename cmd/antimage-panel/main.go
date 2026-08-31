@@ -25,9 +25,14 @@ import (
 	"github.com/amyrm/antimage/internal/panel/audit"
 	"github.com/amyrm/antimage/internal/panel/auth"
 	"github.com/amyrm/antimage/internal/panel/control"
+	"github.com/amyrm/antimage/internal/panel/deployment"
 	"github.com/amyrm/antimage/internal/panel/httpapi"
 	"github.com/amyrm/antimage/internal/panel/metrics"
 	"github.com/amyrm/antimage/internal/panel/nodes"
+	"github.com/amyrm/antimage/internal/panel/notify/telegram"
+	"github.com/amyrm/antimage/internal/panel/observability"
+	"github.com/amyrm/antimage/internal/panel/resellers"
+	"github.com/amyrm/antimage/internal/panel/service"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/panel/subjects"
 	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
@@ -42,6 +47,16 @@ func main() {
 	grpcHosts := flag.String("grpc-hosts", "localhost,127.0.0.1",
 		"comma-separated DNS names and IPs agents dial this panel on; they become the SANs of the panel's TLS certificate")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	// Accounting maintenance, for use either side of a migration. Read-only
+	// unless --repair is given, and --repair reports what it would do rather
+	// than doing it unless --apply is given too: recomputing a billing figure
+	// is not something to trigger by typo.
+	verifyAccounting := flag.Bool("accounting-verify", false,
+		"print an accounting checksum and exit")
+	repairAccounting := flag.Bool("accounting-repair", false,
+		"recompute hourly rollups inflated by the pre-00026 sweeper; reports without writing unless --accounting-apply is given")
+	applyRepair := flag.Bool("accounting-apply", false,
+		"with --accounting-repair, write the repair instead of reporting it")
 	flag.Parse()
 
 	if *showVersion {
@@ -49,10 +64,67 @@ func main() {
 		return
 	}
 
+	if *verifyAccounting || *repairAccounting {
+		if err := accountingMaintenance(*dataDir, *repairAccounting, *applyRepair); err != nil {
+			slog.Error("accounting maintenance failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := run(*dataDir, *httpAddr, *grpcAddr, *grpcHosts); err != nil {
 		slog.Error("panel stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+// accountingMaintenance runs the checksum, and optionally the rollup repair,
+// against the database without starting the panel.
+//
+// Taking the checksum either side of a migration is how "this migration changes
+// no bill" stops being a claim and becomes a check. The repair is separate and
+// opt-in because it rewrites billing figures: it recomputes the hourly rollups
+// that the pre-00026 sweeper inflated, and only for the buckets whose raw
+// deltas survive the retention window. Buckets whose deltas have been pruned
+// are reported and left exactly as they are, because the true figure is not
+// recoverable and a confident wrong number is worse than a known-wrong one.
+func accountingMaintenance(dataDir string, repair, apply bool) error {
+	st, err := store.Open(filepath.Join(dataDir, "antimage.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	ctx := context.Background()
+	before, err := nodes.TakeChecksum(ctx, st)
+	if err != nil {
+		return err
+	}
+	_, _ = os.Stdout.WriteString(before.String())
+
+	if !repair {
+		return nil
+	}
+
+	report, err := nodes.RepairHourlyRollups(ctx, st, !apply)
+	if err != nil {
+		return err
+	}
+	_, _ = os.Stdout.WriteString(report.String() + "\n")
+	if !apply {
+		_, _ = os.Stdout.WriteString(
+			"nothing was written; re-run with --accounting-apply to apply this\n")
+		return nil
+	}
+
+	after, err := nodes.TakeChecksum(ctx, st)
+	if err != nil {
+		return err
+	}
+	for _, line := range before.Divergence(after) {
+		_, _ = os.Stdout.WriteString("changed " + line + "\n")
+	}
+	return nil
 }
 
 func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
@@ -89,6 +161,12 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Recover any deployments stuck in in_progress state from process crashes
+	orchestrator := deployment.NewOrchestrator(st)
+	if err := orchestrator.RecoverStaleDeployments(ctx); err != nil {
+		slog.Warn("deployment recovery failed", "error", err)
+	}
+
 	// SP5: Register Prometheus metrics collector
 	collector := metrics.NewCollector(st)
 	prometheus.MustRegister(collector)
@@ -101,6 +179,24 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 	now := func() time.Time { return time.Now().UTC() }
 
 	go nodes.NewSweeper(st, now).Run(ctx, 30*time.Second)
+
+	// Deployment timeout enforcement sweeper
+	// Runs every 2 minutes to detect and fail deployments exceeding their timeout
+	timeoutConfig := deployment.DefaultTimeoutConfig()
+	go func() {
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := orchestrator.EnforceTimeouts(ctx, timeoutConfig, now()); err != nil {
+					slog.ErrorContext(ctx, "deployment timeout enforcement failed", "error", err)
+				}
+			}
+		}
+	}()
 
 	// Expiry is enforced by omission from the desired document; this sweeper
 	// makes it prompt and visible by stamping expired_at and bumping the
@@ -229,6 +325,53 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 		}
 	}()
 
+	// SP7: Certificate and quota alert sweeper
+	// Runs every 5 minutes to check for expiring certificates and quota thresholds
+	obsSweeper := observability.NewSweeper(st)
+	go obsSweeper.Run(ctx)
+
+	// SP7: Hourly rollup generator for observability metrics
+	// Aggregates detailed node_health data into hourly summaries
+	obsRollup := observability.NewRollupGenerator(st)
+	go obsRollup.RunHourly(ctx)
+
+	// SP7: Daily rollup generator for observability metrics
+	// Aggregates hourly data into daily summaries
+	go obsRollup.RunDaily(ctx)
+
+	// Telegram bot.
+	//
+	// The token comes from the environment, never a flag: a flag is visible in
+	// `ps` output to every user on the box, and a bot token lets its holder
+	// impersonate the panel to every linked operator.
+	//
+	// An absent token means the bot is simply off, which is the right default:
+	// an operator who has not configured Telegram should not have a component
+	// polling an external service on their behalf.
+	if token := os.Getenv("ANTIMAGE_TELEGRAM_TOKEN"); token != "" {
+		links := telegram.NewStore(st, now)
+
+		// The bot reads through the same service layer the HTTP API uses, so
+		// its commands inherit permission checks, tenant scope and audit
+		// rather than reimplementing them.
+		subjStore := subjects.NewStore(st, box, now)
+		botSvc := service.NewSubjects(
+			st, subjStore, resellers.NewStore(st, subjStore, now),
+			hub, now, nodes.WithUnsealer(box),
+		)
+
+		// Optional. Without it /config returns the subscription path and says
+		// what to prefix it with, rather than emitting a link built from a
+		// guessed hostname that would not resolve.
+		publicURL := os.Getenv("ANTIMAGE_PUBLIC_URL")
+
+		bot := telegram.NewBot(telegram.NewHTTPAPI(token), st, links, botSvc, publicURL, now)
+		go bot.Run(ctx)
+	} else {
+		slog.InfoContext(ctx, "telegram bot disabled",
+			"reason", "ANTIMAGE_TELEGRAM_TOKEN is not set")
+	}
+
 	// The control plane is mTLS end to end. Without credentials here the
 	// server speaks plaintext HTTP/2 while both agent paths dial with TLS, so
 	// every handshake fails before control.VerifyPeer is ever reached and no
@@ -282,7 +425,8 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 			DownloadDir: filepath.Join(dataDir, "downloads"),
 			// SSEInterval is left at zero on purpose: zero selects the
 			// production default. Only tests set it.
-			Now: now,
+			Now:          now,
+			CoreVersions: httpapi.NewXrayCoreVersionCache(),
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

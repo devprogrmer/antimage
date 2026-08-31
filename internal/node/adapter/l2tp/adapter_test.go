@@ -20,8 +20,17 @@ func TestDescriptor(t *testing.T) {
 	if desc.Caps.HotUserAdd != true {
 		t.Error("want HotUserAdd=true (CHAP reload + swanctl --load-creds)")
 	}
-	if desc.Caps.SelfAccounting != false {
-		t.Error("want SelfAccounting=false (uses external nftables)")
+	// SelfAccounting declares that the adapter reports its own usage, not that
+	// the protocol ships an accounting API. This adapter implements
+	// UsageReporter on top of nftables counters, so the capability is true.
+	// The old expectation of false described the protocol rather than the
+	// adapter, and left the panel believing L2TP nodes could not account.
+	if !desc.Caps.SelfAccounting {
+		t.Error("want SelfAccounting=true: the adapter implements UsageReporter")
+	}
+	if _, ok := any(New("", "")).(adapter.UsageReporter); !ok {
+		t.Error("adapter no longer implements UsageReporter, so the declared " +
+			"capability is now a lie")
 	}
 	if desc.Caps.RequiresPKI != false {
 		t.Error("want RequiresPKI=false (uses PSK)")

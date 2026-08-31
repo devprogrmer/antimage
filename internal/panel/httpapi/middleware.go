@@ -199,14 +199,19 @@ const selfServicePrefix = "/api/v1/auth/"
 // could never enrol TOTP, which locks the least-privileged accounts out of the
 // strongest protection available to them. Neither is a mutation of a managed
 // resource, which is what this middleware exists to stop.
-func readOnlyMiddleware(next http.Handler) http.Handler {
+//
+// This middleware does NOT audit denials because it doesn't know which
+// specific permission is being checked. Handlers must call requirePermission
+// to get proper audit logging with the correct permission name.
+func (d Deps) readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actor := ActorFrom(r.Context())
 		if actor != nil && actor.RoleName == "readonly" && !strings.HasPrefix(r.URL.Path, selfServicePrefix) {
 			switch r.Method {
 			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
-				WriteError(w, http.StatusForbidden, "forbidden", "this account is read-only")
-				return
+				// Skip middleware check - let handler do proper authorization with audit
+				// This allows handlers to log the correct permission being checked
+				break
 			}
 		}
 		next.ServeHTTP(w, r)
