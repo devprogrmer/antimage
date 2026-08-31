@@ -25,6 +25,15 @@ type AdapterRegistryEntry struct {
 	HotUserAdd     bool
 	SelfAccounting bool
 	RequiresPKI    bool
+
+	// GeoUpdatedAt, GeoIPSHA256, GeoSiteSHA256 are set by the panel's own
+	// geo-update handler when a command against this adapter succeeds --
+	// never by Hello, which reports what the agent's process knows about
+	// itself and has no way to know what happened to a file on disk since.
+	// Nil/empty means never updated, not "unknown".
+	GeoUpdatedAt  *time.Time
+	GeoIPSHA256   string
+	GeoSiteSHA256 string
 }
 
 // UpsertAdapter records what one adapter on one node reports about itself.
@@ -79,7 +88,8 @@ func UpsertAdapter(ctx context.Context, s *store.Store, nodeID int64,
 func ListAdapters(ctx context.Context, s *store.Store, nodeID int64) ([]AdapterRegistryEntry, error) {
 	rows, err := s.Read().QueryContext(ctx,
 		`SELECT id, node_id, kind, version, capabilities, reported_at,
-		        service_schema, hot_user_add, self_accounting, requires_pki
+		        service_schema, hot_user_add, self_accounting, requires_pki,
+		        geo_updated_at, COALESCE(geo_geoip_sha256, ''), COALESCE(geo_geosite_sha256, '')
 		 FROM adapter_registry WHERE node_id = ?
 		 ORDER BY kind`, nodeID)
 	if err != nil {
@@ -94,9 +104,15 @@ func ListAdapters(ctx context.Context, s *store.Store, nodeID int64) ([]AdapterR
 		var reportedAt int64
 		var schema sql.NullString
 		var hotAdd, selfAcct, pki int
+		var geoUpdatedAt sql.NullInt64
 		if err := rows.Scan(&e.ID, &e.NodeID, &e.Kind, &e.Version,
-			&capsJSON, &reportedAt, &schema, &hotAdd, &selfAcct, &pki); err != nil {
+			&capsJSON, &reportedAt, &schema, &hotAdd, &selfAcct, &pki,
+			&geoUpdatedAt, &e.GeoIPSHA256, &e.GeoSiteSHA256); err != nil {
 			return nil, err
+		}
+		if geoUpdatedAt.Valid {
+			t := time.Unix(geoUpdatedAt.Int64, 0).UTC()
+			e.GeoUpdatedAt = &t
 		}
 		if schema.Valid {
 			e.ServiceSchema = []byte(schema.String)
@@ -116,4 +132,30 @@ func ListAdapters(ctx context.Context, s *store.Store, nodeID int64) ([]AdapterR
 	}
 
 	return entries, nil
+}
+
+// RecordGeoUpdate stamps a successful geo-data update against an existing
+// adapter_registry row.
+//
+// Only UPDATEs, never INSERTs: the row this is stamping was created by
+// Hello when the adapter first connected, and a geo update for a kind the
+// node has never reported would be updating a fact about an adapter that,
+// as far as the panel knows, does not exist here. Reports whether a row
+// existed to update, so the caller can distinguish "recorded" from
+// "nothing to record it against".
+func RecordGeoUpdate(ctx context.Context, s *store.Store, nodeID int64, kind, geoipSHA256, geositeSHA256 string, at time.Time) (bool, error) {
+	var affected int64
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE adapter_registry
+			    SET geo_updated_at = ?, geo_geoip_sha256 = ?, geo_geosite_sha256 = ?
+			  WHERE node_id = ? AND kind = ?`,
+			at.Unix(), geoipSHA256, geositeSHA256, nodeID, kind)
+		if err != nil {
+			return err
+		}
+		affected, err = res.RowsAffected()
+		return err
+	})
+	return affected > 0, err
 }

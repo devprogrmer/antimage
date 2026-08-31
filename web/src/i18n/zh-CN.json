@@ -751,5 +751,8 @@
   "node.syncOffline": "节点离线；将在下次连接时自行同步",
   "node.restartOffline": "节点离线；未重启任何内容",
   "node.restartNoAdapters": "代理未报告任何可重启的适配器",
-  "node.restartOK": "已重启"
+  "node.restartOK": "已重启",
+  "node.updateGeoData": "更新地理数据",
+  "node.updateGeoDataOK": "已更新",
+  "node.geoDataUpdatedAt": "地理数据更新时间"
 }

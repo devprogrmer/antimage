@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { api } from "../lib/api";
 import { MutationError } from "../routes/Resellers";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 import { formatTimestamp, t } from "../i18n";
 
 interface Adapter {
@@ -10,6 +12,26 @@ interface Adapter {
   version: string;
   capabilities: string[];
   reported_at: number;
+  // Null when this adapter's geo data has never been updated through the
+  // panel -- true for every adapter kind with no geo-data concept at all,
+  // so the update control only ever renders where it could be non-null.
+  geo_updated_at: number | null;
+  geoip_sha256?: string;
+  geosite_sha256?: string;
+}
+
+interface GeoUpdateOutcome {
+  kind: string;
+  ok: boolean;
+  error: string;
+  geoip_sha256: string;
+  geosite_sha256: string;
+}
+
+interface GeoUpdateResponse {
+  delivered: boolean;
+  outcomes: GeoUpdateOutcome[] | null;
+  message: string;
 }
 
 interface Capability {
@@ -29,6 +51,7 @@ interface Capability {
  * find is a node that will accept an inbound and fail to apply it.
  */
 export function NodeAdapters({ nodeId }: { nodeId: number }) {
+  const queryClient = useQueryClient();
   const adapters = useQuery({
     queryKey: ["node", nodeId, "adapters"],
     queryFn: () => api.get<{ adapters: Adapter[] }>(`/api/v1/nodes/${nodeId}/adapters`),
@@ -39,13 +62,60 @@ export function NodeAdapters({ nodeId }: { nodeId: number }) {
       api.get<{ capabilities: Capability[] }>(`/api/v1/nodes/${nodeId}/capabilities`),
   });
 
+  // One button for the node, not one per adapter row: the operator's intent
+  // is "refresh whatever geo data this node has," not a per-protocol
+  // decision, and RestartAdapters/NodeActions already use the same
+  // node-level shape. Which adapter kinds actually have geo data is decided
+  // agent-side (adapter.GeoDataUpdater) and reported back per outcome, so
+  // this deliberately does not hardcode "xray" here -- a node running only
+  // wireguard sees the button do nothing useful and say so, rather than the
+  // browser guessing in advance which protocols qualify.
+  const [geoResult, setGeoResult] = useState<GeoUpdateResponse | null>(null);
+  const updateGeoData = useMutation({
+    mutationFn: () => api.post<GeoUpdateResponse>(`/api/v1/nodes/${nodeId}/geo-update`, {}),
+    onSuccess: (data) => {
+      setGeoResult(data);
+      queryClient.invalidateQueries({ queryKey: ["node", nodeId, "adapters"] });
+    },
+  });
+
   return (
     <div className="space-y-6">
       <section>
-        <h3 className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-          {t("node.adapters")}
-        </h3>
+        <div className="mb-2 flex items-center gap-2">
+          <h3 className="text-xs uppercase tracking-wide text-muted-foreground">
+            {t("node.adapters")}
+          </h3>
+          <Button
+            size="sm"
+            variant="outline"
+            className="ms-auto"
+            disabled={updateGeoData.isPending}
+            onClick={() => {
+              setGeoResult(null);
+              updateGeoData.mutate();
+            }}
+          >
+            {updateGeoData.isPending ? t("egress.saving") : t("node.updateGeoData")}
+          </Button>
+        </div>
         <MutationError error={adapters.error} />
+        <MutationError error={updateGeoData.error} />
+        {geoResult && (
+          <div role="status" className="mb-2 rounded border border-border bg-card p-2 text-xs">
+            {!geoResult.delivered || !geoResult.outcomes || geoResult.outcomes.length === 0 ? (
+              <span className="text-muted-foreground">{geoResult.message}</span>
+            ) : (
+              <ul className="space-y-0.5">
+                {geoResult.outcomes.map((o) => (
+                  <li key={o.kind} className={o.ok ? "text-success" : "text-destructive"}>
+                    {o.kind}: {o.ok ? t("node.updateGeoDataOK") : o.error}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {adapters.data?.adapters.length === 0 && (
           // Distinct from "no adapters": a node that has never connected has
           // reported nothing, which is a different thing to explain.
@@ -68,6 +138,17 @@ export function NodeAdapters({ nodeId }: { nodeId: number }) {
                   </Badge>
                 ))}
               </div>
+            )}
+            {/* Only rendered for an adapter that has actually had a
+                successful geo update at some point -- most adapter kinds
+                never will, and printing "never" on every row for protocols
+                with no geo concept at all would be noise, not information. */}
+            {a.geo_updated_at != null && (
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                {t("node.geoDataUpdatedAt")}: {formatTimestamp(a.geo_updated_at)}
+                {a.geoip_sha256 && ` · geoip ${a.geoip_sha256.slice(0, 12)}`}
+                {a.geosite_sha256 && ` · geosite ${a.geosite_sha256.slice(0, 12)}`}
+              </p>
             )}
           </div>
         ))}

@@ -351,6 +351,26 @@ func (c *Client) handleCommand(ctx context.Context, cmd *pb.AgentCommand) *pb.Ag
 				RestartAdapters: &pb.RestartAdaptersResult{Outcomes: wire},
 			},
 		}
+	case *pb.AgentCommand_UpdateGeoData:
+		g := body.UpdateGeoData
+		outcomes := c.ads.UpdateGeoData(ctx, g.GeoipUrl, g.GeoipSha256Url, g.GeositeUrl, g.GeositeSha256Url)
+		wire := make([]*pb.AdapterGeoUpdateOutcome, 0, len(outcomes))
+		for _, o := range outcomes {
+			errText := ""
+			if o.Err != nil {
+				errText = o.Err.Error()
+			}
+			wire = append(wire, &pb.AdapterGeoUpdateOutcome{
+				Kind: string(o.Kind), Ok: o.OK, Error: errText,
+				GeoipSha256: o.GeoIPSHA256, GeositeSha256: o.GeoSiteSHA256,
+			})
+		}
+		return &pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_UpdateGeoData{
+				UpdateGeoData: &pb.UpdateGeoDataResult{Outcomes: wire},
+			},
+		}
 	default:
 		// Forward compatible: an agent build older than a newer command type
 		// tells the panel it does not understand rather than silently

@@ -43,11 +43,29 @@ const (
 	statsConfigFile = "antimage-stats.json"
 )
 
+// DefaultAssetDir is where the official Xray installer
+// (github.com/XTLS/Xray-install) places geoip.dat/geosite.dat and points
+// XRAY_LOCATION_ASSET at in the systemd unit it writes. Antimage does not
+// provision that unit -- Xray itself is installed by whatever means the
+// operator chose -- so this default only holds if the node followed that
+// convention, which the overwhelming majority of real installs do. New's
+// assetDir parameter exists precisely so a node that did not can be pointed
+// elsewhere without an agent rebuild.
+const DefaultAssetDir = "/usr/local/share/xray"
+
 // Adapter implements the adapter contract for Xray-core.
 type Adapter struct {
 	// dir is Xray's confdir. Each service becomes one file in it.
 	dir string
 	rt  Runtime
+
+	// assetDir is where geoip.dat/geosite.dat live -- wherever
+	// XRAY_LOCATION_ASSET on this host's xray unit actually points, NOT
+	// necessarily confdir. Conflating the two would silently write geo data
+	// into a directory Xray never reads if a node's unit sets the env var
+	// to somewhere else, which is common on hosts that installed Xray
+	// before antimage ever touched them.
+	assetDir string
 
 	// shapes records, per service, the checksum of the inbound rendered with
 	// NO users, as read by the last Observe. Plan compares it against the
@@ -60,9 +78,16 @@ type Adapter struct {
 	hotAdd bool
 }
 
-// New returns an adapter writing into dir and driving rt.
+// New returns an adapter writing into dir and driving rt, using
+// DefaultAssetDir for geo data.
 func New(dir string, rt Runtime, hotAdd bool) *Adapter {
-	return &Adapter{dir: dir, rt: rt, hotAdd: hotAdd}
+	return NewWithAssetDir(dir, rt, hotAdd, DefaultAssetDir)
+}
+
+// NewWithAssetDir is New with an explicit geo-data directory, for a node
+// whose Xray was not installed by the official installer's convention.
+func NewWithAssetDir(dir string, rt Runtime, hotAdd bool, assetDir string) *Adapter {
+	return &Adapter{dir: dir, rt: rt, hotAdd: hotAdd, assetDir: assetDir}
 }
 
 // serviceSchema is published to the panel, which validates operator input

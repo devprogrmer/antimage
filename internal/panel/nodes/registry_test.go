@@ -243,3 +243,121 @@ func TestUpsertAdapter_InvalidJSON(t *testing.T) {
 		t.Errorf("UpsertAdapter should handle any valid []string: %v", err)
 	}
 }
+
+// seedNodeForRegistry creates a bare node row for tests that need a real
+// node_id foreign key.
+func seedNodeForRegistry(t *testing.T, s *store.Store) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var nodeID int64
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO nodes (name, address, created_at) VALUES (?, ?, ?)`,
+			"geo-test-node", "10.0.0.9", time.Now().Unix())
+		if err != nil {
+			return err
+		}
+		nodeID, _ = res.LastInsertId()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	return nodeID
+}
+
+// TestRecordGeoUpdate_StampsExistingRow proves the write path the HTTP
+// handler depends on: an adapter that already reported in via Hello gets
+// its geo columns filled in by a successful update.
+func TestRecordGeoUpdate_StampsExistingRow(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStoreForRegistry(t)
+	nodeID := seedNodeForRegistry(t, s)
+
+	if err := UpsertAdapter(ctx, s, nodeID, AdapterInfo{Kind: "xray", Version: "1.8.0"}, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatalf("seed adapter: %v", err)
+	}
+
+	at := time.Unix(1_700_001_000, 0).UTC()
+	ok, err := RecordGeoUpdate(ctx, s, nodeID, "xray", "geoipsum", "geositesum", at)
+	if err != nil {
+		t.Fatalf("RecordGeoUpdate: %v", err)
+	}
+	if !ok {
+		t.Fatal("RecordGeoUpdate reported no row updated, want true")
+	}
+
+	entries, err := ListAdapters(ctx, s, nodeID)
+	if err != nil {
+		t.Fatalf("ListAdapters: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d adapters, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.GeoUpdatedAt == nil || !e.GeoUpdatedAt.Equal(at) {
+		t.Errorf("GeoUpdatedAt = %v, want %v", e.GeoUpdatedAt, at)
+	}
+	if e.GeoIPSHA256 != "geoipsum" || e.GeoSiteSHA256 != "geositesum" {
+		t.Errorf("checksums = %q/%q, want geoipsum/geositesum", e.GeoIPSHA256, e.GeoSiteSHA256)
+	}
+}
+
+// TestRecordGeoUpdate_NoMatchingRowReportsFalse proves the handler can
+// distinguish "recorded" from "nothing to record it against" -- an adapter
+// kind the node never reported via Hello has no row to stamp.
+func TestRecordGeoUpdate_NoMatchingRowReportsFalse(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStoreForRegistry(t)
+	nodeID := seedNodeForRegistry(t, s)
+
+	ok, err := RecordGeoUpdate(ctx, s, nodeID, "xray", "a", "b", time.Now())
+	if err != nil {
+		t.Fatalf("RecordGeoUpdate: %v", err)
+	}
+	if ok {
+		t.Error("RecordGeoUpdate reported a row updated for a kind that was never registered")
+	}
+}
+
+// TestUpsertAdapter_PreservesGeoColumnsAcrossHello is the invariant the
+// migration's own comment promises: Hello re-upserting an adapter (every
+// reconnect) must not wipe out geo tracking the panel recorded separately.
+// UpsertAdapter's SET clause simply does not name the geo_* columns, so
+// SQLite leaves them untouched -- this proves that holds, not just reads
+// the source and assumes it.
+func TestUpsertAdapter_PreservesGeoColumnsAcrossHello(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStoreForRegistry(t)
+	nodeID := seedNodeForRegistry(t, s)
+
+	if err := UpsertAdapter(ctx, s, nodeID, AdapterInfo{Kind: "xray", Version: "1.8.0"}, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatalf("initial UpsertAdapter: %v", err)
+	}
+	at := time.Unix(1_700_001_000, 0).UTC()
+	if _, err := RecordGeoUpdate(ctx, s, nodeID, "xray", "geoipsum", "geositesum", at); err != nil {
+		t.Fatalf("RecordGeoUpdate: %v", err)
+	}
+
+	// Simulate the agent reconnecting and sending Hello again, with a new
+	// version -- geo data on disk has not changed just because the process
+	// restarted.
+	if err := UpsertAdapter(ctx, s, nodeID, AdapterInfo{Kind: "xray", Version: "1.8.1"}, time.Unix(1_700_002_000, 0)); err != nil {
+		t.Fatalf("second UpsertAdapter: %v", err)
+	}
+
+	entries, err := ListAdapters(ctx, s, nodeID)
+	if err != nil {
+		t.Fatalf("ListAdapters: %v", err)
+	}
+	e := entries[0]
+	if e.Version != "1.8.1" {
+		t.Errorf("version = %q, want 1.8.1 (Hello should still update this)", e.Version)
+	}
+	if e.GeoUpdatedAt == nil || !e.GeoUpdatedAt.Equal(at) {
+		t.Errorf("GeoUpdatedAt = %v, want it preserved at %v across the Hello re-upsert", e.GeoUpdatedAt, at)
+	}
+	if e.GeoIPSHA256 != "geoipsum" {
+		t.Errorf("GeoIPSHA256 = %q, want it preserved as geoipsum", e.GeoIPSHA256)
+	}
+}
