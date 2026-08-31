@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -39,21 +40,33 @@ func skipUnlessLinux(t *testing.T) {
 // other argument (so a[Restart-triggered health check via systemctl in
 // production isn't exercised here, but has no complaint from this file
 // existing where systemctl expects the unit's binary).
-const fakeXrayScript = `#!/bin/sh
+//
+// The trailing comment block is padding, not part of the fake behavior: a
+// real Xray release archive is several MB, and downloadExtractVerify
+// deliberately refuses anything under geoMinPlausibleSize on the theory
+// that a tiny "download" is more likely an error page than a real binary.
+// Without this padding these fixtures come in under that floor and get
+// rejected before the test ever reaches the behavior it means to exercise.
+var fakeXrayScriptPadding = strings.Repeat(
+	"# padding so this fixture clears the download size sanity check\n", 100)
+
+var fakeXrayScript = `#!/bin/sh
 if [ "$1" = "-version" ]; then
   echo "Xray %s (Xray, Penetrates Everything.) Custom (go1.2 linux/amd64)"
   exit 0
 fi
 exit 0
-`
+` + fakeXrayScriptPadding
 
 // buildFakeXrayZip returns zip bytes containing one entry "xray" with mode
-// 0755 running fakeXrayScript formatted with version.
+// 0755 running fakeXrayScript formatted with version. Stored uncompressed so
+// the archive's on-disk size does not depend on how well the padding
+// compresses -- it must reliably clear geoMinPlausibleSize.
 func buildFakeXrayZip(t *testing.T, version string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	hdr := &zip.FileHeader{Name: "xray", Method: zip.Deflate}
+	hdr := &zip.FileHeader{Name: "xray", Method: zip.Store}
 	hdr.SetMode(0o755)
 	w, err := zw.CreateHeader(hdr)
 	if err != nil {
@@ -224,8 +237,12 @@ func TestUpgradeCore_ArchiveWithoutXrayEntry_IsRejected(t *testing.T) {
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	w, _ := zw.Create("README.md")
-	_, _ = w.Write([]byte("not a binary"))
+	hdr := &zip.FileHeader{Name: "README.md", Method: zip.Store}
+	w, _ := zw.CreateHeader(hdr)
+	// Padded past geoMinPlausibleSize so this fails for the reason the test
+	// name claims -- no xray entry -- rather than being rejected earlier as
+	// simply too small to be a real archive.
+	_, _ = w.Write([]byte("not a binary\n" + fakeXrayScriptPadding))
 	_ = zw.Close()
 
 	url, _ := coreTestServer(t, buf.Bytes())
