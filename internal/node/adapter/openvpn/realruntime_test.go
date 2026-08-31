@@ -81,6 +81,16 @@ func TestRealRuntimeOpenVPNParsesTheGeneratedConfig(t *testing.T) {
 	if err := a.writeConf(1, raw); err != nil {
 		t.Fatalf("write conf: %v", err)
 	}
+	// OpenVPN 2.7 stats every certificate path before it parses the rest of
+	// the config. Empty files satisfy the existence check without pretending
+	// to be usable PKI material -- the test still fails on any real "Options
+	// error", it just doesn't fail on missing files that were never the
+	// point of a parser test.
+	for _, name := range []string{"ca.crt", "s.crt", "s.key"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatalf("touch %s: %v", name, err)
+		}
+	}
 
 	confPath := filepath.Join(dir, confName)
 	// No --test-crypto: that flag forces a static-key self-test regardless of
