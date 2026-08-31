@@ -107,6 +107,12 @@ type Caps struct {
 	// Publishing the list is what lets the panel refuse that rule at the API
 	// instead.
 	BuiltinOutboundTags []string `json:"builtin_outbound_tags,omitempty"`
+
+	// SupportsDNS declares whether this adapter can apply schema v4's DNS
+	// document: which servers to query, static host overrides, and fake-IP
+	// pools. Fail closed like SupportsOutbounds: only Xray owns a DNS
+	// resolution concept distinct from the OS's own in this codebase today.
+	SupportsDNS bool `json:"supports_dns"`
 }
 
 type Descriptor struct {
@@ -148,7 +154,7 @@ type Service struct {
 // about. For egress that would mean an operator configuring an outbound, the
 // panel reporting convergence, and the node routing traffic somewhere else
 // entirely. Refusing is the only safe reading of "I do not understand this".
-const MaxSchemaVersion = 3
+const MaxSchemaVersion = 4
 
 // Outbound mirrors the panel's Outbound. Schema v3+.
 type Outbound struct {
@@ -179,6 +185,40 @@ type Routing struct {
 	DefaultOutboundTag string        `json:"default_outbound_tag,omitempty"`
 }
 
+// DNSServer mirrors the panel's DNSServer. Schema v4+.
+//
+// Domains scopes this server to a subset of lookups (split DNS): a query for
+// a domain matching one of them is sent here rather than to whichever server
+// would otherwise answer it. Empty means this server may answer any query.
+type DNSServer struct {
+	Address      string   `json:"address"`
+	Domains      []string `json:"domains,omitempty"`
+	SkipFallback bool     `json:"skip_fallback,omitempty"`
+}
+
+// FakeDNSPool mirrors the panel's FakeDNSPool. Schema v4+.
+//
+// A fake-IP pool defers real resolution until a connection's destination is
+// actually dialed: a lookup gets back an address from this range instead of
+// the domain's real IP, and the adapter learns the real destination when
+// that fake address is connected to. IPv4 and IPv6 pools are two separate
+// entries here because Xray keys them by address family.
+type FakeDNSPool struct {
+	IPPool   string `json:"ip_pool"`
+	PoolSize int    `json:"pool_size"`
+}
+
+// DNSConfig mirrors the panel's DNSConfig. Schema v4+.
+type DNSConfig struct {
+	Servers []DNSServer `json:"servers,omitempty"`
+	// Hosts maps a domain to the IP address(es) it always resolves to,
+	// skipping any server entirely.
+	Hosts         map[string][]string `json:"hosts,omitempty"`
+	FakeDNS       []FakeDNSPool       `json:"fakedns,omitempty"`
+	QueryStrategy string              `json:"query_strategy,omitempty"`
+	DisableCache  bool                `json:"disable_cache,omitempty"`
+}
+
 // Desired mirrors the panel's document type field-for-field. It is declared
 // here rather than imported so this package stays free of panel code; the
 // wire contract keeps the two in sync.
@@ -192,6 +232,9 @@ type Desired struct {
 	// Egress (schema v3+).
 	Outbounds []Outbound `json:"outbounds,omitempty"`
 	Routing   *Routing   `json:"routing,omitempty"`
+
+	// DNS (schema v4+).
+	DNS *DNSConfig `json:"dns,omitempty"`
 }
 
 // CheckSchemaVersion refuses a document this agent cannot fully apply.
