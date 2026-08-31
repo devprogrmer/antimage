@@ -394,6 +394,26 @@ func (c *Client) handleCommand(ctx context.Context, cmd *pb.AgentCommand) *pb.Ag
 				},
 			},
 		}
+	case *pb.AgentCommand_FetchLogs:
+		fl := body.FetchLogs
+		outcome := c.ads.ReadLogs(ctx, fl.Kind, int(fl.Lines))
+		errText := ""
+		switch {
+		case !outcome.Found:
+			errText = fmt.Sprintf("this node runs no %q adapter", fl.Kind)
+		case !outcome.Capable:
+			errText = fmt.Sprintf("the %q adapter on this node has no log-reading concept", fl.Kind)
+		case outcome.Err != nil:
+			errText = outcome.Err.Error()
+		}
+		return &pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_FetchLogs{
+				FetchLogs: &pb.FetchLogsResult{
+					Kind: fl.Kind, Ok: outcome.OK, Logs: outcome.Logs, Error: errText,
+				},
+			},
+		}
 	default:
 		// Forward compatible: an agent build older than a newer command type
 		// tells the panel it does not understand rather than silently

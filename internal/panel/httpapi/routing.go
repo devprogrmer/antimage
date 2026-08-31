@@ -31,7 +31,10 @@ type routingRuleRequest struct {
 	SubjectIDs  []int64  `json:"subject_ids"`
 	Network     string   `json:"network"`
 	OutboundTag string   `json:"outbound_tag"`
-	Enabled     *bool    `json:"enabled"`
+	// BalancerTag is the rule's second possible target. Exactly one of
+	// OutboundTag and BalancerTag may be set.
+	BalancerTag string `json:"balancer_tag"`
+	Enabled     *bool  `json:"enabled"`
 }
 
 type routingRuleDTO struct {
@@ -47,6 +50,7 @@ type routingRuleDTO struct {
 	SubjectIDs  []int64  `json:"subject_ids"`
 	Network     string   `json:"network"`
 	OutboundTag string   `json:"outbound_tag"`
+	BalancerTag string   `json:"balancer_tag"`
 	Enabled     bool     `json:"enabled"`
 }
 
@@ -57,8 +61,13 @@ type routingRuleDTO struct {
 // the rule, rather than watching the node fail to converge afterwards with an
 // error attached to a revision instead of to the thing they just typed.
 func validateRoutingRule(req routingRuleRequest) error {
-	if strings.TrimSpace(req.OutboundTag) == "" {
-		return errors.New("outbound_tag is required; a rule that matches but selects nothing silently drops traffic")
+	hasOutbound := strings.TrimSpace(req.OutboundTag) != ""
+	hasBalancer := strings.TrimSpace(req.BalancerTag) != ""
+	switch {
+	case hasOutbound && hasBalancer:
+		return errors.New("outbound_tag and balancer_tag cannot both be set; exactly one selects where matched traffic goes")
+	case !hasOutbound && !hasBalancer:
+		return errors.New("outbound_tag or balancer_tag is required; a rule that matches but selects nothing silently drops traffic")
 	}
 	switch req.Network {
 	case "", "tcp", "udp":
@@ -111,6 +120,16 @@ func jsonArray[T any](in []T) string {
 	return string(b)
 }
 
+// requireKnownRuleTarget validates whichever of outbound_tag/balancer_tag
+// the request set. validateRoutingRule has already refused a request
+// setting both or neither, so exactly one branch runs.
+func (d Deps) requireKnownRuleTarget(ctx context.Context, nodeID int64, adapterKind string, req routingRuleRequest) error {
+	if req.OutboundTag != "" {
+		return d.requireKnownOutbound(ctx, nodeID, adapterKind, req.OutboundTag)
+	}
+	return d.requireKnownBalancer(ctx, nodeID, req.BalancerTag)
+}
+
 func routingPriorityOf(req routingRuleRequest) int {
 	if req.Priority == nil {
 		return 0
@@ -142,7 +161,7 @@ func (d Deps) handleListRoutingRules(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := d.Store.Read().QueryContext(r.Context(),
 		`SELECT id, priority, domains, ip_cidrs, geoip, geosite, ports,
-		        inbound_tags, subject_ids, network, outbound_tag, enabled
+		        inbound_tags, subject_ids, network, outbound_tag, balancer_tag, enabled
 		   FROM routing_rules
 		  WHERE node_id = ?
 		  ORDER BY priority, id`, nodeID)
@@ -159,7 +178,7 @@ func (d Deps) handleListRoutingRules(w http.ResponseWriter, r *http.Request) {
 		var enabled int
 		if err := rows.Scan(
 			&dto.ID, &dto.Priority, &domains, &ipCIDRs, &geoIP, &geoSite, &ports,
-			&inboundTags, &subjectIDs, &dto.Network, &dto.OutboundTag, &enabled,
+			&inboundTags, &subjectIDs, &dto.Network, &dto.OutboundTag, &dto.BalancerTag, &enabled,
 		); err != nil {
 			WriteError(w, http.StatusInternalServerError, "internal", "could not read routing rule")
 			return
@@ -228,7 +247,7 @@ func (d Deps) handleCreateRoutingRule(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 		return
 	}
-	if err := d.requireKnownOutbound(r.Context(), nodeID, adapterKind, req.OutboundTag); err != nil {
+	if err := d.requireKnownRuleTarget(r.Context(), nodeID, adapterKind, req); err != nil {
 		WriteError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 		return
 	}
@@ -241,13 +260,13 @@ func (d Deps) handleCreateRoutingRule(w http.ResponseWriter, r *http.Request) {
 			res, execErr := tx.ExecContext(ctx,
 				`INSERT INTO routing_rules
 				   (node_id, priority, domains, ip_cidrs, geoip, geosite, ports,
-				    inbound_tags, subject_ids, network, outbound_tag, enabled,
+				    inbound_tags, subject_ids, network, outbound_tag, balancer_tag, enabled,
 				    created_at, updated_at)
-				 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				nodeID, routingPriorityOf(req),
 				jsonArray(req.Domains), jsonArray(req.IPCIDRs), jsonArray(req.GeoIP),
 				jsonArray(req.GeoSite), jsonArray(req.Ports), jsonArray(req.InboundTags),
-				jsonArray(req.SubjectIDs), req.Network, req.OutboundTag,
+				jsonArray(req.SubjectIDs), req.Network, req.OutboundTag, req.BalancerTag,
 				routingEnabledOf(req), d.now().Unix(), d.now().Unix())
 			if execErr != nil {
 				return execErr
@@ -268,7 +287,7 @@ func (d Deps) handleCreateRoutingRule(w http.ResponseWriter, r *http.Request) {
 		ID: id, NodeID: nodeID, Priority: routingPriorityOf(req),
 		Domains: req.Domains, IPCIDRs: req.IPCIDRs, GeoIP: req.GeoIP, GeoSite: req.GeoSite,
 		Ports: req.Ports, InboundTags: req.InboundTags, SubjectIDs: req.SubjectIDs,
-		Network: req.Network, OutboundTag: req.OutboundTag,
+		Network: req.Network, OutboundTag: req.OutboundTag, BalancerTag: req.BalancerTag,
 		Enabled: routingEnabledOf(req) == 1,
 	})
 }
@@ -307,7 +326,7 @@ func (d Deps) handleUpdateRoutingRule(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusUnprocessableEntity, "unsupported", err.Error())
 		return
 	}
-	if err := d.requireKnownOutbound(r.Context(), nodeID, adapterKind, req.OutboundTag); err != nil {
+	if err := d.requireKnownRuleTarget(r.Context(), nodeID, adapterKind, req); err != nil {
 		WriteError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 		return
 	}
@@ -321,12 +340,12 @@ func (d Deps) handleUpdateRoutingRule(w http.ResponseWriter, r *http.Request) {
 				`UPDATE routing_rules
 				    SET priority = ?, domains = ?, ip_cidrs = ?, geoip = ?, geosite = ?,
 				        ports = ?, inbound_tags = ?, subject_ids = ?, network = ?,
-				        outbound_tag = ?, enabled = ?, updated_at = ?
+				        outbound_tag = ?, balancer_tag = ?, enabled = ?, updated_at = ?
 				  WHERE id = ? AND node_id = ?`,
 				routingPriorityOf(req),
 				jsonArray(req.Domains), jsonArray(req.IPCIDRs), jsonArray(req.GeoIP),
 				jsonArray(req.GeoSite), jsonArray(req.Ports), jsonArray(req.InboundTags),
-				jsonArray(req.SubjectIDs), req.Network, req.OutboundTag,
+				jsonArray(req.SubjectIDs), req.Network, req.OutboundTag, req.BalancerTag,
 				routingEnabledOf(req), d.now().Unix(), ruleID, nodeID)
 			if execErr != nil {
 				return execErr
@@ -354,7 +373,7 @@ func (d Deps) handleUpdateRoutingRule(w http.ResponseWriter, r *http.Request) {
 		ID: ruleID, NodeID: nodeID, Priority: routingPriorityOf(req),
 		Domains: req.Domains, IPCIDRs: req.IPCIDRs, GeoIP: req.GeoIP, GeoSite: req.GeoSite,
 		Ports: req.Ports, InboundTags: req.InboundTags, SubjectIDs: req.SubjectIDs,
-		Network: req.Network, OutboundTag: req.OutboundTag,
+		Network: req.Network, OutboundTag: req.OutboundTag, BalancerTag: req.BalancerTag,
 		Enabled: routingEnabledOf(req) == 1,
 	})
 }

@@ -188,9 +188,9 @@ func TestEgressOrderingIsDeterministic(t *testing.T) {
 // declares its own. If the panel's ceiling ever exceeds what the shipped agent
 // understands, every node refuses its document -- which is safe, but it is a
 // fleet-wide outage, so the two constants moving together is worth pinning.
-func TestPanelCeilingMatchesTheEgressVersion(t *testing.T) {
-	if DocumentSchemaVersion != schemaVersionEgress {
+func TestPanelCeilingMatchesTheNewestSchemaVersion(t *testing.T) {
+	if DocumentSchemaVersion != schemaVersionBalancer {
 		t.Errorf("DocumentSchemaVersion = %d but the newest schema is v%d",
-			DocumentSchemaVersion, schemaVersionEgress)
+			DocumentSchemaVersion, schemaVersionBalancer)
 	}
 }

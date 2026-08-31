@@ -218,6 +218,7 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/nodes/{nodeID}/geo-update", d.handleUpdateNodeGeoData)
 			private.Post("/nodes/{nodeID}/core-upgrade", d.handleUpgradeNodeCore)
 			private.Get("/xray-core-versions", d.handleListXrayCoreVersions)
+			private.Get("/nodes/{nodeID}/xray-logs", d.handleGetXrayLogs)
 			private.Post("/nodes/{nodeID}/sync", d.handleSyncNode)
 			private.Post("/nodes/{nodeID}/maintenance", d.handleSetNodeMaintenance)
 			private.Post("/nodes/{nodeID}/enable", d.handleEnableNode)
@@ -259,6 +260,22 @@ func NewRouter(d Deps) http.Handler {
 			// exactly one per node and setting it twice is the same as setting
 			// it once.
 			private.Put("/nodes/{nodeID}/routing/default", d.handleSetDefaultOutbound)
+
+			// Balancers: named pools of outbounds a routing rule can select
+			// (balancer_tag) instead of one fixed outbound (outbound_tag).
+			// Independently addressable rows like outbounds, not a
+			// whole-object setting like DNS.
+			private.Get("/nodes/{nodeID}/balancers", d.handleListBalancers)
+			private.Post("/nodes/{nodeID}/balancers", d.handleCreateBalancer)
+			private.Put("/nodes/{nodeID}/balancers/{balancerID}", d.handleUpdateBalancer)
+			private.Delete("/nodes/{nodeID}/balancers/{balancerID}", d.handleDeleteBalancer)
+
+			// DNS. Whole-object like routing/default: exactly one config per
+			// node, read and replaced together rather than as independently
+			// addressable rows.
+			private.Get("/nodes/{nodeID}/dns", d.handleGetNodeDNS)
+			private.Put("/nodes/{nodeID}/dns", d.handleSetNodeDNS)
+
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)
 

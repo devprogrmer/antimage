@@ -755,3 +755,91 @@ func TestUpgradeCore_FailurePropagatesWithRolledBackFlag(t *testing.T) {
 		t.Error("Err is nil despite the upgrade failing")
 	}
 }
+
+// logAdapter wraps recordingAdapter and additionally implements
+// adapter.LogReader.
+type logAdapter struct {
+	*recordingAdapter
+	mu    sync.Mutex
+	calls int
+	lines int
+	logs  string
+	err   error
+}
+
+func (l *logAdapter) ReadLogs(_ context.Context, lines int) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls++
+	l.lines = lines
+	if l.err != nil {
+		return "", l.err
+	}
+	return l.logs, nil
+}
+
+var _ adapter.LogReader = (*logAdapter)(nil)
+
+func TestReadLogs_TargetsOnlyTheNamedKind(t *testing.T) {
+	xray := &logAdapter{recordingAdapter: &recordingAdapter{kind: "xray"}, logs: "xray log lines"}
+	singbox := &logAdapter{recordingAdapter: &recordingAdapter{kind: "singbox"}, logs: "singbox log lines"}
+	r := MustRegistry(xray, singbox)
+
+	outcome := r.ReadLogs(context.Background(), "xray", 100)
+	if !outcome.Found || !outcome.Capable || !outcome.OK {
+		t.Fatalf("outcome = %+v, want Found+Capable+OK", outcome)
+	}
+	if outcome.Logs != "xray log lines" {
+		t.Errorf("Logs = %q, want xray's own output", outcome.Logs)
+	}
+	if xray.calls != 1 {
+		t.Errorf("xray.ReadLogs called %d times, want 1", xray.calls)
+	}
+	if xray.lines != 100 {
+		t.Errorf("xray.ReadLogs asked for %d lines, want 100", xray.lines)
+	}
+	if singbox.calls != 0 {
+		t.Errorf("singbox.ReadLogs called %d times, want 0 -- it was not named", singbox.calls)
+	}
+}
+
+func TestReadLogs_UnknownKindReportsNotFound(t *testing.T) {
+	r := MustRegistry(&logAdapter{recordingAdapter: &recordingAdapter{kind: "xray"}})
+
+	outcome := r.ReadLogs(context.Background(), "singbox", 100)
+	if outcome.Found {
+		t.Error("Found = true for a kind this node does not run")
+	}
+}
+
+// TestReadLogs_AdapterWithoutTheCapabilityIsDistinguished proves the
+// three-way distinction LogsOutcome exists for: wireguard is a real adapter
+// on this node, it just has no log-reading concept, and that must read
+// differently from "no such adapter at all".
+func TestReadLogs_AdapterWithoutTheCapabilityIsDistinguished(t *testing.T) {
+	r := MustRegistry(&recordingAdapter{kind: "wireguard"}) // no ReadLogs method
+
+	outcome := r.ReadLogs(context.Background(), "wireguard", 100)
+	if !outcome.Found {
+		t.Error("Found = false; wireguard IS a real adapter on this node")
+	}
+	if outcome.Capable {
+		t.Error("Capable = true; wireguard has no log-reading concept")
+	}
+}
+
+func TestReadLogs_FailurePropagates(t *testing.T) {
+	failing := &logAdapter{
+		recordingAdapter: &recordingAdapter{kind: "xray"},
+		err:              errors.New("journalctl: command not found"),
+	}
+	r := MustRegistry(failing)
+
+	outcome := r.ReadLogs(context.Background(), "xray", 100)
+	if outcome.OK {
+		t.Error("OK = true despite the read failing")
+	}
+	if outcome.Err == nil {
+		t.Error("Err is nil despite the read failing")
+	}
+}

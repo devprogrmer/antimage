@@ -22,12 +22,14 @@ import "encoding/json"
 // v1: Initial schema (SP1-SP2)
 // v2: Added enforcement policies to Subject (User Management Enhancements)
 // v3: Added Outbounds and Routing
+// v4: Added DNS
+// v5: Added Balancers
 //
 // The version a given document CARRIES is not this constant: see
 // effectiveSchemaVersion. A document declares the lowest version that fully
 // describes it, so a fleet using no v3 feature keeps emitting v2 and its
 // hashes do not move.
-const DocumentSchemaVersion = 3
+const DocumentSchemaVersion = 5
 
 // schemaVersionEnforcement is the version that introduced Subject enforcement
 // policies, and the floor for every document this panel emits. Nothing older
@@ -36,6 +38,12 @@ const schemaVersionEnforcement = 2
 
 // schemaVersionEgress is the version that introduced Outbounds and Routing.
 const schemaVersionEgress = 3
+
+// schemaVersionDNS is the version that introduced DNS.
+const schemaVersionDNS = 4
+
+// schemaVersionBalancer is the version that introduced Balancers.
+const schemaVersionBalancer = 5
 
 type Credential struct {
 	Kind  string `json:"kind"`
@@ -82,8 +90,9 @@ type Outbound struct {
 	Params json.RawMessage `json:"params"`
 }
 
-// RoutingRule selects an outbound for traffic that matches every predicate set
-// on it. An empty predicate is not a wildcard, it is simply not considered.
+// RoutingRule selects an outbound or a balancer for traffic that matches
+// every predicate set on it. An empty predicate is not a wildcard, it is
+// simply not considered.
 //
 // The matcher set is deliberately conservative: it covers what Xray and
 // sing-box can both actually express, so a rule the panel accepts is a rule the
@@ -103,18 +112,71 @@ type RoutingRule struct {
 	InboundTags []string `json:"inbound_tags,omitempty"`
 	SubjectIDs  []int64  `json:"subject_ids,omitempty"`
 
-	// OutboundTag names the Outbound this rule selects. Required: a rule that
-	// matches but selects nothing is a rule that silently drops traffic.
-	OutboundTag string `json:"outbound_tag"`
+	// OutboundTag names the Outbound this rule selects. Exactly one of
+	// OutboundTag and BalancerTag must be set: a rule that matches but
+	// selects nothing is a rule that silently drops traffic, and a rule
+	// selecting both is ambiguous about which one actually applies.
+	OutboundTag string `json:"outbound_tag,omitempty"`
+	// BalancerTag names the Balancer this rule selects. Schema v5+.
+	BalancerTag string `json:"balancer_tag,omitempty"`
 }
 
-// Routing is the node's rule table plus the fallback for unmatched traffic.
+// Balancer is a named pool of outbounds a routing rule can select instead of
+// one fixed outbound. Schema v5+.
+//
+// Selector names outbound tag PREFIXES this balancer picks among -- Xray's
+// own matching is prefix-based, not exact, so listing a tag's full name
+// still matches it (a full tag is trivially its own prefix).
+type Balancer struct {
+	ID       int64    `json:"id"`
+	Tag      string   `json:"tag"`
+	Selector []string `json:"selector"`
+	// Strategy is "random" (the default, applied when empty) or
+	// "least_ping". least_ping needs live latency data, which is why
+	// choosing it is what causes the adapter to probe for it at all --
+	// see xray/balancer.go's renderObservatory.
+	Strategy string `json:"strategy,omitempty"`
+}
+
+// Routing is the node's rule table, its balancers, and the fallback for
+// unmatched traffic.
 type Routing struct {
 	Rules []RoutingRule `json:"rules"`
 	// DefaultOutboundTag receives traffic no rule matched. Empty means the
 	// adapter's own default applies, which for both Xray and sing-box is the
 	// first outbound.
 	DefaultOutboundTag string `json:"default_outbound_tag,omitempty"`
+	// Balancers (schema v5+).
+	Balancers []Balancer `json:"balancers,omitempty"`
+}
+
+// DNSServer is one resolver the node may query. Domains scopes it to a
+// subset of lookups (split DNS) -- empty means it may answer any query.
+type DNSServer struct {
+	Address      string   `json:"address"`
+	Domains      []string `json:"domains,omitempty"`
+	SkipFallback bool     `json:"skip_fallback,omitempty"`
+}
+
+// FakeDNSPool is one address range the node hands out instead of resolving a
+// domain for real, deferring the real lookup until the connection's
+// destination is actually dialed. An IPv4 and an IPv6 pool are two separate
+// entries because Xray keys pools by address family.
+type FakeDNSPool struct {
+	IPPool   string `json:"ip_pool"`
+	PoolSize int    `json:"pool_size"`
+}
+
+// DNSConfig is the node's DNS resolution behavior: which servers to query,
+// static overrides that skip resolution entirely, and fake-IP pools that
+// defer resolution until a connection's real destination is known.
+type DNSConfig struct {
+	Servers []DNSServer `json:"servers,omitempty"`
+	// Hosts maps a domain to the IP address(es) it always resolves to.
+	Hosts         map[string][]string `json:"hosts,omitempty"`
+	FakeDNS       []FakeDNSPool       `json:"fakedns,omitempty"`
+	QueryStrategy string              `json:"query_strategy,omitempty"`
+	DisableCache  bool                `json:"disable_cache,omitempty"`
 }
 
 // Document is what an agent converges against.
@@ -135,6 +197,9 @@ type Document struct {
 	// Egress (schema v3+).
 	Outbounds []Outbound `json:"outbounds,omitempty"`
 	Routing   *Routing   `json:"routing,omitempty"`
+
+	// DNS (schema v4+).
+	DNS *DNSConfig `json:"dns,omitempty"`
 }
 
 // effectiveSchemaVersion reports the lowest version that fully describes doc.
@@ -150,6 +215,12 @@ type Document struct {
 // no egress configuration, and correctly refuses the document that first gives
 // it some.
 func effectiveSchemaVersion(doc Document) int {
+	if doc.Routing != nil && len(doc.Routing.Balancers) > 0 {
+		return schemaVersionBalancer
+	}
+	if doc.DNS != nil {
+		return schemaVersionDNS
+	}
 	if len(doc.Outbounds) > 0 || doc.Routing != nil {
 		return schemaVersionEgress
 	}

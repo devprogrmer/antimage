@@ -3,11 +3,13 @@ import { api } from "../lib/api";
 import { formatNumber, formatTimestamp, t } from "../i18n";
 import { StatusBadge, type NodeStatus } from "../components/StatusBadge";
 import { EgressPanel } from "../components/EgressPanel";
+import { DnsStudio } from "../components/DnsStudio";
 import { EnhancedDeploymentPanel } from "../components/EnhancedDeploymentPanel";
 import { NodeAdapters } from "../components/NodeAdapters";
 import { NodeHealth } from "../components/NodeHealth";
 import { NodeReconciliation } from "../components/NodeReconciliation";
 import { NodeLogs } from "../components/NodeLogs";
+import { XrayLogs } from "../components/XrayLogs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { InboundStudio } from "../components/InboundStudio";
 import { NodeActions } from "../components/NodeActions";
@@ -104,10 +106,12 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
           <TabsTrigger value="overview">{t("node.tabOverview")}</TabsTrigger>
           <TabsTrigger value="inbounds">{t("studio.title")}</TabsTrigger>
           <TabsTrigger value="egress">{t("egress.title")}</TabsTrigger>
+          <TabsTrigger value="dns">{t("dns.title")}</TabsTrigger>
           <TabsTrigger value="deployments">{t("deploy.title")}</TabsTrigger>
           <TabsTrigger value="adapters">{t("node.adapters")}</TabsTrigger>
           <TabsTrigger value="health">{t("health.tab")}</TabsTrigger>
           <TabsTrigger value="logs">{t("node.logs")}</TabsTrigger>
+          <TabsTrigger value="xray-logs">{t("node.xrayLogs")}</TabsTrigger>
           <TabsTrigger value="history">{t("node.tabHistory")}</TabsTrigger>
         </TabsList>
 
@@ -121,6 +125,10 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
 
         <TabsContent value="egress">
           <EgressPanel nodeId={nodeId} />
+        </TabsContent>
+
+        <TabsContent value="dns">
+          <DnsStudio nodeId={nodeId} />
         </TabsContent>
 
         <TabsContent value="deployments">
@@ -145,6 +153,10 @@ export function NodeDetail({ nodeId }: { nodeId: number }) {
 
         <TabsContent value="logs">
           <NodeLogs nodeId={nodeId} />
+        </TabsContent>
+
+        <TabsContent value="xray-logs">
+          <XrayLogs nodeId={nodeId} />
         </TabsContent>
 
         <TabsContent value="history" className="space-y-6">

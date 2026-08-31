@@ -262,6 +262,42 @@ func (r *Registry) UpgradeCore(ctx context.Context, kind, binaryURL, binarySHA25
 	return CoreVersionOutcome{}
 }
 
+// LogsOutcome answers a ReadLogs call against one named adapter kind, with
+// the same three-way Found/Capable/ran distinction CoreVersionOutcome
+// reports, for the same reason: no adapter of this kind on the node at all
+// (Found=false), one exists but has no log-reading concept (Found=true,
+// Capable=false), or one exists, is capable, and the read either succeeded
+// or failed (Found=true, Capable=true, OK/Logs/Err).
+type LogsOutcome struct {
+	Found   bool
+	Capable bool
+	OK      bool
+	Logs    string
+	Err     error
+}
+
+// ReadLogs targets exactly ONE named adapter kind -- the same reasoning as
+// UpgradeCore: a node running xray and sing-box together has two unrelated
+// log streams, and "fetch logs" with no kind specified would not have a
+// single correct meaning.
+func (r *Registry) ReadLogs(ctx context.Context, kind string, lines int) LogsOutcome {
+	if r == nil {
+		return LogsOutcome{}
+	}
+	for _, ad := range r.adapters {
+		if string(ad.Descriptor().Kind) != kind {
+			continue
+		}
+		reader, ok := ad.(adapter.LogReader)
+		if !ok {
+			return LogsOutcome{Found: true, Capable: false}
+		}
+		logs, err := reader.ReadLogs(ctx, lines)
+		return LogsOutcome{Found: true, Capable: true, OK: err == nil, Logs: logs, Err: err}
+	}
+	return LogsOutcome{}
+}
+
 // UsageReporters returns the adapters that account for their own traffic.
 //
 // Not every adapter does -- Caps.SelfAccounting says whether it claims to, and

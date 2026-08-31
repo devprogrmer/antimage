@@ -47,6 +47,11 @@ func sortRoutingRules(rules []RoutingRule) {
 	})
 }
 
+// sortBalancers orders by id, the same reasoning sortOutbounds documents.
+func sortBalancers(balancers []Balancer) {
+	sort.Slice(balancers, func(i, j int) bool { return balancers[i].ID < balancers[j].ID })
+}
+
 // BuildDesiredSnapshot is the one authoritative reader of desired state
 // (invariant 5).
 //
@@ -133,6 +138,10 @@ func BuildDesiredSnapshot(
 	if err != nil {
 		return nil, err
 	}
+	dns, err := buildDNS(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
 
 	doc := Document{
 		Revision:  revision,
@@ -141,10 +150,12 @@ func BuildDesiredSnapshot(
 		Subjects:  subjects,
 		Outbounds: outbounds,
 		Routing:   routing,
+		DNS:       dns,
 	}
 	sortOutbounds(doc.Outbounds)
 	if doc.Routing != nil {
 		sortRoutingRules(doc.Routing.Rules)
+		sortBalancers(doc.Routing.Balancers)
 	}
 	// Derived from content, not from the panel's maximum: a node given no
 	// egress state keeps declaring v2 and its hash does not move.

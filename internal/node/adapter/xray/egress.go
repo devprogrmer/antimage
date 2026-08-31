@@ -3,6 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
@@ -143,20 +144,40 @@ func renderOutbound(o adapter.Outbound) (map[string]any, error) {
 // match everything, which is not what an operator who left every matcher empty
 // meant -- they meant the rule to be inert, or they made a mistake. Either way
 // silently routing all traffic somewhere is the wrong reading.
-func renderRule(r adapter.RoutingRule, known map[string]bool, serviceIDs []int64) (map[string]any, error) {
-	if strings.TrimSpace(r.OutboundTag) == "" {
+//
+// Exactly one of OutboundTag and BalancerTag selects where matched traffic
+// goes. Both set is ambiguous -- Xray's own field rule accepts only one of
+// outboundTag/balancerTag, so accepting both here and picking one silently
+// would let an operator believe the rule does something it does not. Neither
+// set is the pre-balancer v3 refusal, kept exactly as it read before.
+func renderRule(
+	r adapter.RoutingRule, knownOutbounds, knownBalancers map[string]bool, serviceIDs []int64,
+) (map[string]any, error) {
+	hasOutbound := strings.TrimSpace(r.OutboundTag) != ""
+	hasBalancer := strings.TrimSpace(r.BalancerTag) != ""
+	switch {
+	case hasOutbound && hasBalancer:
+		return nil, fmt.Errorf(
+			"routing rule %d sets both outbound_tag and balancer_tag; exactly one selects "+
+				"where matched traffic goes", r.ID)
+	case !hasOutbound && !hasBalancer:
 		return nil, fmt.Errorf("routing rule %d selects no outbound", r.ID)
-	}
-	if !known[r.OutboundTag] {
+	case hasOutbound && !knownOutbounds[r.OutboundTag]:
 		return nil, fmt.Errorf(
 			"routing rule %d selects outbound %q, which this node does not have; "+
 				"traffic matching it would fall through to the default instead",
 			r.ID, r.OutboundTag)
+	case hasBalancer && !knownBalancers[r.BalancerTag]:
+		return nil, fmt.Errorf(
+			"routing rule %d selects balancer %q, which this node does not have",
+			r.ID, r.BalancerTag)
 	}
 
-	rule := map[string]any{
-		"type":        "field",
-		"outboundTag": r.OutboundTag,
+	rule := map[string]any{"type": "field"}
+	if hasOutbound {
+		rule["outboundTag"] = r.OutboundTag
+	} else {
+		rule["balancerTag"] = r.BalancerTag
 	}
 
 	matchers := 0
@@ -226,7 +247,100 @@ func renderRule(r adapter.RoutingRule, known map[string]bool, serviceIDs []int64
 	return rule, nil
 }
 
-// GenerateEgressConfig renders outbounds and routing as one Xray document.
+// renderDNS turns the document's DNS config into Xray's dns object.
+//
+// A server with no Domains and no SkipFallback renders as a bare address
+// string rather than an object -- the plain form Xray's own examples use,
+// and indistinguishable in effect from the object form with both fields
+// empty, so there is no reason to make every config carry the more verbose
+// shape just because the struct always could.
+func renderDNS(d *adapter.DNSConfig) (map[string]any, error) {
+	if d == nil {
+		return nil, nil
+	}
+
+	out := map[string]any{}
+
+	if len(d.Servers) > 0 {
+		servers := make([]any, 0, len(d.Servers))
+		for i, s := range d.Servers {
+			if strings.TrimSpace(s.Address) == "" {
+				return nil, fmt.Errorf("dns server %d has no address", i)
+			}
+			if len(s.Domains) == 0 && !s.SkipFallback {
+				servers = append(servers, s.Address)
+				continue
+			}
+			obj := map[string]any{"address": s.Address}
+			if len(s.Domains) > 0 {
+				obj["domains"] = toAny(s.Domains)
+			}
+			if s.SkipFallback {
+				obj["skipFallback"] = true
+			}
+			servers = append(servers, obj)
+		}
+		out["servers"] = servers
+	}
+
+	if len(d.Hosts) > 0 {
+		hosts := map[string]any{}
+		// Sorted so the rendered document is byte-identical across builds --
+		// Go map iteration order is random, and this file's checksum is what
+		// planEgress diffs against to decide whether anything changed.
+		domains := make([]string, 0, len(d.Hosts))
+		for domain := range d.Hosts {
+			domains = append(domains, domain)
+		}
+		sort.Strings(domains)
+		for _, domain := range domains {
+			ips := d.Hosts[domain]
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("dns host %q has no addresses", domain)
+			}
+			if len(ips) == 1 {
+				hosts[domain] = ips[0]
+			} else {
+				hosts[domain] = toAny(ips)
+			}
+		}
+		out["hosts"] = hosts
+	}
+
+	if len(d.FakeDNS) > 0 {
+		pools := make([]any, 0, len(d.FakeDNS))
+		for i, p := range d.FakeDNS {
+			if _, _, err := net.ParseCIDR(p.IPPool); err != nil {
+				return nil, fmt.Errorf("fakedns pool %d: %q is not a valid CIDR: %w", i, p.IPPool, err)
+			}
+			if p.PoolSize <= 0 {
+				return nil, fmt.Errorf("fakedns pool %d (%s): pool_size must be positive", i, p.IPPool)
+			}
+			pools = append(pools, map[string]any{"ipPool": p.IPPool, "poolSize": p.PoolSize})
+		}
+		out["fakedns"] = pools
+	}
+
+	switch d.QueryStrategy {
+	case "", "UseIP", "UseIPv4", "UseIPv6":
+	default:
+		return nil, fmt.Errorf("dns query_strategy %q is not one of UseIP, UseIPv4, UseIPv6", d.QueryStrategy)
+	}
+	if d.QueryStrategy != "" {
+		out["queryStrategy"] = d.QueryStrategy
+	}
+	if d.DisableCache {
+		out["disableCache"] = true
+	}
+
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// GenerateEgressConfig renders outbounds, routing, and DNS as one Xray
+// document.
 //
 // Returns nil when there is nothing to write, which the caller treats as
 // "remove the file" rather than "write an empty document": an empty routing
@@ -234,8 +348,9 @@ func renderRule(r adapter.RoutingRule, known map[string]bool, serviceIDs []int64
 // reason about than no file.
 func GenerateEgressConfig(
 	outbounds []adapter.Outbound, routing *adapter.Routing, serviceIDs []int64,
+	dns *adapter.DNSConfig,
 ) ([]byte, error) {
-	if len(outbounds) == 0 && routing == nil {
+	if len(outbounds) == 0 && routing == nil && dns == nil {
 		return nil, nil
 	}
 
@@ -281,7 +396,19 @@ func GenerateEgressConfig(
 		"outboundTag": tagAPI,
 	}}
 
+	routingBlock := map[string]any{}
+	var knownBalancers map[string]bool
+
 	if routing != nil {
+		renderedBalancers, kb, err := renderBalancers(routing.Balancers, known)
+		if err != nil {
+			return nil, err
+		}
+		knownBalancers = kb
+		if len(renderedBalancers) > 0 {
+			routingBlock["balancers"] = renderedBalancers
+		}
+
 		ordered := append([]adapter.RoutingRule{}, routing.Rules...)
 		sort.SliceStable(ordered, func(i, j int) bool {
 			if ordered[i].Priority != ordered[j].Priority {
@@ -290,7 +417,7 @@ func GenerateEgressConfig(
 			return ordered[i].ID < ordered[j].ID
 		})
 		for _, r := range ordered {
-			obj, err := renderRule(r, known, serviceIDs)
+			obj, err := renderRule(r, known, knownBalancers, serviceIDs)
 			if err != nil {
 				return nil, err
 			}
@@ -314,9 +441,22 @@ func GenerateEgressConfig(
 				"outboundTag": routing.DefaultOutboundTag,
 			})
 		}
+
+		if obs := renderObservatory(routing.Balancers); obs != nil {
+			doc["observatory"] = obs
+		}
 	}
 
-	doc["routing"] = map[string]any{"rules": rules}
+	routingBlock["rules"] = rules
+	doc["routing"] = routingBlock
+
+	dnsObj, err := renderDNS(dns)
+	if err != nil {
+		return nil, err
+	}
+	if dnsObj != nil {
+		doc["dns"] = dnsObj
+	}
 
 	// MarshalIndent for an operator reading this during an incident;
 	// encoding/json sorts map keys, which is what keeps it deterministic.

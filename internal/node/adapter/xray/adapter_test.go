@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,18 +20,21 @@ import (
 // fakeRuntime records what the adapter asked of Xray, so a test can assert
 // that a hot user add did NOT restart the process.
 type fakeRuntime struct {
-	mu            sync.Mutex
-	restarts      int
-	reloads       int
-	added         []string
-	removed       []string
-	available     error
-	healthy       bool
-	detail        string
-	failAdd       error
-	failRst       error
-	binaryPath    string
-	binaryPathErr error
+	mu             sync.Mutex
+	restarts       int
+	reloads        int
+	added          []string
+	removed        []string
+	available      error
+	healthy        bool
+	detail         string
+	failAdd        error
+	failRst        error
+	binaryPath     string
+	binaryPathErr  error
+	logOutput      string
+	logErr         error
+	lastLinesAsked int
 	// healthyAfterRestartN, when non-zero, overrides the static `healthy`
 	// field: Healthy() reports false until restarts >= this count. A
 	// rollback test sets this to 2 to simulate "the freshly installed
@@ -103,6 +107,19 @@ func (f *fakeRuntime) BinaryPath(context.Context) (string, error) {
 		return f.binaryPath, nil
 	}
 	return "/usr/local/bin/xray", nil
+}
+
+func (f *fakeRuntime) ReadLog(_ context.Context, lines int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastLinesAsked = lines
+	if f.logErr != nil {
+		return "", f.logErr
+	}
+	if f.logOutput != "" {
+		return f.logOutput, nil
+	}
+	return fmt.Sprintf("fake journal output (%d lines requested)", lines), nil
 }
 
 func (f *fakeRuntime) counts() (restarts, reloads int, added, removed []string) {

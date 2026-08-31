@@ -107,6 +107,18 @@ type Caps struct {
 	// Publishing the list is what lets the panel refuse that rule at the API
 	// instead.
 	BuiltinOutboundTags []string `json:"builtin_outbound_tags,omitempty"`
+
+	// SupportsDNS declares whether this adapter can apply schema v4's DNS
+	// document: which servers to query, static host overrides, and fake-IP
+	// pools. Fail closed like SupportsOutbounds: only Xray owns a DNS
+	// resolution concept distinct from the OS's own in this codebase today.
+	SupportsDNS bool `json:"supports_dns"`
+
+	// SupportsBalancer declares whether this adapter can apply schema v5's
+	// balancers: named pools of outbounds a routing rule can select instead
+	// of one fixed outbound. Fail closed, and implies SupportsRouting --
+	// a balancer is meaningless without a rule engine to select it.
+	SupportsBalancer bool `json:"supports_balancer"`
 }
 
 type Descriptor struct {
@@ -148,7 +160,7 @@ type Service struct {
 // about. For egress that would mean an operator configuring an outbound, the
 // panel reporting convergence, and the node routing traffic somewhere else
 // entirely. Refusing is the only safe reading of "I do not understand this".
-const MaxSchemaVersion = 3
+const MaxSchemaVersion = 5
 
 // Outbound mirrors the panel's Outbound. Schema v3+.
 type Outbound struct {
@@ -159,6 +171,12 @@ type Outbound struct {
 }
 
 // RoutingRule mirrors the panel's RoutingRule. Schema v3+.
+//
+// Exactly one of OutboundTag and BalancerTag selects where matched traffic
+// goes (schema v5+ adds BalancerTag as the second option). OutboundTag lost
+// its v3 omitempty-free requirement here for that reason: a v5 rule that
+// picks a balancer legitimately carries no outbound tag at all, and a v3
+// rule always carried a non-empty one, so no existing document's bytes move.
 type RoutingRule struct {
 	ID          int64    `json:"id"`
 	Priority    int      `json:"priority"`
@@ -170,13 +188,67 @@ type RoutingRule struct {
 	Network     string   `json:"network,omitempty"`
 	InboundTags []string `json:"inbound_tags,omitempty"`
 	SubjectIDs  []int64  `json:"subject_ids,omitempty"`
-	OutboundTag string   `json:"outbound_tag"`
+	OutboundTag string   `json:"outbound_tag,omitempty"`
+	// BalancerTag mirrors the panel's RoutingRule.BalancerTag. Schema v5+.
+	BalancerTag string `json:"balancer_tag,omitempty"`
+}
+
+// Balancer mirrors the panel's Balancer. Schema v5+.
+//
+// Selector names outbound tag PREFIXES this balancer picks among -- Xray's
+// own matching is prefix-based, not exact, so an operator listing a tag's
+// full name still matches it (a full tag is trivially its own prefix).
+type Balancer struct {
+	ID       int64    `json:"id"`
+	Tag      string   `json:"tag"`
+	Selector []string `json:"selector"`
+	// Strategy is "random" (the default, applied when empty) or
+	// "least_ping". least_ping requires live latency data, which is why
+	// choosing it is what causes the adapter to emit an observatory block
+	// at all -- see xray/balancer.go.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 // Routing mirrors the panel's Routing. Schema v3+.
 type Routing struct {
 	Rules              []RoutingRule `json:"rules"`
 	DefaultOutboundTag string        `json:"default_outbound_tag,omitempty"`
+	// Balancers (schema v5+).
+	Balancers []Balancer `json:"balancers,omitempty"`
+}
+
+// DNSServer mirrors the panel's DNSServer. Schema v4+.
+//
+// Domains scopes this server to a subset of lookups (split DNS): a query for
+// a domain matching one of them is sent here rather than to whichever server
+// would otherwise answer it. Empty means this server may answer any query.
+type DNSServer struct {
+	Address      string   `json:"address"`
+	Domains      []string `json:"domains,omitempty"`
+	SkipFallback bool     `json:"skip_fallback,omitempty"`
+}
+
+// FakeDNSPool mirrors the panel's FakeDNSPool. Schema v4+.
+//
+// A fake-IP pool defers real resolution until a connection's destination is
+// actually dialed: a lookup gets back an address from this range instead of
+// the domain's real IP, and the adapter learns the real destination when
+// that fake address is connected to. IPv4 and IPv6 pools are two separate
+// entries here because Xray keys them by address family.
+type FakeDNSPool struct {
+	IPPool   string `json:"ip_pool"`
+	PoolSize int    `json:"pool_size"`
+}
+
+// DNSConfig mirrors the panel's DNSConfig. Schema v4+.
+type DNSConfig struct {
+	Servers []DNSServer `json:"servers,omitempty"`
+	// Hosts maps a domain to the IP address(es) it always resolves to,
+	// skipping any server entirely.
+	Hosts         map[string][]string `json:"hosts,omitempty"`
+	FakeDNS       []FakeDNSPool       `json:"fakedns,omitempty"`
+	QueryStrategy string              `json:"query_strategy,omitempty"`
+	DisableCache  bool                `json:"disable_cache,omitempty"`
 }
 
 // Desired mirrors the panel's document type field-for-field. It is declared
@@ -192,6 +264,9 @@ type Desired struct {
 	// Egress (schema v3+).
 	Outbounds []Outbound `json:"outbounds,omitempty"`
 	Routing   *Routing   `json:"routing,omitempty"`
+
+	// DNS (schema v4+).
+	DNS *DNSConfig `json:"dns,omitempty"`
 }
 
 // CheckSchemaVersion refuses a document this agent cannot fully apply.
@@ -411,6 +486,22 @@ type CoreVersionManager interface {
 	// node down with no working core is a worse failure than the upgrade
 	// simply not happening.
 	UpgradeCore(ctx context.Context, binaryURL, binarySHA256, expectedVersion string) (CoreVersionResult, error)
+}
+
+// LogReader is an optional capability for adapters that can return their
+// own recent runtime log output on demand -- today, xray via journald.
+// Unlike Restart, this is NOT part of the base Adapter interface, for the
+// same reason GeoDataUpdater is not: most of the protocols this codebase
+// drives are OS-packaged services (ocserv, OpenVPN, L2TP/IPsec) or kernel
+// facilities (WireGuard) whose logging this codebase neither configures
+// nor owns. Type-assert the adapter to this interface to check.
+type LogReader interface {
+	// ReadLogs returns the last `lines` lines of this adapter's own
+	// runtime log output, newest last (the convention `tail` and
+	// `journalctl` both already follow). The implementation clamps lines
+	// to its own sane maximum rather than trusting the caller not to ask
+	// for everything the log source has ever recorded.
+	ReadLogs(ctx context.Context, lines int) (string, error)
 }
 
 // CoreVersionResult reports what is actually running after the call
