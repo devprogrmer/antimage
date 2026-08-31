@@ -759,5 +759,9 @@
   "node.coreVersionPicker": "Версия ядра",
   "node.chooseVersion": "Выберите версию",
   "node.upgradeCore": "Обновить ядро",
-  "node.coreUpgraded": "Обновлено"
+  "node.coreUpgraded": "Обновлено",
+  "node.xrayLogs": "Логи Xray",
+  "node.xrayLogsHint": "Собственный журнал выполнения Xray, получаемый по запросу с подключённого узла.",
+  "node.xrayLogLines": "Строк",
+  "node.fetchXrayLogs": "Получить логи"
 }

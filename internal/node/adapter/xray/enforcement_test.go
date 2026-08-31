@@ -78,6 +78,10 @@ func (m *mockRuntime) BinaryPath(ctx context.Context) (string, error) {
 	return "/usr/local/bin/xray", nil
 }
 
+func (m *mockRuntime) ReadLog(ctx context.Context, lines int) (string, error) {
+	return "", nil
+}
+
 func TestConnectionTracker(t *testing.T) {
 	t.Run("registers new connection", func(t *testing.T) {
 		enforcer := enforcement.New()

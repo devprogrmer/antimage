@@ -68,6 +68,11 @@ func (r *sp2Runtime) BinaryPath(context.Context) (string, error) {
 	// internal/node/adapter/xray/coreversion_test.go instead.
 	return "/usr/bin/xray", nil
 }
+func (r *sp2Runtime) ReadLog(context.Context, int) (string, error) {
+	// Not exercised by any e2e test here -- ReadLogs is covered in
+	// internal/node/adapter/xray/logs_test.go instead.
+	return "", nil
+}
 
 // singboxRuntime is the restart-only counterpart.
 type singboxRuntime struct{ restarts int }

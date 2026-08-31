@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -54,6 +55,15 @@ type Runtime interface {
 	// how to find it via exec.LookPath, and this is that same resolution
 	// exposed for a caller that needs the path itself, not just a yes/no.
 	BinaryPath(ctx context.Context) (string, error)
+
+	// ReadLog returns the systemd unit's recent journal output, newest
+	// last. Xray's own log object is left at its defaults (nothing in this
+	// codebase configures an access/error file path for it -- see
+	// adapter.go's config builder), so stdout/stderr captured by systemd is
+	// the only log surface that reliably exists regardless of how a given
+	// node's Xray was installed, and it is the same source Healthy already
+	// trusts for liveness.
+	ReadLog(ctx context.Context, lines int) (string, error)
 }
 
 // ExecRuntime drives Xray through systemd and its gRPC management API.
@@ -129,6 +139,15 @@ func (r *ExecRuntime) BinaryPath(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: %s not found in PATH: %w", ErrRuntimeUnavailable, r.Binary, err)
 	}
 	return path, nil
+}
+
+// ReadLog runs journalctl for r.Unit and returns its combined output
+// verbatim. --no-pager is required -- without it journalctl invokes a
+// pager, which blocks forever waiting for a terminal that will never come
+// when run under exec.CommandContext.
+func (r *ExecRuntime) ReadLog(ctx context.Context, lines int) (string, error) {
+	return r.run(ctx, "journalctl", "-u", r.Unit, "-n", strconv.Itoa(lines),
+		"--no-pager", "--output=short-iso")
 }
 
 // HotAddSupported reports whether user mutation can avoid a restart. It is

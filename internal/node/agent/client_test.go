@@ -232,6 +232,34 @@ func TestHandleCommand_UpgradeCore_UnknownKindIsReportedNotCrashed(t *testing.T)
 	}
 }
 
+func TestHandleCommand_FetchLogs_UnknownKindIsReportedNotCrashed(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{
+		CommandId: "cmd-logs-1",
+		Body:      &pb.AgentCommand_FetchLogs{FetchLogs: &pb.FetchLogs{Kind: "xray", Lines: 100}},
+	})
+
+	if result.CommandId != "cmd-logs-1" {
+		t.Errorf("result command id = %q, want cmd-logs-1", result.CommandId)
+	}
+	logs, ok := result.Body.(*pb.AgentCommandResult_FetchLogs)
+	if !ok {
+		t.Fatalf("result body = %T, want *AgentCommandResult_FetchLogs", result.Body)
+	}
+	if logs.FetchLogs.Ok {
+		t.Error("Ok = true for a node with no xray adapter at all")
+	}
+	if logs.FetchLogs.Error == "" {
+		t.Error("no error text for a node with no xray adapter at all")
+	}
+	if logs.FetchLogs.Kind != "xray" {
+		t.Errorf("Kind = %q, want it echoed back as xray", logs.FetchLogs.Kind)
+	}
+}
+
 // An unrecognised command body must not crash the agent or drop the
 // command silently -- it echoes the id with no body set, which the panel
 // side treats as a failure (see the SendCommand contract) rather than as

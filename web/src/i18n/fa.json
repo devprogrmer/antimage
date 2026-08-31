@@ -759,5 +759,9 @@
   "node.coreVersionPicker": "نسخهٔ هسته",
   "node.chooseVersion": "یک نسخه انتخاب کنید",
   "node.upgradeCore": "به‌روزرسانی هسته",
-  "node.coreUpgraded": "به‌روزرسانی شد"
+  "node.coreUpgraded": "به‌روزرسانی شد",
+  "node.xrayLogs": "لاگ‌های Xray",
+  "node.xrayLogsHint": "لاگ زمان اجرای خود Xray، که به‌صورت درخواستی از یک نود متصل واکشی می‌شود.",
+  "node.xrayLogLines": "تعداد خطوط",
+  "node.fetchXrayLogs": "دریافت لاگ‌ها"
 }

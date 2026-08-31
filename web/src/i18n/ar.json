@@ -759,5 +759,9 @@
   "node.coreVersionPicker": "إصدار النواة",
   "node.chooseVersion": "اختر إصدارًا",
   "node.upgradeCore": "ترقية النواة",
-  "node.coreUpgraded": "تمت الترقية"
+  "node.coreUpgraded": "تمت الترقية",
+  "node.xrayLogs": "سجلات Xray",
+  "node.xrayLogsHint": "سجل التشغيل الخاص بـ Xray نفسه، يُجلب عند الطلب من عقدة متصلة.",
+  "node.xrayLogLines": "عدد الأسطر",
+  "node.fetchXrayLogs": "جلب السجلات"
 }

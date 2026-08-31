@@ -759,5 +759,9 @@
   "node.coreVersionPicker": "Core version",
   "node.chooseVersion": "Choose a version",
   "node.upgradeCore": "Upgrade core",
-  "node.coreUpgraded": "Upgraded"
+  "node.coreUpgraded": "Upgraded",
+  "node.xrayLogs": "Xray Logs",
+  "node.xrayLogsHint": "Xray's own runtime log, fetched on demand from a connected node.",
+  "node.xrayLogLines": "Lines",
+  "node.fetchXrayLogs": "Fetch logs"
 }

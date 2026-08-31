@@ -59,9 +59,9 @@ message PanelMessage {
 
 // AgentCommand is the panel asking the agent to do something ON DEMAND,
 // outside the desired-state reconciliation loop -- restarting a service the
-// operator clicked, or (later) pulling a fresh geo database, reporting an
-// installed core version precisely, or opening a log tail. It exists
-// separately from RevisionBump/FetchNow because those two both mean
+// operator clicked, pulling a fresh geo database, installing a precise core
+// version, or fetching a log tail. It exists separately from
+// RevisionBump/FetchNow because those two both mean
 // "converge toward the desired document", and an on-demand action is not a
 // convergence request: a restart with no config change has nothing to
 // converge, and this command is what asks for it anyway.
@@ -78,6 +78,7 @@ message AgentCommand {
     RestartAdapters restart_adapters = 2;
     UpdateGeoData update_geo_data = 3;
     UpgradeCore upgrade_core = 4;
+    FetchLogs fetch_logs = 5;
   }
 }
 
@@ -138,7 +139,36 @@ message AgentCommandResult {
     RestartAdaptersResult restart_adapters = 2;
     UpdateGeoDataResult update_geo_data = 3;
     UpgradeCoreResult upgrade_core = 4;
+    FetchLogsResult fetch_logs = 5;
   }
+}
+
+// FetchLogs asks the agent for the tail of ONE named adapter's own recent
+// runtime log output. Targets exactly one kind, the same reasoning as
+// UpgradeCore: a node running xray and sing-box together has two unrelated
+// log streams, and "fetch logs" with no kind specified would not have a
+// single correct meaning.
+message FetchLogs {
+  string kind = 1;
+  // lines is how many trailing lines to return. The agent clamps this to
+  // its own sane maximum rather than trusting the panel not to ask for
+  // everything the log source has ever recorded.
+  int32 lines = 2;
+}
+
+// FetchLogsResult carries one adapter's raw recent log text, newest last
+// (the convention `tail`/`journalctl` already follow), or an error
+// explaining why there is none. Unlike UpgradeCoreResult there is no
+// separate Found/Capable distinction on the wire -- see
+// Registry.ReadLogs, which folds both into one error string here because,
+// unlike a core upgrade, nothing was attempted that could partially
+// succeed: either a readable adapter of this kind exists, or it does not.
+message FetchLogsResult {
+  string kind = 1;
+  bool ok = 2;
+  string logs = 3;
+  // Empty when ok.
+  string error = 4;
 }
 
 // UpgradeCoreResult reports what is actually installed and running RIGHT

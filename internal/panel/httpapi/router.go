@@ -218,6 +218,7 @@ func NewRouter(d Deps) http.Handler {
 			private.Post("/nodes/{nodeID}/geo-update", d.handleUpdateNodeGeoData)
 			private.Post("/nodes/{nodeID}/core-upgrade", d.handleUpgradeNodeCore)
 			private.Get("/xray-core-versions", d.handleListXrayCoreVersions)
+			private.Get("/nodes/{nodeID}/xray-logs", d.handleGetXrayLogs)
 			private.Post("/nodes/{nodeID}/sync", d.handleSyncNode)
 			private.Post("/nodes/{nodeID}/maintenance", d.handleSetNodeMaintenance)
 			private.Post("/nodes/{nodeID}/enable", d.handleEnableNode)

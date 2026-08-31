@@ -413,6 +413,22 @@ type CoreVersionManager interface {
 	UpgradeCore(ctx context.Context, binaryURL, binarySHA256, expectedVersion string) (CoreVersionResult, error)
 }
 
+// LogReader is an optional capability for adapters that can return their
+// own recent runtime log output on demand -- today, xray via journald.
+// Unlike Restart, this is NOT part of the base Adapter interface, for the
+// same reason GeoDataUpdater is not: most of the protocols this codebase
+// drives are OS-packaged services (ocserv, OpenVPN, L2TP/IPsec) or kernel
+// facilities (WireGuard) whose logging this codebase neither configures
+// nor owns. Type-assert the adapter to this interface to check.
+type LogReader interface {
+	// ReadLogs returns the last `lines` lines of this adapter's own
+	// runtime log output, newest last (the convention `tail` and
+	// `journalctl` both already follow). The implementation clamps lines
+	// to its own sane maximum rather than trusting the caller not to ask
+	// for everything the log source has ever recorded.
+	ReadLogs(ctx context.Context, lines int) (string, error)
+}
+
 // CoreVersionResult reports what is actually running after the call
 // returns, not merely whether the download succeeded.
 type CoreVersionResult struct {

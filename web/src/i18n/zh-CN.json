@@ -759,5 +759,9 @@
   "node.coreVersionPicker": "核心版本",
   "node.chooseVersion": "选择版本",
   "node.upgradeCore": "升级核心",
-  "node.coreUpgraded": "已升级"
+  "node.coreUpgraded": "已升级",
+  "node.xrayLogs": "Xray 日志",
+  "node.xrayLogsHint": "Xray 自身的运行时日志,按需从已连接的节点获取。",
+  "node.xrayLogLines": "行数",
+  "node.fetchXrayLogs": "获取日志"
 }
