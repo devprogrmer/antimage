@@ -425,7 +425,8 @@ func run(dataDir, httpAddr, grpcAddr, grpcHostList string) error {
 			DownloadDir: filepath.Join(dataDir, "downloads"),
 			// SSEInterval is left at zero on purpose: zero selects the
 			// production default. Only tests set it.
-			Now: now,
+			Now:          now,
+			CoreVersions: httpapi.NewXrayCoreVersionCache(),
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

@@ -24,6 +24,9 @@ type AdapterJSON struct {
 	GeoUpdatedAt  *int64 `json:"geo_updated_at"`
 	GeoIPSHA256   string `json:"geoip_sha256,omitempty"`
 	GeoSiteSHA256 string `json:"geosite_sha256,omitempty"`
+	// CoreUpgradedAt is null when this adapter has never been upgraded
+	// through the panel.
+	CoreUpgradedAt *int64 `json:"core_upgraded_at"`
 }
 
 // handleListAdapters implements GET /api/v1/nodes/{id}/adapters.
@@ -64,6 +67,10 @@ func (d Deps) handleListAdapters(w http.ResponseWriter, r *http.Request) {
 		if e.GeoUpdatedAt != nil {
 			ts := e.GeoUpdatedAt.Unix()
 			aj.GeoUpdatedAt = &ts
+		}
+		if e.CoreUpgradedAt != nil {
+			ts := e.CoreUpgradedAt.Unix()
+			aj.CoreUpgradedAt = &ts
 		}
 		adapters = append(adapters, aj)
 	}

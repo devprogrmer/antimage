@@ -197,6 +197,41 @@ func TestHandleCommand_UpdateGeoData_NoCapableAdapterIsEmptyNotError(t *testing.
 	}
 }
 
+// The stub adapter runs no core process an upgrade concept applies to, so
+// this proves the dispatch reaches the registry, distinguishes "no such
+// adapter kind" from a real failure, and reports it through the error text
+// rather than crashing or silently dropping the command.
+func TestHandleCommand_UpgradeCore_UnknownKindIsReportedNotCrashed(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{
+		CommandId: "cmd-core-1",
+		Body: &pb.AgentCommand_UpgradeCore{UpgradeCore: &pb.UpgradeCore{
+			Kind: "xray", BinaryUrl: "https://example.invalid/xray.zip",
+			BinarySha256: "aaaa", ExpectedVersion: "1.9.0",
+		}},
+	})
+
+	if result.CommandId != "cmd-core-1" {
+		t.Errorf("result command id = %q, want cmd-core-1", result.CommandId)
+	}
+	core, ok := result.Body.(*pb.AgentCommandResult_UpgradeCore)
+	if !ok {
+		t.Fatalf("result body = %T, want *AgentCommandResult_UpgradeCore", result.Body)
+	}
+	if core.UpgradeCore.Ok {
+		t.Error("Ok = true for a node with no xray adapter at all")
+	}
+	if core.UpgradeCore.Error == "" {
+		t.Error("no error text for a node with no xray adapter at all")
+	}
+	if core.UpgradeCore.Kind != "xray" {
+		t.Errorf("Kind = %q, want it echoed back as xray", core.UpgradeCore.Kind)
+	}
+}
+
 // An unrecognised command body must not crash the agent or drop the
 // command silently -- it echoes the id with no body set, which the panel
 // side treats as a failure (see the SendCommand contract) rather than as

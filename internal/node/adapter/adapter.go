@@ -393,3 +393,37 @@ type GeoDataResult struct {
 	GeoIPSHA256   string
 	GeoSiteSHA256 string
 }
+
+// CoreVersionManager is an optional capability for adapters that drive a
+// core process whose exact binary version an operator may want to pin or
+// upgrade -- Xray and sing-box, not the other five protocols this codebase
+// drives, which are either OS-packaged (ocserv, OpenVPN, L2TP/IPsec) or
+// have no separate "core" distinct from the kernel/tool itself (WireGuard,
+// Hysteria2). Type-assert the adapter to this interface to check.
+type CoreVersionManager interface {
+	// UpgradeCore installs a SPECIFIC binary, never "latest" resolved by
+	// the adapter itself -- binaryURL and binarySHA256 name an exact
+	// artifact the caller already chose. The implementation MUST verify
+	// the checksum and run the downloaded binary's own -version output
+	// BEFORE touching the currently-installed one (the "preflight"), and
+	// MUST roll back to the previous binary and restart it if the newly
+	// installed one fails to come up healthy -- an upgrade that leaves a
+	// node down with no working core is a worse failure than the upgrade
+	// simply not happening.
+	UpgradeCore(ctx context.Context, binaryURL, binarySHA256, expectedVersion string) (CoreVersionResult, error)
+}
+
+// CoreVersionResult reports what is actually running after the call
+// returns, not merely whether the download succeeded.
+type CoreVersionResult struct {
+	// InstalledVersion is read back from the binary that ended up in
+	// place -- the new one on success, the restored previous one after a
+	// rollback -- never assumed from what the caller asked to install.
+	InstalledVersion string
+	// RolledBack is true when the new binary was installed, failed its
+	// post-restart health check, and the adapter already reverted to the
+	// previous binary and restarted it. The caller must report this
+	// alongside any error: the node is not left broken, but the upgrade
+	// did not take.
+	RolledBack bool
+}

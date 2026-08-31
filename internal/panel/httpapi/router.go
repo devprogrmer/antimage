@@ -38,6 +38,11 @@ type Deps struct {
 	// real client would rather than pin a sleep to the production value.
 	SSEInterval time.Duration
 	Now         func() time.Time
+	// CoreVersions caches the Xray release list GET /xray-core-versions
+	// serves. Nil is safe (the handler falls back to an uncached fetch),
+	// but production wiring sets it so a fleet of operators opening the
+	// upgrade dialog does not multiply GitHub API calls.
+	CoreVersions *xrayCoreVersionCache
 }
 
 func (d Deps) now() time.Time {
@@ -211,6 +216,8 @@ func NewRouter(d Deps) http.Handler {
 			// Node actions (M6)
 			private.Post("/nodes/{nodeID}/restart", d.handleRestartNode)
 			private.Post("/nodes/{nodeID}/geo-update", d.handleUpdateNodeGeoData)
+			private.Post("/nodes/{nodeID}/core-upgrade", d.handleUpgradeNodeCore)
+			private.Get("/xray-core-versions", d.handleListXrayCoreVersions)
 			private.Post("/nodes/{nodeID}/sync", d.handleSyncNode)
 			private.Post("/nodes/{nodeID}/maintenance", d.handleSetNodeMaintenance)
 			private.Post("/nodes/{nodeID}/enable", d.handleEnableNode)

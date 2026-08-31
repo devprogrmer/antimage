@@ -754,5 +754,10 @@
   "node.restartOK": "restarted",
   "node.updateGeoData": "Update geo data",
   "node.updateGeoDataOK": "updated",
-  "node.geoDataUpdatedAt": "Geo data updated"
+  "node.geoDataUpdatedAt": "Geo data updated",
+  "node.coreUpgradedAt": "Core upgraded via panel",
+  "node.coreVersionPicker": "Core version",
+  "node.chooseVersion": "Choose a version",
+  "node.upgradeCore": "Upgrade core",
+  "node.coreUpgraded": "Upgraded"
 }

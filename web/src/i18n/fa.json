@@ -754,5 +754,10 @@
   "node.restartOK": "راه‌اندازی مجدد شد",
   "node.updateGeoData": "به‌روزرسانی داده‌های جغرافیایی",
   "node.updateGeoDataOK": "به‌روزرسانی شد",
-  "node.geoDataUpdatedAt": "آخرین به‌روزرسانی داده‌های جغرافیایی"
+  "node.geoDataUpdatedAt": "آخرین به‌روزرسانی داده‌های جغرافیایی",
+  "node.coreUpgradedAt": "به‌روزرسانی هسته از طریق پنل",
+  "node.coreVersionPicker": "نسخهٔ هسته",
+  "node.chooseVersion": "یک نسخه انتخاب کنید",
+  "node.upgradeCore": "به‌روزرسانی هسته",
+  "node.coreUpgraded": "به‌روزرسانی شد"
 }

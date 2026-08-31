@@ -18,6 +18,22 @@ interface Adapter {
   geo_updated_at: number | null;
   geoip_sha256?: string;
   geosite_sha256?: string;
+  core_upgraded_at: number | null;
+}
+
+interface XrayCoreVersion {
+  version: string;
+  binary_url: string;
+  binary_sha256: string;
+}
+
+interface CoreUpgradeResponse {
+  delivered: boolean;
+  ok: boolean;
+  installed_version: string;
+  rolled_back: boolean;
+  error: string;
+  message: string;
 }
 
 interface GeoUpdateOutcome {
@@ -62,6 +78,33 @@ export function NodeAdapters({ nodeId }: { nodeId: number }) {
       api.get<{ capabilities: Capability[] }>(`/api/v1/nodes/${nodeId}/capabilities`),
   });
 
+  // Only fetched when this node actually has an xray row -- there is no
+  // reason to touch GitHub for a node that only runs, say, WireGuard.
+  const hasXray = (adapters.data?.adapters ?? []).some((a) => a.kind === "xray");
+  const coreVersions = useQuery({
+    queryKey: ["xray-core-versions"],
+    queryFn: () => api.get<{ versions: XrayCoreVersion[] }>("/api/v1/xray-core-versions"),
+    enabled: hasXray,
+    // Fleet-wide, slow-changing data; no reason to refetch it as often as
+    // node-specific state.
+    staleTime: 5 * 60 * 1000,
+  });
+  const [selectedVersion, setSelectedVersion] = useState<string>("");
+  const [coreResult, setCoreResult] = useState<CoreUpgradeResponse | null>(null);
+  const upgradeCore = useMutation({
+    mutationFn: (v: XrayCoreVersion) =>
+      api.post<CoreUpgradeResponse>(`/api/v1/nodes/${nodeId}/core-upgrade`, {
+        kind: "xray",
+        binary_url: v.binary_url,
+        binary_sha256: v.binary_sha256,
+        expected_version: v.version,
+      }),
+    onSuccess: (data) => {
+      setCoreResult(data);
+      queryClient.invalidateQueries({ queryKey: ["node", nodeId, "adapters"] });
+    },
+  });
+
   // One button for the node, not one per adapter row: the operator's intent
   // is "refresh whatever geo data this node has," not a per-protocol
   // decision, and RestartAdapters/NodeActions already use the same
@@ -101,6 +144,7 @@ export function NodeAdapters({ nodeId }: { nodeId: number }) {
         </div>
         <MutationError error={adapters.error} />
         <MutationError error={updateGeoData.error} />
+        <MutationError error={upgradeCore.error} />
         {geoResult && (
           <div role="status" className="mb-2 rounded border border-border bg-card p-2 text-xs">
             {!geoResult.delivered || !geoResult.outcomes || geoResult.outcomes.length === 0 ? (
@@ -149,6 +193,65 @@ export function NodeAdapters({ nodeId }: { nodeId: number }) {
                 {a.geoip_sha256 && ` · geoip ${a.geoip_sha256.slice(0, 12)}`}
                 {a.geosite_sha256 && ` · geosite ${a.geosite_sha256.slice(0, 12)}`}
               </p>
+            )}
+            {a.core_upgraded_at != null && (
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                {t("node.coreUpgradedAt")}: {formatTimestamp(a.core_upgraded_at)}
+              </p>
+            )}
+            {/* The version picker is xray-specific because the version
+                LIST endpoint is -- it queries Xray-core's own GitHub
+                releases, and sing-box (or any future core-managed
+                protocol) would need its own source before this control
+                could honestly offer it a version to pick from. The
+                POST /core-upgrade route itself is generic and takes any
+                kind; only this convenience picker is scoped. */}
+            {a.kind === "xray" && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <select
+                  value={selectedVersion}
+                  onChange={(e) => setSelectedVersion(e.target.value)}
+                  disabled={coreVersions.isLoading || upgradeCore.isPending}
+                  className="border border-input bg-card px-2 py-1 font-mono text-xs"
+                  aria-label={t("node.coreVersionPicker")}
+                >
+                  <option value="">{t("node.chooseVersion")}</option>
+                  {(coreVersions.data?.versions ?? []).map((v) => (
+                    <option key={v.version} value={v.version}>
+                      {v.version}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={selectedVersion === "" || upgradeCore.isPending}
+                  onClick={() => {
+                    const v = (coreVersions.data?.versions ?? []).find(
+                      (x) => x.version === selectedVersion,
+                    );
+                    if (!v) return;
+                    setCoreResult(null);
+                    upgradeCore.mutate(v);
+                  }}
+                >
+                  {upgradeCore.isPending ? t("egress.saving") : t("node.upgradeCore")}
+                </Button>
+                <MutationError error={coreVersions.error} />
+              </div>
+            )}
+            {a.kind === "xray" && coreResult && (
+              <div role="status" className="mt-1 rounded border border-border bg-card p-2 text-xs">
+                {coreResult.rolled_back ? (
+                  <span className="text-warning">{coreResult.message}</span>
+                ) : coreResult.ok ? (
+                  <span className="text-success">
+                    {t("node.coreUpgraded")}: {coreResult.installed_version}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">{coreResult.message}</span>
+                )}
+              </div>
             )}
           </div>
         ))}

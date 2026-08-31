@@ -754,5 +754,10 @@
   "node.restartOK": "перезапущено",
   "node.updateGeoData": "Обновить гео-данные",
   "node.updateGeoDataOK": "обновлено",
-  "node.geoDataUpdatedAt": "Гео-данные обновлены"
+  "node.geoDataUpdatedAt": "Гео-данные обновлены",
+  "node.coreUpgradedAt": "Ядро обновлено через панель",
+  "node.coreVersionPicker": "Версия ядра",
+  "node.chooseVersion": "Выберите версию",
+  "node.upgradeCore": "Обновить ядро",
+  "node.coreUpgraded": "Обновлено"
 }

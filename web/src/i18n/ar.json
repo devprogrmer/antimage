@@ -754,5 +754,10 @@
   "node.restartOK": "أُعيد التشغيل",
   "node.updateGeoData": "تحديث البيانات الجغرافية",
   "node.updateGeoDataOK": "تم التحديث",
-  "node.geoDataUpdatedAt": "آخر تحديث للبيانات الجغرافية"
+  "node.geoDataUpdatedAt": "آخر تحديث للبيانات الجغرافية",
+  "node.coreUpgradedAt": "تم ترقية النواة عبر اللوحة",
+  "node.coreVersionPicker": "إصدار النواة",
+  "node.chooseVersion": "اختر إصدارًا",
+  "node.upgradeCore": "ترقية النواة",
+  "node.coreUpgraded": "تمت الترقية"
 }

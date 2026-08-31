@@ -657,3 +657,101 @@ func TestUpdateGeoData_FailurePropagatesWithoutStoppingOthers(t *testing.T) {
 		t.Errorf("singbox outcome reported not-OK: %v", byKind["singbox"].Err)
 	}
 }
+
+// coreVersionAdapter wraps recordingAdapter and additionally implements
+// adapter.CoreVersionManager.
+type coreVersionAdapter struct {
+	*recordingAdapter
+	mu               sync.Mutex
+	calls            int
+	err              error
+	installedVersion string
+	rolledBack       bool
+}
+
+func (c *coreVersionAdapter) UpgradeCore(_ context.Context, binaryURL, binarySHA256, expectedVersion string) (adapter.CoreVersionResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	if c.err != nil {
+		// A failing UpgradeCore in production still reports InstalledVersion
+		// (what the rollback restored, or the preflight-verified new
+		// version if the failure happened after that but before install --
+		// see coreversion.go). The stub matches that shape so this test
+		// exercises Registry's field propagation, not a stub that only
+		// ever succeeds.
+		return adapter.CoreVersionResult{InstalledVersion: c.installedVersion, RolledBack: c.rolledBack}, c.err
+	}
+	return adapter.CoreVersionResult{InstalledVersion: c.installedVersion, RolledBack: c.rolledBack}, nil
+}
+
+var _ adapter.CoreVersionManager = (*coreVersionAdapter)(nil)
+
+func TestUpgradeCore_TargetsOnlyTheNamedKind(t *testing.T) {
+	xray := &coreVersionAdapter{recordingAdapter: &recordingAdapter{kind: "xray"}, installedVersion: "1.9.0"}
+	singbox := &coreVersionAdapter{recordingAdapter: &recordingAdapter{kind: "singbox"}, installedVersion: "1.5.0"}
+	r := MustRegistry(xray, singbox)
+
+	outcome := r.UpgradeCore(context.Background(), "xray", "https://x", "sum", "1.9.0")
+	if !outcome.Found || !outcome.Capable || !outcome.OK {
+		t.Fatalf("outcome = %+v, want Found+Capable+OK", outcome)
+	}
+	if outcome.InstalledVersion != "1.9.0" {
+		t.Errorf("InstalledVersion = %q, want 1.9.0", outcome.InstalledVersion)
+	}
+	if xray.calls != 1 {
+		t.Errorf("xray.UpgradeCore called %d times, want 1", xray.calls)
+	}
+	if singbox.calls != 0 {
+		t.Errorf("singbox.UpgradeCore called %d times, want 0 -- it was not named", singbox.calls)
+	}
+}
+
+func TestUpgradeCore_UnknownKindReportsNotFound(t *testing.T) {
+	r := MustRegistry(&coreVersionAdapter{recordingAdapter: &recordingAdapter{kind: "xray"}})
+
+	outcome := r.UpgradeCore(context.Background(), "singbox", "https://x", "sum", "")
+	if outcome.Found {
+		t.Error("Found = true for a kind this node does not run")
+	}
+}
+
+// TestUpgradeCore_AdapterWithoutTheCapabilityIsDistinguished proves the
+// three-way distinction CoreVersionOutcome exists for: wireguard is a real
+// adapter on this node, it just has no core-version concept, and that must
+// read differently from "no such adapter at all".
+func TestUpgradeCore_AdapterWithoutTheCapabilityIsDistinguished(t *testing.T) {
+	r := MustRegistry(&recordingAdapter{kind: "wireguard"}) // no UpgradeCore method
+
+	outcome := r.UpgradeCore(context.Background(), "wireguard", "https://x", "sum", "")
+	if !outcome.Found {
+		t.Error("Found = false; wireguard IS a real adapter on this node")
+	}
+	if outcome.Capable {
+		t.Error("Capable = true; wireguard has no core-version concept")
+	}
+}
+
+func TestUpgradeCore_FailurePropagatesWithRolledBackFlag(t *testing.T) {
+	failing := &coreVersionAdapter{
+		recordingAdapter: &recordingAdapter{kind: "xray"},
+		err:              errors.New("the new binary never became healthy"),
+		rolledBack:       true,
+		installedVersion: "1.8.0", // what it rolled back TO
+	}
+	r := MustRegistry(failing)
+
+	outcome := r.UpgradeCore(context.Background(), "xray", "https://x", "sum", "1.9.0")
+	if outcome.OK {
+		t.Error("OK = true despite the upgrade failing")
+	}
+	if !outcome.RolledBack {
+		t.Error("RolledBack = false, want true")
+	}
+	if outcome.InstalledVersion != "1.8.0" {
+		t.Errorf("InstalledVersion = %q, want 1.8.0 (what the rollback restored)", outcome.InstalledVersion)
+	}
+	if outcome.Err == nil {
+		t.Error("Err is nil despite the upgrade failing")
+	}
+}
