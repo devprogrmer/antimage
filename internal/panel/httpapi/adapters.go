@@ -17,6 +17,13 @@ type AdapterJSON struct {
 	Version      string   `json:"version"`
 	Capabilities []string `json:"capabilities"`
 	ReportedAt   int64    `json:"reported_at"`
+	// GeoUpdatedAt is null when this adapter's geo data has never been
+	// updated through the panel -- which is also true for every adapter
+	// kind that has no geo data concept at all, so the browser only offers
+	// the control where it could ever be non-null.
+	GeoUpdatedAt  *int64 `json:"geo_updated_at"`
+	GeoIPSHA256   string `json:"geoip_sha256,omitempty"`
+	GeoSiteSHA256 string `json:"geosite_sha256,omitempty"`
 }
 
 // handleListAdapters implements GET /api/v1/nodes/{id}/adapters.
@@ -46,12 +53,19 @@ func (d Deps) handleListAdapters(w http.ResponseWriter, r *http.Request) {
 
 	adapters := make([]AdapterJSON, 0, len(entries))
 	for _, e := range entries {
-		adapters = append(adapters, AdapterJSON{
-			Kind:         e.Kind,
-			Version:      e.Version,
-			Capabilities: e.Capabilities,
-			ReportedAt:   e.ReportedAt.Unix(),
-		})
+		aj := AdapterJSON{
+			Kind:          e.Kind,
+			Version:       e.Version,
+			Capabilities:  e.Capabilities,
+			ReportedAt:    e.ReportedAt.Unix(),
+			GeoIPSHA256:   e.GeoIPSHA256,
+			GeoSiteSHA256: e.GeoSiteSHA256,
+		}
+		if e.GeoUpdatedAt != nil {
+			ts := e.GeoUpdatedAt.Unix()
+			aj.GeoUpdatedAt = &ts
+		}
+		adapters = append(adapters, aj)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

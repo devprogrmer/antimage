@@ -366,3 +366,30 @@ type UsageReporter interface {
 	// adapter's responsibility to persist cursors and detect restarts.
 	Usage(ctx context.Context) ([]UsageSample, error)
 }
+
+// GeoDataUpdater is an optional capability for adapters whose routing rules
+// can reference geoip/geosite categories, and which therefore need a local
+// geo database kept current. Unlike Restart, this is NOT part of the base
+// Adapter interface: most protocols this codebase drives (WireGuard,
+// OpenVPN, L2TP/IPsec, Hysteria2, ocserv) have no domain/IP category
+// routing concept at all, and forcing all of them to answer "unsupported"
+// for a question that does not apply to them would be noise rather than a
+// truthful "no". Type-assert the adapter to this interface to check.
+type GeoDataUpdater interface {
+	// UpdateGeoData fetches geoipURL/geositeURL, verifies each against the
+	// hex digest published at its matching *SHA256Url, and only then
+	// replaces the adapter's local copy and restarts it to load the new
+	// data. A checksum mismatch or fetch failure must leave the adapter's
+	// existing geo data untouched -- a routing rule that resolved a moment
+	// ago must not start failing because an update attempt fell over
+	// halfway through.
+	UpdateGeoData(ctx context.Context, geoipURL, geoipSHA256URL, geositeURL, geositeSHA256URL string) (GeoDataResult, error)
+}
+
+// GeoDataResult reports what was actually applied, so the operator sees the
+// same checksum the source published rather than trusting the update
+// silently.
+type GeoDataResult struct {
+	GeoIPSHA256   string
+	GeoSiteSHA256 string
+}

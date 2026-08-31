@@ -95,7 +95,8 @@ func build(cfg *agent.Config, spec agent.AdapterConfig) (adapter.Adapter, error)
 		// HotAddSupported is reported per NODE rather than per adapter type,
 		// because whether Xray can add a user without a restart depends on this
 		// host having configured the management API.
-		return xray.New(orDefault(spec.ConfigDir, defaultXrayDir), rt, rt.HotAddSupported()), nil
+		return xray.NewWithAssetDir(orDefault(spec.ConfigDir, defaultXrayDir), rt, rt.HotAddSupported(),
+			orDefault(spec.AssetDir, xray.DefaultAssetDir)), nil
 
 	case singbox.Kind:
 		rt := singbox.NewExecRuntime(

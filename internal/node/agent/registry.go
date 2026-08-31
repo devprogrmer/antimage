@@ -172,6 +172,52 @@ func (r *Registry) RestartAll(ctx context.Context, kinds []string) []AdapterRest
 	return out
 }
 
+// AdapterGeoUpdateOutcome pairs a geo-data update result with the adapter
+// that produced it, named to match pb.AdapterGeoUpdateOutcome for the same
+// reason AdapterRestartOutcome is.
+type AdapterGeoUpdateOutcome struct {
+	Kind          adapter.Kind
+	OK            bool
+	GeoIPSHA256   string
+	GeoSiteSHA256 string
+	Err           error
+}
+
+// UpdateGeoData refreshes geo data on every adapter that has any -- checked
+// with a type assertion against adapter.GeoDataUpdater, since most adapters
+// this registry runs have no such concept at all.
+//
+// Unlike RestartAll, an adapter that does not implement the interface is
+// simply not included in the result, rather than reported as an
+// "unsupported" row: restart is a question every adapter can meaningfully
+// answer (even if the answer is no), but geo data is not a question most
+// protocols this codebase drives have any stake in at all, and padding the
+// result with rows for wireguard/openvpn/l2tp/hysteria2/ocserv would be
+// noise. An empty result means literally none of this node's adapters have
+// geo data -- the caller (httpapi) is what turns that into a clear message,
+// not a silent success.
+func (r *Registry) UpdateGeoData(
+	ctx context.Context, geoipURL, geoipSHA256URL, geositeURL, geositeSHA256URL string,
+) []AdapterGeoUpdateOutcome {
+	if r == nil {
+		return nil
+	}
+	out := make([]AdapterGeoUpdateOutcome, 0, len(r.adapters))
+	for _, ad := range r.adapters {
+		kind := ad.Descriptor().Kind
+		updater, ok := ad.(adapter.GeoDataUpdater)
+		if !ok {
+			continue
+		}
+		result, err := updater.UpdateGeoData(ctx, geoipURL, geoipSHA256URL, geositeURL, geositeSHA256URL)
+		out = append(out, AdapterGeoUpdateOutcome{
+			Kind: kind, OK: err == nil, Err: err,
+			GeoIPSHA256: result.GeoIPSHA256, GeoSiteSHA256: result.GeoSiteSHA256,
+		})
+	}
+	return out
+}
+
 // UsageReporters returns the adapters that account for their own traffic.
 //
 // Not every adapter does -- Caps.SelfAccounting says whether it claims to, and

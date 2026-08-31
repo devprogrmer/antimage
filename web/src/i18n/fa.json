@@ -751,5 +751,8 @@
   "node.syncOffline": "گره آفلاین است؛ در اتصال بعدی خودش را همگام می‌کند",
   "node.restartOffline": "گره آفلاین است؛ چیزی راه‌اندازی مجدد نشد",
   "node.restartNoAdapters": "عامل هیچ آداپتوری برای راه‌اندازی مجدد گزارش نکرد",
-  "node.restartOK": "راه‌اندازی مجدد شد"
+  "node.restartOK": "راه‌اندازی مجدد شد",
+  "node.updateGeoData": "به‌روزرسانی داده‌های جغرافیایی",
+  "node.updateGeoDataOK": "به‌روزرسانی شد",
+  "node.geoDataUpdatedAt": "آخرین به‌روزرسانی داده‌های جغرافیایی"
 }

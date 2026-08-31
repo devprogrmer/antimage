@@ -751,5 +751,8 @@
   "node.syncOffline": "Узел офлайн; синхронизируется при следующем подключении",
   "node.restartOffline": "Узел офлайн; ничего не было перезапущено",
   "node.restartNoAdapters": "Агент не сообщил об адаптерах для перезапуска",
-  "node.restartOK": "перезапущено"
+  "node.restartOK": "перезапущено",
+  "node.updateGeoData": "Обновить гео-данные",
+  "node.updateGeoDataOK": "обновлено",
+  "node.geoDataUpdatedAt": "Гео-данные обновлены"
 }

@@ -564,3 +564,96 @@ func TestRestartAll_OneFailureDoesNotStopTheOthers(t *testing.T) {
 		t.Errorf("xray outcome reported not-OK: %v", byKind["xray"].Err)
 	}
 }
+
+// geoAdapter wraps recordingAdapter and additionally implements
+// adapter.GeoDataUpdater, so tests can construct a mixed registry where
+// only some adapters have geo data at all -- recordingAdapter alone (no
+// UpdateGeoData method) stands in for the majority of protocols that
+// genuinely have none.
+type geoAdapter struct {
+	*recordingAdapter
+	mu      sync.Mutex
+	calls   int
+	err     error
+	geoip   string
+	geosite string
+}
+
+func (g *geoAdapter) UpdateGeoData(_ context.Context, geoipURL, _, geositeURL, _ string) (adapter.GeoDataResult, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls++
+	if g.err != nil {
+		return adapter.GeoDataResult{}, g.err
+	}
+	return adapter.GeoDataResult{GeoIPSHA256: g.geoip, GeoSiteSHA256: g.geosite}, nil
+}
+
+func (g *geoAdapter) callCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.calls
+}
+
+var _ adapter.GeoDataUpdater = (*geoAdapter)(nil)
+
+// TestUpdateGeoData_OnlyTouchesCapableAdapters is the design's central
+// property: an adapter with no geo-data concept at all (wireguard, l2tp,
+// hysteria2, ocserv, openvpn in production) must not appear in the result
+// just because it happened to share a registry with xray.
+func TestUpdateGeoData_OnlyTouchesCapableAdapters(t *testing.T) {
+	xray := &geoAdapter{recordingAdapter: &recordingAdapter{kind: "xray"}, geoip: "aaa", geosite: "bbb"}
+	wireguard := &recordingAdapter{kind: "wireguard"} // no UpdateGeoData method at all
+	r := MustRegistry(xray, wireguard)
+
+	outcomes := r.UpdateGeoData(context.Background(), "geoip-url", "geoip-sum-url", "geosite-url", "geosite-sum-url")
+	if len(outcomes) != 1 {
+		t.Fatalf("got %d outcomes, want exactly 1 (xray only): %+v", len(outcomes), outcomes)
+	}
+	if outcomes[0].Kind != "xray" {
+		t.Errorf("outcome kind = %q, want xray", outcomes[0].Kind)
+	}
+	if !outcomes[0].OK {
+		t.Errorf("outcome not OK: %v", outcomes[0].Err)
+	}
+	if outcomes[0].GeoIPSHA256 != "aaa" || outcomes[0].GeoSiteSHA256 != "bbb" {
+		t.Errorf("checksums not carried through: %+v", outcomes[0])
+	}
+	if xray.callCount() != 1 {
+		t.Errorf("xray.UpdateGeoData called %d times, want 1", xray.callCount())
+	}
+}
+
+// TestUpdateGeoData_NoCapableAdaptersReturnsEmpty proves the "nothing to
+// update" case is a plain empty slice rather than a synthesized error or a
+// row for an adapter that was never asked -- httpapi is what turns an empty
+// result into an operator-facing message, not this layer.
+func TestUpdateGeoData_NoCapableAdaptersReturnsEmpty(t *testing.T) {
+	r := MustRegistry(&recordingAdapter{kind: "wireguard"}, &recordingAdapter{kind: "openvpn"})
+
+	outcomes := r.UpdateGeoData(context.Background(), "a", "b", "c", "d")
+	if len(outcomes) != 0 {
+		t.Errorf("got %d outcomes, want 0: %+v", len(outcomes), outcomes)
+	}
+}
+
+func TestUpdateGeoData_FailurePropagatesWithoutStoppingOthers(t *testing.T) {
+	failing := &geoAdapter{recordingAdapter: &recordingAdapter{kind: "xray"}, err: errors.New("checksum mismatch")}
+	working := &geoAdapter{recordingAdapter: &recordingAdapter{kind: "singbox"}, geoip: "x", geosite: "y"}
+	r := MustRegistry(failing, working)
+
+	outcomes := r.UpdateGeoData(context.Background(), "a", "b", "c", "d")
+	if len(outcomes) != 2 {
+		t.Fatalf("got %d outcomes, want 2", len(outcomes))
+	}
+	byKind := map[adapter.Kind]AdapterGeoUpdateOutcome{}
+	for _, o := range outcomes {
+		byKind[o.Kind] = o
+	}
+	if byKind["xray"].OK {
+		t.Error("xray outcome reported OK despite the update failing")
+	}
+	if !byKind["singbox"].OK {
+		t.Errorf("singbox outcome reported not-OK: %v", byKind["singbox"].Err)
+	}
+}

@@ -751,5 +751,8 @@
   "node.syncOffline": "العقدة غير متصلة؛ ستتزامن تلقائيًا عند الاتصال التالي",
   "node.restartOffline": "العقدة غير متصلة؛ لم يُعَد تشغيل أي شيء",
   "node.restartNoAdapters": "لم يُبلغ العامل عن أي محولات لإعادة التشغيل",
-  "node.restartOK": "أُعيد التشغيل"
+  "node.restartOK": "أُعيد التشغيل",
+  "node.updateGeoData": "تحديث البيانات الجغرافية",
+  "node.updateGeoDataOK": "تم التحديث",
+  "node.geoDataUpdatedAt": "آخر تحديث للبيانات الجغرافية"
 }

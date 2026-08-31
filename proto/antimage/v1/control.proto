@@ -76,6 +76,7 @@ message AgentCommand {
   string command_id = 1;
   oneof body {
     RestartAdapters restart_adapters = 2;
+    UpdateGeoData update_geo_data = 3;
   }
 }
 
@@ -87,11 +88,54 @@ message RestartAdapters {
   repeated string kinds = 1;
 }
 
+// UpdateGeoData asks the agent to fetch fresh geoip/geosite databases and
+// restart whichever adapter uses them. The panel supplies the URLs rather
+// than the agent hardcoding an upstream: an operator behind a mirror or
+// firewall can point at their own copy without an agent upgrade, and there
+// is exactly one place -- the panel -- that decides which source a fleet
+// trusts.
+//
+// Xray reads geo data once at process start, not on SIGHUP/reload, so
+// "update" without a restart would download a file nothing reads; the
+// agent restarts the adapter itself once the new files verify, using the
+// same Adapter.Restart path RestartAdapters uses.
+message UpdateGeoData {
+  string geoip_url = 1;
+  string geoip_sha256_url = 2;
+  string geosite_url = 3;
+  string geosite_sha256_url = 4;
+}
+
 message AgentCommandResult {
   string command_id = 1;
   oneof body {
     RestartAdaptersResult restart_adapters = 2;
+    UpdateGeoDataResult update_geo_data = 3;
   }
+}
+
+message UpdateGeoDataResult {
+  repeated AdapterGeoUpdateOutcome outcomes = 1;
+}
+
+// AdapterGeoUpdateOutcome is per adapter kind, so a node running xray
+// alongside wireguard reports xray's real outcome without wireguard's
+// unrelated presence changing anything about it.
+//
+// Unlike AdapterRestartOutcome, adapters with no geo-database concept at
+// all do NOT get a row here -- most of the protocols this codebase drives
+// have no domain/IP category routing, and listing five "unsupported" rows
+// for a node that only runs xray would be noise, not signal. An empty
+// outcomes list means no adapter on this node has geo data to update at
+// all, which the caller reports as its own clear condition rather than as
+// a silent no-op success.
+message AdapterGeoUpdateOutcome {
+  string kind = 1;
+  bool ok = 2;
+  string geoip_sha256 = 3;
+  string geosite_sha256 = 4;
+  // Empty when ok.
+  string error = 5;
 }
 
 message RestartAdaptersResult {

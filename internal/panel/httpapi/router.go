@@ -210,6 +210,7 @@ func NewRouter(d Deps) http.Handler {
 
 			// Node actions (M6)
 			private.Post("/nodes/{nodeID}/restart", d.handleRestartNode)
+			private.Post("/nodes/{nodeID}/geo-update", d.handleUpdateNodeGeoData)
 			private.Post("/nodes/{nodeID}/sync", d.handleSyncNode)
 			private.Post("/nodes/{nodeID}/maintenance", d.handleSetNodeMaintenance)
 			private.Post("/nodes/{nodeID}/enable", d.handleEnableNode)

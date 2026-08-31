@@ -167,6 +167,36 @@ func TestHandleCommand_RestartAdapters_EchoesCommandID(t *testing.T) {
 	}
 }
 
+// The stub adapter has no geo-data concept (it implements Restart, not
+// GeoDataUpdater), so this proves the dispatch path threads an
+// UpdateGeoData command through to the registry and back onto the wire
+// correctly even when the answer is "nothing on this node has geo data" --
+// an empty outcomes list, not an error and not a crash.
+func TestHandleCommand_UpdateGeoData_NoCapableAdapterIsEmptyNotError(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{
+		CommandId: "cmd-geo-1",
+		Body: &pb.AgentCommand_UpdateGeoData{UpdateGeoData: &pb.UpdateGeoData{
+			GeoipUrl: "https://example.invalid/geoip.dat", GeoipSha256Url: "https://example.invalid/geoip.dat.sha256sum",
+			GeositeUrl: "https://example.invalid/geosite.dat", GeositeSha256Url: "https://example.invalid/geosite.dat.sha256sum",
+		}},
+	})
+
+	if result.CommandId != "cmd-geo-1" {
+		t.Errorf("result command id = %q, want cmd-geo-1", result.CommandId)
+	}
+	geo, ok := result.Body.(*pb.AgentCommandResult_UpdateGeoData)
+	if !ok {
+		t.Fatalf("result body = %T, want *AgentCommandResult_UpdateGeoData", result.Body)
+	}
+	if len(geo.UpdateGeoData.Outcomes) != 0 {
+		t.Errorf("got %d outcomes for a registry with no geo-capable adapter, want 0", len(geo.UpdateGeoData.Outcomes))
+	}
+}
+
 // An unrecognised command body must not crash the agent or drop the
 // command silently -- it echoes the id with no body set, which the panel
 // side treats as a failure (see the SendCommand contract) rather than as

@@ -751,5 +751,8 @@
   "node.syncOffline": "Node is offline; will reconcile on its own next connection",
   "node.restartOffline": "Node is offline; nothing was restarted",
   "node.restartNoAdapters": "The agent reported no adapters to restart",
-  "node.restartOK": "restarted"
+  "node.restartOK": "restarted",
+  "node.updateGeoData": "Update geo data",
+  "node.updateGeoDataOK": "updated",
+  "node.geoDataUpdatedAt": "Geo data updated"
 }

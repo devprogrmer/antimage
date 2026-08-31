@@ -70,6 +70,14 @@ type AdapterConfig struct {
 	// Leaving it empty is a supported choice and costs a restart per user
 	// change; it is not a degraded mode.
 	APIAddress string `yaml:"api_address,omitempty"`
+	// AssetDir is where geo data (geoip.dat/geosite.dat) lives, for adapters
+	// that have any. Only Xray uses it today. Empty means the adapter's own
+	// documented default -- for Xray, wherever the official installer's
+	// systemd unit points XRAY_LOCATION_ASSET, which is xray.DefaultAssetDir
+	// on a host that followed that convention. A host whose Xray predates
+	// antimage and lives elsewhere sets this explicitly rather than needing
+	// an agent rebuild.
+	AssetDir string `yaml:"asset_dir,omitempty"`
 }
 
 func LoadConfig(path string) (*Config, error) {
