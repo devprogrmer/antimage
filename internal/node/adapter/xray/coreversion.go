@@ -153,7 +153,7 @@ func (a *Adapter) rollback(ctx context.Context, installedPath, backupPath string
 	_ = os.Rename(installedPath, failedBinary) // best-effort; proceed regardless
 	if err := os.Rename(backupPath, installedPath); err != nil {
 		return adapter.CoreVersionResult{}, fmt.Errorf(
-			"%w; additionally, restoring the previous binary FAILED (%v) -- this node may have no working core binary at %s",
+			"%w; additionally, restoring the previous binary FAILED (%w) -- this node may have no working core binary at %s",
 			cause, err, installedPath)
 	}
 	_ = a.Restart(ctx) // best-effort: report the original cause regardless of this outcome
