@@ -630,3 +630,59 @@ func TestForeignServicesDoNotAffectRemoval(t *testing.T) {
 			"an id must not keep our interface alive", plan.Steps)
 	}
 }
+
+// A node with no WireGuard interfaces configured has nothing to restart.
+func TestRestart_NoInterfacesReturnsUnsupported(t *testing.T) {
+	e := newApplyEnv(t)
+	err := e.a.Restart(context.Background())
+	if !errors.Is(err, adapter.ErrRestartUnsupported) {
+		t.Errorf("Restart with nothing configured = %v, want ErrRestartUnsupported", err)
+	}
+}
+
+// Restart cycles every configured interface, down then up, because
+// WireGuard has no daemon of its own to bounce -- each interface is its own
+// kernel object. A node running two interfaces must see both go down and
+// both come back up, in that order per interface.
+func TestRestart_CyclesEveryConfiguredInterface(t *testing.T) {
+	e := newApplyEnv(t)
+	ctx := context.Background()
+
+	for _, id := range []int64{7, 42} {
+		d := desiredWith(t, 1)
+		d.Services[0].ID = id
+		p := payloadFor(t, e.a, d)
+		if res, _ := e.a.Apply(ctx, adapter.Step{
+			Kind: "install", ServiceID: id, Payload: mustJSON(t, p),
+		}); !res.OK {
+			t.Fatalf("install %d: %s", id, res.Err)
+		}
+	}
+	e.rt.mu.Lock()
+	e.rt.calls = nil
+	e.rt.mu.Unlock()
+
+	if err := e.a.Restart(ctx); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	calls := e.rt.Calls()
+	downs, ups := map[string]bool{}, map[string]bool{}
+	for _, c := range calls {
+		if name, ok := strings.CutPrefix(c, "down:"); ok {
+			downs[name] = true
+		}
+		if name, ok := strings.CutPrefix(c, "up:"); ok {
+			ups[name] = true
+		}
+	}
+	for _, id := range []int64{7, 42} {
+		iface := interfaceName(id)
+		if !downs[iface] {
+			t.Errorf("interface %s never brought down (calls=%v)", iface, calls)
+		}
+		if !ups[iface] {
+			t.Errorf("interface %s never brought back up (calls=%v)", iface, calls)
+		}
+	}
+}

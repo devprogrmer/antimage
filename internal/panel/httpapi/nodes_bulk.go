@@ -4,12 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/amyrm/antimage/internal/panel/audit"
+	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
+	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
 )
 
 // BulkNodeAction represents a bulk operation request
@@ -190,54 +195,120 @@ func (d Deps) handleBulkNodeAction(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, response)
 }
 
+// executeBulkRestart carries the same fix as handleRestartNode: it used to
+// record an event and an audit row, then report success regardless of
+// whether anything reached the node, for every id in the batch. It now
+// sends the real RestartAdapters command and folds delivery into whether
+// this node counts as a success in the batch response -- a node that was
+// offline is reported as a per-node failure with a clear reason, not lumped
+// in with the ones that actually restarted.
 func (d Deps) executeBulkRestart(ctx context.Context, actor *rbac.Actor, nodeID int64, nodeName string) error {
-	// Record restart request event
-	details := map[string]interface{}{
-		"action":    "restart",
-		"admin_id":  actor.AdminID,
-		"node_name": nodeName,
-		"bulk":      true,
+	cmd := &pb.AgentCommand{
+		CommandId: uuid.NewString(),
+		Body:      &pb.AgentCommand_RestartAdapters{RestartAdapters: &pb.RestartAdapters{}},
 	}
 
+	delivered := false
+	var outcomes []map[string]any
+	var cmdErr error
+	if d.Hub != nil {
+		result, err := d.Hub.SendCommand(ctx, nodeID, cmd, restartCommandTimeout)
+		switch {
+		case err == nil:
+			delivered = true
+			if restart, ok := result.Body.(*pb.AgentCommandResult_RestartAdapters); ok {
+				for _, o := range restart.RestartAdapters.Outcomes {
+					outcomes = append(outcomes, map[string]any{
+						"kind": o.Kind, "ok": o.Ok, "error": o.Error,
+					})
+					if !o.Ok {
+						// The first per-adapter failure becomes this node's
+						// bulk-result error, so the operator sees WHICH
+						// protocol failed rather than a bare "false".
+						cmdErr = errors.New(o.Kind + ": " + o.Error)
+					}
+				}
+			}
+		case errors.Is(err, control.ErrCommandNotDelivered):
+			cmdErr = errors.New("node offline")
+		default:
+			cmdErr = err
+		}
+	} else {
+		cmdErr = errors.New("control hub unavailable")
+	}
+
+	details := map[string]interface{}{
+		"action": "restart", "admin_id": actor.AdminID, "node_name": nodeName,
+		"bulk": true, "delivered": delivered, "outcomes": outcomes,
+	}
 	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "restart_requested", "info", details, &actor.AdminID); err != nil {
 		return err
 	}
 
-	// Audit log
-	return d.Store.Write(ctx, func(tx *sql.Tx) error {
+	auditErr := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, nil), audit.Record{
 			Action:     "node.restart",
 			TargetType: "node",
 			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
 			Result:     "ok",
-			After:      map[string]any{"node": nodeName, "bulk": true},
+			After:      map[string]any{"node": nodeName, "bulk": true, "delivered": delivered},
 		})
 	})
+	if auditErr != nil {
+		return auditErr
+	}
+	// Returned last: the event and audit rows are written either way,
+	// because "the restart failed" is itself something worth a durable
+	// record, not a reason to skip writing one.
+	return cmdErr
 }
 
+// executeBulkSync carries the same fix as handleSyncNode: see its own doc
+// comment in nodes_actions.go for why "requested" without a Hub.Notify call
+// was never true.
 func (d Deps) executeBulkSync(ctx context.Context, actor *rbac.Actor, nodeID int64, nodeName string) error {
-	// Record sync request event
-	details := map[string]interface{}{
-		"action":    "sync",
-		"admin_id":  actor.AdminID,
-		"node_name": nodeName,
-		"bulk":      true,
+	var desiredRevision int64
+	if err := d.Store.Read().QueryRowContext(ctx,
+		`SELECT desired_revision FROM nodes WHERE id = ?`, nodeID).Scan(&desiredRevision); err != nil {
+		return err
 	}
 
+	delivered := false
+	if d.Hub != nil {
+		delivered = d.Hub.Notify(nodeID, desiredRevision)
+	}
+
+	details := map[string]interface{}{
+		"action": "sync", "admin_id": actor.AdminID, "node_name": nodeName,
+		"bulk": true, "delivered": delivered,
+	}
 	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "sync_requested", "info", details, &actor.AdminID); err != nil {
 		return err
 	}
 
-	// Audit log
-	return d.Store.Write(ctx, func(tx *sql.Tx) error {
+	auditErr := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, nil), audit.Record{
 			Action:     "node.sync",
 			TargetType: "node",
 			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
 			Result:     "ok",
-			After:      map[string]any{"node": nodeName, "bulk": true},
+			After:      map[string]any{"node": nodeName, "bulk": true, "delivered": delivered},
 		})
 	})
+	if auditErr != nil {
+		return auditErr
+	}
+	if !delivered {
+		// Unlike restart, an undelivered sync is not necessarily a failure
+		// worth counting against the batch: the node reconciles on its own
+		// next connect regardless. But silently reporting success here would
+		// repeat the exact bug being fixed, so the caller learns the truth
+		// and can decide whether "offline" counts as failure for their
+		// purposes.
+		return errors.New("node offline; will reconcile on its own next connection")
+	}
+	return nil
 }
 
 func (d Deps) executeBulkEnable(ctx context.Context, actor *rbac.Actor, nodeID int64) error {

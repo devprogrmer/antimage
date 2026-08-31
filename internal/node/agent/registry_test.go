@@ -40,6 +40,8 @@ type recordingAdapter struct {
 	planErr    error
 	applyErr   string
 	probe      adapter.Health
+	restartErr error
+	restarted  int
 }
 
 func (a *recordingAdapter) Descriptor() adapter.Descriptor {
@@ -97,6 +99,22 @@ func (a *recordingAdapter) Apply(_ context.Context, step adapter.Step) (adapter.
 
 func (a *recordingAdapter) Probe(context.Context) (adapter.Health, error) {
 	return a.probe, nil
+}
+
+func (a *recordingAdapter) Restart(context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.restarted++
+	if a.restartErr != nil {
+		return a.restartErr
+	}
+	return nil
+}
+
+func (a *recordingAdapter) restartCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.restarted
 }
 
 func (a *recordingAdapter) snapshot() ([][]int64, [][]int64, []adapter.Step, int) {
@@ -475,4 +493,74 @@ type countingAdapter struct{ recordingAdapter }
 
 func (c *countingAdapter) Usage(context.Context) ([]adapter.UsageSample, error) {
 	return []adapter.UsageSample{{SubjectID: 1, UplinkBytes: 10, DownlinkBytes: 20}}, nil
+}
+
+// Empty kinds means "every adapter this node runs" -- explicit rather than a
+// sentinel, so a caller who meant one specific kind is never one typo away
+// from restarting the whole node.
+func TestRestartAll_EmptyKindsRestartsEverything(t *testing.T) {
+	alpha := &recordingAdapter{kind: "alpha"}
+	beta := &recordingAdapter{kind: "beta"}
+	r := MustRegistry(alpha, beta)
+
+	outcomes := r.RestartAll(context.Background(), nil)
+	if len(outcomes) != 2 {
+		t.Fatalf("got %d outcomes, want 2", len(outcomes))
+	}
+	if alpha.restartCount() != 1 || beta.restartCount() != 1 {
+		t.Errorf("alpha restarted %d times, beta %d times; want 1 each",
+			alpha.restartCount(), beta.restartCount())
+	}
+}
+
+// Named kinds restart only those, and this is where a partial fleet restart
+// (a UI that lets an operator restart "just xray") depends on the filter
+// actually filtering.
+func TestRestartAll_NamedKindsRestartsOnlyThose(t *testing.T) {
+	alpha := &recordingAdapter{kind: "alpha"}
+	beta := &recordingAdapter{kind: "beta"}
+	r := MustRegistry(alpha, beta)
+
+	outcomes := r.RestartAll(context.Background(), []string{"alpha"})
+	if len(outcomes) != 1 {
+		t.Fatalf("got %d outcomes, want 1", len(outcomes))
+	}
+	if alpha.restartCount() != 1 {
+		t.Errorf("alpha restarted %d times, want 1", alpha.restartCount())
+	}
+	if beta.restartCount() != 0 {
+		t.Errorf("beta restarted %d times, want 0 -- it was not named", beta.restartCount())
+	}
+}
+
+// One adapter's restart failing must not stop the others from being
+// attempted, and the failure must be reported against the RIGHT kind -- an
+// operator who restarted a mixed fleet needs to know which protocol is
+// still down, not merely that something is.
+func TestRestartAll_OneFailureDoesNotStopTheOthers(t *testing.T) {
+	failing := &recordingAdapter{kind: "wireguard", restartErr: adapter.ErrRestartUnsupported}
+	working := &recordingAdapter{kind: "xray"}
+	r := MustRegistry(failing, working)
+
+	outcomes := r.RestartAll(context.Background(), nil)
+	if len(outcomes) != 2 {
+		t.Fatalf("got %d outcomes, want 2", len(outcomes))
+	}
+	if working.restartCount() != 1 {
+		t.Errorf("the working adapter was not restarted after the other one failed")
+	}
+
+	byKind := map[adapter.Kind]AdapterRestartOutcome{}
+	for _, o := range outcomes {
+		byKind[o.Kind] = o
+	}
+	if byKind["wireguard"].OK {
+		t.Error("wireguard outcome reported OK despite ErrRestartUnsupported")
+	}
+	if !errors.Is(byKind["wireguard"].Err, adapter.ErrRestartUnsupported) {
+		t.Errorf("wireguard error = %v, want ErrRestartUnsupported", byKind["wireguard"].Err)
+	}
+	if !byKind["xray"].OK {
+		t.Errorf("xray outcome reported not-OK: %v", byKind["xray"].Err)
+	}
 }

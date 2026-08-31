@@ -133,6 +133,45 @@ func (r *Registry) Probe(ctx context.Context) []AdapterHealth {
 	return out
 }
 
+// AdapterRestartOutcome pairs a restart result with the adapter that
+// produced it. Named to match the wire message it becomes
+// (pb.AdapterRestartOutcome), so control.dispatchCommand can build one
+// straight from the other without an intermediate translation the two could
+// drift out of step with.
+type AdapterRestartOutcome struct {
+	Kind adapter.Kind
+	OK   bool
+	Err  error
+}
+
+// RestartAll bounces every adapter matching kinds, or every adapter this
+// node runs if kinds is empty.
+//
+// One adapter failing to restart does not stop the others from being asked,
+// same reasoning as Probe: an operator who asked to restart everything and
+// got back "xray restarted, wireguard has no restart concept" learned
+// something true about both. Stopping at the first failure would have told
+// them nothing about wireguard at all.
+func (r *Registry) RestartAll(ctx context.Context, kinds []string) []AdapterRestartOutcome {
+	if r == nil {
+		return nil
+	}
+	want := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		want[k] = true
+	}
+	out := make([]AdapterRestartOutcome, 0, len(r.adapters))
+	for _, ad := range r.adapters {
+		kind := ad.Descriptor().Kind
+		if len(want) > 0 && !want[string(kind)] {
+			continue
+		}
+		err := ad.Restart(ctx)
+		out = append(out, AdapterRestartOutcome{Kind: kind, OK: err == nil, Err: err})
+	}
+	return out
+}
+
 // UsageReporters returns the adapters that account for their own traffic.
 //
 // Not every adapter does -- Caps.SelfAccounting says whether it claims to, and

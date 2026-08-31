@@ -16,6 +16,7 @@ import (
 	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
+	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
 	"github.com/amyrm/antimage/internal/testutil/storetest"
 )
 
@@ -149,6 +150,88 @@ func TestHandleRestartNode_Success(t *testing.T) {
 	if count != 1 {
 		t.Errorf("audit count = %d, want 1", count)
 	}
+
+	// No agent registered on the hub for this node (deps.Hub is nil here,
+	// matching every other test in this file that does not opt in), so
+	// delivery must be reported honestly as false -- the previous
+	// implementation had no way to be wrong about this because it never
+	// checked; this is the regression guard for that gap re-opening.
+	if response["delivered"] != false {
+		t.Errorf("delivered = %v, want false (no agent connected)", response["delivered"])
+	}
+}
+
+// TestHandleRestartNode_DeliversAndReportsRealOutcomes proves the fix: a
+// registered agent receives an actual RestartAdapters command over the hub,
+// and the HTTP response carries the per-adapter result the agent sent back
+// -- not a canned "requested" string. This is the same shape as
+// TestSendCommand_DeliversAndWaitsForResult in control/hub_test.go, but
+// exercised through the real HTTP handler rather than the hub directly.
+func TestHandleRestartNode_DeliversAndReportsRealOutcomes(t *testing.T) {
+	deps, s, actor := setupTestDeps(t)
+	deps.Hub = control.NewHub()
+	nodeID := int64(105)
+	createTestNode(t, s, nodeID, "connected-node", "online")
+
+	_, cmds, release := deps.Hub.Register(nodeID)
+	defer release()
+
+	// Simulates the agent side: receive the command, reply as if xray
+	// restarted cleanly and wireguard reported ErrRestartUnsupported.
+	go func() {
+		cmd := <-cmds
+		deps.Hub.DeliverResult(&pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_RestartAdapters{
+				RestartAdapters: &pb.RestartAdaptersResult{
+					Outcomes: []*pb.AdapterRestartOutcome{
+						{Kind: "xray", Ok: true},
+						{Kind: "wireguard", Ok: false, Error: "restart not supported by this adapter"},
+					},
+				},
+			},
+		})
+	}()
+
+	req := httptest.NewRequest("POST", "/api/v1/nodes/105/restart", nil)
+	req = req.WithContext(withActor(req.Context(), actor))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("nodeID", "105")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	deps.handleRestartNode(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Delivered bool `json:"delivered"`
+		Outcomes  []struct {
+			Kind  string `json:"kind"`
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		} `json:"outcomes"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if !response.Delivered {
+		t.Fatal("delivered = false, want true (agent registered and replied)")
+	}
+	if len(response.Outcomes) != 2 {
+		t.Fatalf("got %d outcomes, want 2", len(response.Outcomes))
+	}
+	byKind := map[string]bool{}
+	for _, o := range response.Outcomes {
+		byKind[o.Kind] = o.OK
+	}
+	if !byKind["xray"] {
+		t.Error("xray outcome not reported OK")
+	}
+	if byKind["wireguard"] {
+		t.Error("wireguard outcome reported OK; it should have failed with 'not supported'")
+	}
 }
 
 func TestHandleRestartNode_NotFound(t *testing.T) {
@@ -270,7 +353,7 @@ func TestHandleSyncNode_DeliversToConnectedAgent(t *testing.T) {
 		t.Fatalf("seed desired_revision: %v", err)
 	}
 
-	bumps, release := deps.Hub.Register(nodeID)
+	bumps, _, release := deps.Hub.Register(nodeID)
 	defer release()
 
 	req := httptest.NewRequest("POST", "/api/v1/nodes/102/sync", nil)

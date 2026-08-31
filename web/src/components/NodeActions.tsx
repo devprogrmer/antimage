@@ -55,6 +55,22 @@ export function NodeActions({ node }: { node: NodeSummary }) {
   // connect. Both are legitimate outcomes; only the first means "now".
   const [syncDelivered, setSyncDelivered] = useState<boolean | null>(null);
 
+  // Set only by "restart": the real per-adapter outcomes an agent reported
+  // back over the command channel, or null if nothing was delivered (node
+  // offline). Restart bounces one service per protocol the node runs, so a
+  // single ok/fail for "the node" would hide the case that matters most --
+  // xray restarted, wireguard didn't -- from the operator who needs to know
+  // which protocol is still down.
+  interface RestartOutcome {
+    kind: string;
+    ok: boolean;
+    error: string;
+  }
+  const [restartResult, setRestartResult] = useState<{
+    delivered: boolean;
+    outcomes: RestartOutcome[];
+  } | null>(null);
+
   const run = useMutation({
     mutationFn: (action: Action) => {
       switch (action) {
@@ -72,6 +88,11 @@ export function NodeActions({ node }: { node: NodeSummary }) {
           });
         case "sync":
           return api.post<{ delivered: boolean }>(`/api/v1/nodes/${node.id}/sync`, {});
+        case "restart":
+          return api.post<{ delivered: boolean; outcomes: RestartOutcome[] | null }>(
+            `/api/v1/nodes/${node.id}/restart`,
+            {},
+          );
         default:
           return api.post(`/api/v1/nodes/${node.id}/${action}`, {});
       }
@@ -81,6 +102,10 @@ export function NodeActions({ node }: { node: NodeSummary }) {
       setReason("");
       if (action === "sync") {
         setSyncDelivered((data as { delivered: boolean } | undefined)?.delivered ?? false);
+      }
+      if (action === "restart") {
+        const d = data as { delivered: boolean; outcomes: RestartOutcome[] | null } | undefined;
+        setRestartResult({ delivered: d?.delivered ?? false, outcomes: d?.outcomes ?? [] });
       }
       queryClient.invalidateQueries({ queryKey: ["nodes"] });
       queryClient.invalidateQueries({ queryKey: ["node", node.id] });
@@ -143,11 +168,31 @@ export function NodeActions({ node }: { node: NodeSummary }) {
       <Button
         size="sm"
         variant="outline"
-        onClick={() => invoke("restart")}
+        onClick={() => {
+          setRestartResult(null);
+          invoke("restart");
+        }}
         disabled={run.isPending}
       >
         {t("node.restart")}
       </Button>
+      {restartResult && (
+        <div role="status" className="w-full basis-full text-xs">
+          {!restartResult.delivered ? (
+            <span className="text-muted-foreground">{t("node.restartOffline")}</span>
+          ) : restartResult.outcomes.length === 0 ? (
+            <span className="text-muted-foreground">{t("node.restartNoAdapters")}</span>
+          ) : (
+            <ul className="space-y-0.5">
+              {restartResult.outcomes.map((o) => (
+                <li key={o.kind} className={o.ok ? "text-success" : "text-destructive"}>
+                  {o.kind}: {o.ok ? t("node.restartOK") : o.error}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <MutationError error={run.error} />
 

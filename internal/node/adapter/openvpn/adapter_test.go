@@ -3,6 +3,7 @@ package openvpn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -647,5 +648,26 @@ func TestVerifyScriptUnderARealShell(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("COMMAND INJECTION: the client-supplied username was executed by the shell")
+	}
+}
+
+func TestRestart_UnconfiguredReturnsUnsupported(t *testing.T) {
+	a, _ := newTestAdapter(t)
+	err := a.Restart(context.Background())
+	if !errors.Is(err, adapter.ErrRestartUnsupported) {
+		t.Errorf("Restart on an unconfigured node = %v, want ErrRestartUnsupported", err)
+	}
+}
+
+func TestRestart_ConfiguredCallsRuntimeRestart(t *testing.T) {
+	a, rt := newTestAdapter(t)
+	converge(t, a, desiredWith(goodParams))
+	rt.calls = nil
+
+	if err := a.Restart(context.Background()); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if len(rt.calls) != 1 || rt.calls[0] != "restart" {
+		t.Errorf("calls = %v, want exactly [restart]", rt.calls)
 	}
 }

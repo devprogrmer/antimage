@@ -981,6 +981,14 @@ func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: ok, Detail: detail}, nil
 }
 
+// Restart bounces the running process on demand, independent of whether the
+// desired document changed. It reuses the same runtime call the reconciler
+// itself uses for a DisruptRestart step, so an on-demand restart and a
+// config-triggered one behave identically.
+func (a *Adapter) Restart(ctx context.Context) error {
+	return a.rt.Restart(ctx)
+}
+
 // compile-time proof that the contract is satisfied.
 var _ adapter.Adapter = (*Adapter)(nil)
 

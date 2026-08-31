@@ -266,6 +266,9 @@ func (f *flakyAdapter) Apply(context.Context, adapter.Step) (adapter.StepResult,
 func (f *flakyAdapter) Probe(context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: true}, nil
 }
+func (f *flakyAdapter) Restart(context.Context) error {
+	return adapter.ErrRestartUnsupported
+}
 
 type hotOnlyAdapter struct{ applied bool }
 
@@ -287,6 +290,9 @@ func (h *hotOnlyAdapter) Apply(context.Context, adapter.Step) (adapter.StepResul
 }
 func (h *hotOnlyAdapter) Probe(context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: true}, nil
+}
+func (h *hotOnlyAdapter) Restart(context.Context) error {
+	return adapter.ErrRestartUnsupported
 }
 
 // staggeredAdapter needs two Apply rounds to converge: Plan keeps reporting
@@ -313,4 +319,7 @@ func (s *staggeredAdapter) Apply(context.Context, adapter.Step) (adapter.StepRes
 }
 func (s *staggeredAdapter) Probe(context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: true}, nil
+}
+func (s *staggeredAdapter) Restart(context.Context) error {
+	return adapter.ErrRestartUnsupported
 }

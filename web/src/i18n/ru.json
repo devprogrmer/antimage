@@ -748,5 +748,8 @@
   "sub.delivery.uri": "Import URL",
   "subject.frozen": "Frozen",
   "node.syncDelivered": "Доставлено подключённому агенту",
-  "node.syncOffline": "Узел офлайн; синхронизируется при следующем подключении"
+  "node.syncOffline": "Узел офлайн; синхронизируется при следующем подключении",
+  "node.restartOffline": "Узел офлайн; ничего не было перезапущено",
+  "node.restartNoAdapters": "Агент не сообщил об адаптерах для перезапуска",
+  "node.restartOK": "перезапущено"
 }

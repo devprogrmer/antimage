@@ -3,6 +3,7 @@ package stub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -387,5 +388,14 @@ func TestProbeReportsHealthy(t *testing.T) {
 	}
 	if !h.OK {
 		t.Errorf("Probe reported unhealthy: %s", h.Detail)
+	}
+}
+
+// This adapter manages plain files directly, with no daemon behind them.
+// Restart must say so, not silently succeed at bouncing nothing.
+func TestRestartIsUnsupported(t *testing.T) {
+	a := New(t.TempDir())
+	if err := a.Restart(context.Background()); !errors.Is(err, adapter.ErrRestartUnsupported) {
+		t.Errorf("Restart = %v, want ErrRestartUnsupported", err)
 	}
 }

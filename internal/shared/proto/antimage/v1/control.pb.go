@@ -163,6 +163,7 @@ type AgentMessage struct {
 	//	*AgentMessage_Heartbeat
 	//	*AgentMessage_ApplyReport
 	//	*AgentMessage_UsageReport
+	//	*AgentMessage_CommandResult
 	Payload       isAgentMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -241,6 +242,15 @@ func (x *AgentMessage) GetUsageReport() *UsageReport {
 	return nil
 }
 
+func (x *AgentMessage) GetCommandResult() *AgentCommandResult {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentMessage_CommandResult); ok {
+			return x.CommandResult
+		}
+	}
+	return nil
+}
+
 type isAgentMessage_Payload interface {
 	isAgentMessage_Payload()
 }
@@ -261,6 +271,10 @@ type AgentMessage_UsageReport struct {
 	UsageReport *UsageReport `protobuf:"bytes,4,opt,name=usage_report,json=usageReport,proto3,oneof"`
 }
 
+type AgentMessage_CommandResult struct {
+	CommandResult *AgentCommandResult `protobuf:"bytes,5,opt,name=command_result,json=commandResult,proto3,oneof"`
+}
+
 func (*AgentMessage_Hello) isAgentMessage_Payload() {}
 
 func (*AgentMessage_Heartbeat) isAgentMessage_Payload() {}
@@ -269,6 +283,8 @@ func (*AgentMessage_ApplyReport) isAgentMessage_Payload() {}
 
 func (*AgentMessage_UsageReport) isAgentMessage_Payload() {}
 
+func (*AgentMessage_CommandResult) isAgentMessage_Payload() {}
+
 type PanelMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Payload:
@@ -276,6 +292,7 @@ type PanelMessage struct {
 	//	*PanelMessage_RevisionBump
 	//	*PanelMessage_FetchNow
 	//	*PanelMessage_UpgradeRequired
+	//	*PanelMessage_Command
 	Payload       isPanelMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -345,6 +362,15 @@ func (x *PanelMessage) GetUpgradeRequired() *UpgradeRequired {
 	return nil
 }
 
+func (x *PanelMessage) GetCommand() *AgentCommand {
+	if x != nil {
+		if x, ok := x.Payload.(*PanelMessage_Command); ok {
+			return x.Command
+		}
+	}
+	return nil
+}
+
 type isPanelMessage_Payload interface {
 	isPanelMessage_Payload()
 }
@@ -361,11 +387,339 @@ type PanelMessage_UpgradeRequired struct {
 	UpgradeRequired *UpgradeRequired `protobuf:"bytes,3,opt,name=upgrade_required,json=upgradeRequired,proto3,oneof"`
 }
 
+type PanelMessage_Command struct {
+	Command *AgentCommand `protobuf:"bytes,4,opt,name=command,proto3,oneof"`
+}
+
 func (*PanelMessage_RevisionBump) isPanelMessage_Payload() {}
 
 func (*PanelMessage_FetchNow) isPanelMessage_Payload() {}
 
 func (*PanelMessage_UpgradeRequired) isPanelMessage_Payload() {}
+
+func (*PanelMessage_Command) isPanelMessage_Payload() {}
+
+// AgentCommand is the panel asking the agent to do something ON DEMAND,
+// outside the desired-state reconciliation loop -- restarting a service the
+// operator clicked, or (later) pulling a fresh geo database, reporting an
+// installed core version precisely, or opening a log tail. It exists
+// separately from RevisionBump/FetchNow because those two both mean
+// "converge toward the desired document", and an on-demand action is not a
+// convergence request: a restart with no config change has nothing to
+// converge, and this command is what asks for it anyway.
+//
+// command_id correlates this to its AgentCommandResult. It is a string
+// rather than reusing the desired_revision or any DB primary key, because a
+// command is not a row anywhere -- the panel's Hub only needs to remember it
+// long enough to wake whichever HTTP request is waiting, and does not
+// persist it. A UUID generated per HTTP request satisfies that with no
+// coordination against any other id space.
+type AgentCommand struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	// Types that are valid to be assigned to Body:
+	//
+	//	*AgentCommand_RestartAdapters
+	Body          isAgentCommand_Body `protobuf_oneof:"body"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentCommand) Reset() {
+	*x = AgentCommand{}
+	mi := &file_antimage_v1_control_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentCommand) ProtoMessage() {}
+
+func (x *AgentCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_antimage_v1_control_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentCommand.ProtoReflect.Descriptor instead.
+func (*AgentCommand) Descriptor() ([]byte, []int) {
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AgentCommand) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *AgentCommand) GetBody() isAgentCommand_Body {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *AgentCommand) GetRestartAdapters() *RestartAdapters {
+	if x != nil {
+		if x, ok := x.Body.(*AgentCommand_RestartAdapters); ok {
+			return x.RestartAdapters
+		}
+	}
+	return nil
+}
+
+type isAgentCommand_Body interface {
+	isAgentCommand_Body()
+}
+
+type AgentCommand_RestartAdapters struct {
+	RestartAdapters *RestartAdapters `protobuf:"bytes,2,opt,name=restart_adapters,json=restartAdapters,proto3,oneof"`
+}
+
+func (*AgentCommand_RestartAdapters) isAgentCommand_Body() {}
+
+// RestartAdapters names which adapter kinds to restart. Empty means every
+// adapter this node currently runs -- explicit rather than a sentinel value,
+// so a caller who really does mean "just xray" is not one typo away from
+// restarting everything.
+type RestartAdapters struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kinds         []string               `protobuf:"bytes,1,rep,name=kinds,proto3" json:"kinds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartAdapters) Reset() {
+	*x = RestartAdapters{}
+	mi := &file_antimage_v1_control_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartAdapters) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartAdapters) ProtoMessage() {}
+
+func (x *RestartAdapters) ProtoReflect() protoreflect.Message {
+	mi := &file_antimage_v1_control_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartAdapters.ProtoReflect.Descriptor instead.
+func (*RestartAdapters) Descriptor() ([]byte, []int) {
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RestartAdapters) GetKinds() []string {
+	if x != nil {
+		return x.Kinds
+	}
+	return nil
+}
+
+type AgentCommandResult struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	// Types that are valid to be assigned to Body:
+	//
+	//	*AgentCommandResult_RestartAdapters
+	Body          isAgentCommandResult_Body `protobuf_oneof:"body"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentCommandResult) Reset() {
+	*x = AgentCommandResult{}
+	mi := &file_antimage_v1_control_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentCommandResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentCommandResult) ProtoMessage() {}
+
+func (x *AgentCommandResult) ProtoReflect() protoreflect.Message {
+	mi := &file_antimage_v1_control_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentCommandResult.ProtoReflect.Descriptor instead.
+func (*AgentCommandResult) Descriptor() ([]byte, []int) {
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AgentCommandResult) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *AgentCommandResult) GetBody() isAgentCommandResult_Body {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *AgentCommandResult) GetRestartAdapters() *RestartAdaptersResult {
+	if x != nil {
+		if x, ok := x.Body.(*AgentCommandResult_RestartAdapters); ok {
+			return x.RestartAdapters
+		}
+	}
+	return nil
+}
+
+type isAgentCommandResult_Body interface {
+	isAgentCommandResult_Body()
+}
+
+type AgentCommandResult_RestartAdapters struct {
+	RestartAdapters *RestartAdaptersResult `protobuf:"bytes,2,opt,name=restart_adapters,json=restartAdapters,proto3,oneof"`
+}
+
+func (*AgentCommandResult_RestartAdapters) isAgentCommandResult_Body() {}
+
+type RestartAdaptersResult struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Outcomes      []*AdapterRestartOutcome `protobuf:"bytes,1,rep,name=outcomes,proto3" json:"outcomes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartAdaptersResult) Reset() {
+	*x = RestartAdaptersResult{}
+	mi := &file_antimage_v1_control_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartAdaptersResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartAdaptersResult) ProtoMessage() {}
+
+func (x *RestartAdaptersResult) ProtoReflect() protoreflect.Message {
+	mi := &file_antimage_v1_control_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartAdaptersResult.ProtoReflect.Descriptor instead.
+func (*RestartAdaptersResult) Descriptor() ([]byte, []int) {
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RestartAdaptersResult) GetOutcomes() []*AdapterRestartOutcome {
+	if x != nil {
+		return x.Outcomes
+	}
+	return nil
+}
+
+// AdapterRestartOutcome is per adapter kind, because a node running xray and
+// wireguard together can have one restart and the other refuse -- wireguard
+// has no restartable daemon in the systemd sense, and reporting that
+// truthfully as unsupported is the whole point of doing this per-kind rather
+// than collapsing to one ok/error for the node.
+type AdapterRestartOutcome struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Ok    bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	// Empty when ok. "unsupported: <reason>" when the adapter kind has no
+	// restart concept, never silently ok.
+	Error         string `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdapterRestartOutcome) Reset() {
+	*x = AdapterRestartOutcome{}
+	mi := &file_antimage_v1_control_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdapterRestartOutcome) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdapterRestartOutcome) ProtoMessage() {}
+
+func (x *AdapterRestartOutcome) ProtoReflect() protoreflect.Message {
+	mi := &file_antimage_v1_control_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdapterRestartOutcome.ProtoReflect.Descriptor instead.
+func (*AdapterRestartOutcome) Descriptor() ([]byte, []int) {
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AdapterRestartOutcome) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *AdapterRestartOutcome) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *AdapterRestartOutcome) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
 
 type Hello struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -381,7 +735,7 @@ type Hello struct {
 
 func (x *Hello) Reset() {
 	*x = Hello{}
-	mi := &file_antimage_v1_control_proto_msgTypes[4]
+	mi := &file_antimage_v1_control_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +747,7 @@ func (x *Hello) String() string {
 func (*Hello) ProtoMessage() {}
 
 func (x *Hello) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[4]
+	mi := &file_antimage_v1_control_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +760,7 @@ func (x *Hello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hello.ProtoReflect.Descriptor instead.
 func (*Hello) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{4}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Hello) GetNodeId() int64 {
@@ -468,7 +822,7 @@ type AdapterDescriptor struct {
 
 func (x *AdapterDescriptor) Reset() {
 	*x = AdapterDescriptor{}
-	mi := &file_antimage_v1_control_proto_msgTypes[5]
+	mi := &file_antimage_v1_control_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -480,7 +834,7 @@ func (x *AdapterDescriptor) String() string {
 func (*AdapterDescriptor) ProtoMessage() {}
 
 func (x *AdapterDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[5]
+	mi := &file_antimage_v1_control_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -493,7 +847,7 @@ func (x *AdapterDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdapterDescriptor.ProtoReflect.Descriptor instead.
 func (*AdapterDescriptor) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{5}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AdapterDescriptor) GetKind() string {
@@ -557,7 +911,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_antimage_v1_control_proto_msgTypes[6]
+	mi := &file_antimage_v1_control_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -569,7 +923,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[6]
+	mi := &file_antimage_v1_control_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -582,7 +936,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{6}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Heartbeat) GetLoad1() float64 {
@@ -624,7 +978,7 @@ type AdapterHealth struct {
 
 func (x *AdapterHealth) Reset() {
 	*x = AdapterHealth{}
-	mi := &file_antimage_v1_control_proto_msgTypes[7]
+	mi := &file_antimage_v1_control_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -636,7 +990,7 @@ func (x *AdapterHealth) String() string {
 func (*AdapterHealth) ProtoMessage() {}
 
 func (x *AdapterHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[7]
+	mi := &file_antimage_v1_control_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -649,7 +1003,7 @@ func (x *AdapterHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdapterHealth.ProtoReflect.Descriptor instead.
 func (*AdapterHealth) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{7}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AdapterHealth) GetKind() string {
@@ -690,7 +1044,7 @@ type ApplyReport struct {
 
 func (x *ApplyReport) Reset() {
 	*x = ApplyReport{}
-	mi := &file_antimage_v1_control_proto_msgTypes[8]
+	mi := &file_antimage_v1_control_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -702,7 +1056,7 @@ func (x *ApplyReport) String() string {
 func (*ApplyReport) ProtoMessage() {}
 
 func (x *ApplyReport) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[8]
+	mi := &file_antimage_v1_control_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -715,7 +1069,7 @@ func (x *ApplyReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyReport.ProtoReflect.Descriptor instead.
 func (*ApplyReport) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{8}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ApplyReport) GetTargetRevision() int64 {
@@ -775,7 +1129,7 @@ type StepResult struct {
 
 func (x *StepResult) Reset() {
 	*x = StepResult{}
-	mi := &file_antimage_v1_control_proto_msgTypes[9]
+	mi := &file_antimage_v1_control_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -787,7 +1141,7 @@ func (x *StepResult) String() string {
 func (*StepResult) ProtoMessage() {}
 
 func (x *StepResult) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[9]
+	mi := &file_antimage_v1_control_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -800,7 +1154,7 @@ func (x *StepResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepResult.ProtoReflect.Descriptor instead.
 func (*StepResult) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{9}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StepResult) GetSeq() int32 {
@@ -854,7 +1208,7 @@ type RevisionBump struct {
 
 func (x *RevisionBump) Reset() {
 	*x = RevisionBump{}
-	mi := &file_antimage_v1_control_proto_msgTypes[10]
+	mi := &file_antimage_v1_control_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -866,7 +1220,7 @@ func (x *RevisionBump) String() string {
 func (*RevisionBump) ProtoMessage() {}
 
 func (x *RevisionBump) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[10]
+	mi := &file_antimage_v1_control_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -879,7 +1233,7 @@ func (x *RevisionBump) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevisionBump.ProtoReflect.Descriptor instead.
 func (*RevisionBump) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{10}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RevisionBump) GetRevision() int64 {
@@ -897,7 +1251,7 @@ type FetchNow struct {
 
 func (x *FetchNow) Reset() {
 	*x = FetchNow{}
-	mi := &file_antimage_v1_control_proto_msgTypes[11]
+	mi := &file_antimage_v1_control_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -909,7 +1263,7 @@ func (x *FetchNow) String() string {
 func (*FetchNow) ProtoMessage() {}
 
 func (x *FetchNow) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[11]
+	mi := &file_antimage_v1_control_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -922,7 +1276,7 @@ func (x *FetchNow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FetchNow.ProtoReflect.Descriptor instead.
 func (*FetchNow) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{11}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{16}
 }
 
 type UpgradeRequired struct {
@@ -935,7 +1289,7 @@ type UpgradeRequired struct {
 
 func (x *UpgradeRequired) Reset() {
 	*x = UpgradeRequired{}
-	mi := &file_antimage_v1_control_proto_msgTypes[12]
+	mi := &file_antimage_v1_control_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -947,7 +1301,7 @@ func (x *UpgradeRequired) String() string {
 func (*UpgradeRequired) ProtoMessage() {}
 
 func (x *UpgradeRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[12]
+	mi := &file_antimage_v1_control_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -960,7 +1314,7 @@ func (x *UpgradeRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpgradeRequired.ProtoReflect.Descriptor instead.
 func (*UpgradeRequired) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{12}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UpgradeRequired) GetPanelProtocolVersion() uint32 {
@@ -986,7 +1340,7 @@ type SnapshotRequest struct {
 
 func (x *SnapshotRequest) Reset() {
 	*x = SnapshotRequest{}
-	mi := &file_antimage_v1_control_proto_msgTypes[13]
+	mi := &file_antimage_v1_control_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -998,7 +1352,7 @@ func (x *SnapshotRequest) String() string {
 func (*SnapshotRequest) ProtoMessage() {}
 
 func (x *SnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[13]
+	mi := &file_antimage_v1_control_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1011,7 +1365,7 @@ func (x *SnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotRequest.ProtoReflect.Descriptor instead.
 func (*SnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{13}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SnapshotRequest) GetNodeId() int64 {
@@ -1034,7 +1388,7 @@ type SnapshotResponse struct {
 
 func (x *SnapshotResponse) Reset() {
 	*x = SnapshotResponse{}
-	mi := &file_antimage_v1_control_proto_msgTypes[14]
+	mi := &file_antimage_v1_control_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1046,7 +1400,7 @@ func (x *SnapshotResponse) String() string {
 func (*SnapshotResponse) ProtoMessage() {}
 
 func (x *SnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[14]
+	mi := &file_antimage_v1_control_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1059,7 +1413,7 @@ func (x *SnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotResponse.ProtoReflect.Descriptor instead.
 func (*SnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{14}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SnapshotResponse) GetRevision() int64 {
@@ -1097,7 +1451,7 @@ type UsageReport struct {
 
 func (x *UsageReport) Reset() {
 	*x = UsageReport{}
-	mi := &file_antimage_v1_control_proto_msgTypes[15]
+	mi := &file_antimage_v1_control_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1109,7 +1463,7 @@ func (x *UsageReport) String() string {
 func (*UsageReport) ProtoMessage() {}
 
 func (x *UsageReport) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[15]
+	mi := &file_antimage_v1_control_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1122,7 +1476,7 @@ func (x *UsageReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageReport.ProtoReflect.Descriptor instead.
 func (*UsageReport) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{15}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *UsageReport) GetNodeId() int64 {
@@ -1168,7 +1522,7 @@ type UsageSample struct {
 
 func (x *UsageSample) Reset() {
 	*x = UsageSample{}
-	mi := &file_antimage_v1_control_proto_msgTypes[16]
+	mi := &file_antimage_v1_control_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1180,7 +1534,7 @@ func (x *UsageSample) String() string {
 func (*UsageSample) ProtoMessage() {}
 
 func (x *UsageSample) ProtoReflect() protoreflect.Message {
-	mi := &file_antimage_v1_control_proto_msgTypes[16]
+	mi := &file_antimage_v1_control_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1193,7 +1547,7 @@ func (x *UsageSample) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageSample.ProtoReflect.Descriptor instead.
 func (*UsageSample) Descriptor() ([]byte, []int) {
-	return file_antimage_v1_control_proto_rawDescGZIP(), []int{16}
+	return file_antimage_v1_control_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *UsageSample) GetSubjectId() int64 {
@@ -1237,18 +1591,38 @@ const file_antimage_v1_control_proto_rawDesc = "" +
 	"\x0eEnrollResponse\x12\x19\n" +
 	"\bcert_der\x18\x01 \x01(\fR\acertDer\x12\x15\n" +
 	"\x06ca_der\x18\x02 \x01(\fR\x05caDer\x12\x17\n" +
-	"\anode_id\x18\x03 \x01(\x03R\x06nodeId\"\xfb\x01\n" +
+	"\anode_id\x18\x03 \x01(\x03R\x06nodeId\"\xc5\x02\n" +
 	"\fAgentMessage\x12*\n" +
 	"\x05hello\x18\x01 \x01(\v2\x12.antimage.v1.HelloH\x00R\x05hello\x126\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x16.antimage.v1.HeartbeatH\x00R\theartbeat\x12=\n" +
 	"\fapply_report\x18\x03 \x01(\v2\x18.antimage.v1.ApplyReportH\x00R\vapplyReport\x12=\n" +
-	"\fusage_report\x18\x04 \x01(\v2\x18.antimage.v1.UsageReportH\x00R\vusageReportB\t\n" +
-	"\apayload\"\xdc\x01\n" +
+	"\fusage_report\x18\x04 \x01(\v2\x18.antimage.v1.UsageReportH\x00R\vusageReport\x12H\n" +
+	"\x0ecommand_result\x18\x05 \x01(\v2\x1f.antimage.v1.AgentCommandResultH\x00R\rcommandResultB\t\n" +
+	"\apayload\"\x93\x02\n" +
 	"\fPanelMessage\x12@\n" +
 	"\rrevision_bump\x18\x01 \x01(\v2\x19.antimage.v1.RevisionBumpH\x00R\frevisionBump\x124\n" +
 	"\tfetch_now\x18\x02 \x01(\v2\x15.antimage.v1.FetchNowH\x00R\bfetchNow\x12I\n" +
-	"\x10upgrade_required\x18\x03 \x01(\v2\x1c.antimage.v1.UpgradeRequiredH\x00R\x0fupgradeRequiredB\t\n" +
-	"\apayload\"\xf6\x01\n" +
+	"\x10upgrade_required\x18\x03 \x01(\v2\x1c.antimage.v1.UpgradeRequiredH\x00R\x0fupgradeRequired\x125\n" +
+	"\acommand\x18\x04 \x01(\v2\x19.antimage.v1.AgentCommandH\x00R\acommandB\t\n" +
+	"\apayload\"\x80\x01\n" +
+	"\fAgentCommand\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12I\n" +
+	"\x10restart_adapters\x18\x02 \x01(\v2\x1c.antimage.v1.RestartAdaptersH\x00R\x0frestartAdaptersB\x06\n" +
+	"\x04body\"'\n" +
+	"\x0fRestartAdapters\x12\x14\n" +
+	"\x05kinds\x18\x01 \x03(\tR\x05kinds\"\x8c\x01\n" +
+	"\x12AgentCommandResult\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12O\n" +
+	"\x10restart_adapters\x18\x02 \x01(\v2\".antimage.v1.RestartAdaptersResultH\x00R\x0frestartAdaptersB\x06\n" +
+	"\x04body\"W\n" +
+	"\x15RestartAdaptersResult\x12>\n" +
+	"\boutcomes\x18\x01 \x03(\v2\".antimage.v1.AdapterRestartOutcomeR\boutcomes\"Q\n" +
+	"\x15AdapterRestartOutcome\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xf6\x01\n" +
 	"\x05Hello\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x03R\x06nodeId\x12#\n" +
 	"\ragent_version\x18\x02 \x01(\tR\fagentVersion\x12)\n" +
@@ -1337,49 +1711,59 @@ func file_antimage_v1_control_proto_rawDescGZIP() []byte {
 	return file_antimage_v1_control_proto_rawDescData
 }
 
-var file_antimage_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_antimage_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_antimage_v1_control_proto_goTypes = []any{
-	(*EnrollRequest)(nil),     // 0: antimage.v1.EnrollRequest
-	(*EnrollResponse)(nil),    // 1: antimage.v1.EnrollResponse
-	(*AgentMessage)(nil),      // 2: antimage.v1.AgentMessage
-	(*PanelMessage)(nil),      // 3: antimage.v1.PanelMessage
-	(*Hello)(nil),             // 4: antimage.v1.Hello
-	(*AdapterDescriptor)(nil), // 5: antimage.v1.AdapterDescriptor
-	(*Heartbeat)(nil),         // 6: antimage.v1.Heartbeat
-	(*AdapterHealth)(nil),     // 7: antimage.v1.AdapterHealth
-	(*ApplyReport)(nil),       // 8: antimage.v1.ApplyReport
-	(*StepResult)(nil),        // 9: antimage.v1.StepResult
-	(*RevisionBump)(nil),      // 10: antimage.v1.RevisionBump
-	(*FetchNow)(nil),          // 11: antimage.v1.FetchNow
-	(*UpgradeRequired)(nil),   // 12: antimage.v1.UpgradeRequired
-	(*SnapshotRequest)(nil),   // 13: antimage.v1.SnapshotRequest
-	(*SnapshotResponse)(nil),  // 14: antimage.v1.SnapshotResponse
-	(*UsageReport)(nil),       // 15: antimage.v1.UsageReport
-	(*UsageSample)(nil),       // 16: antimage.v1.UsageSample
+	(*EnrollRequest)(nil),         // 0: antimage.v1.EnrollRequest
+	(*EnrollResponse)(nil),        // 1: antimage.v1.EnrollResponse
+	(*AgentMessage)(nil),          // 2: antimage.v1.AgentMessage
+	(*PanelMessage)(nil),          // 3: antimage.v1.PanelMessage
+	(*AgentCommand)(nil),          // 4: antimage.v1.AgentCommand
+	(*RestartAdapters)(nil),       // 5: antimage.v1.RestartAdapters
+	(*AgentCommandResult)(nil),    // 6: antimage.v1.AgentCommandResult
+	(*RestartAdaptersResult)(nil), // 7: antimage.v1.RestartAdaptersResult
+	(*AdapterRestartOutcome)(nil), // 8: antimage.v1.AdapterRestartOutcome
+	(*Hello)(nil),                 // 9: antimage.v1.Hello
+	(*AdapterDescriptor)(nil),     // 10: antimage.v1.AdapterDescriptor
+	(*Heartbeat)(nil),             // 11: antimage.v1.Heartbeat
+	(*AdapterHealth)(nil),         // 12: antimage.v1.AdapterHealth
+	(*ApplyReport)(nil),           // 13: antimage.v1.ApplyReport
+	(*StepResult)(nil),            // 14: antimage.v1.StepResult
+	(*RevisionBump)(nil),          // 15: antimage.v1.RevisionBump
+	(*FetchNow)(nil),              // 16: antimage.v1.FetchNow
+	(*UpgradeRequired)(nil),       // 17: antimage.v1.UpgradeRequired
+	(*SnapshotRequest)(nil),       // 18: antimage.v1.SnapshotRequest
+	(*SnapshotResponse)(nil),      // 19: antimage.v1.SnapshotResponse
+	(*UsageReport)(nil),           // 20: antimage.v1.UsageReport
+	(*UsageSample)(nil),           // 21: antimage.v1.UsageSample
 }
 var file_antimage_v1_control_proto_depIdxs = []int32{
-	4,  // 0: antimage.v1.AgentMessage.hello:type_name -> antimage.v1.Hello
-	6,  // 1: antimage.v1.AgentMessage.heartbeat:type_name -> antimage.v1.Heartbeat
-	8,  // 2: antimage.v1.AgentMessage.apply_report:type_name -> antimage.v1.ApplyReport
-	15, // 3: antimage.v1.AgentMessage.usage_report:type_name -> antimage.v1.UsageReport
-	10, // 4: antimage.v1.PanelMessage.revision_bump:type_name -> antimage.v1.RevisionBump
-	11, // 5: antimage.v1.PanelMessage.fetch_now:type_name -> antimage.v1.FetchNow
-	12, // 6: antimage.v1.PanelMessage.upgrade_required:type_name -> antimage.v1.UpgradeRequired
-	5,  // 7: antimage.v1.Hello.adapters:type_name -> antimage.v1.AdapterDescriptor
-	7,  // 8: antimage.v1.Heartbeat.adapter_health:type_name -> antimage.v1.AdapterHealth
-	9,  // 9: antimage.v1.ApplyReport.steps:type_name -> antimage.v1.StepResult
-	16, // 10: antimage.v1.UsageReport.samples:type_name -> antimage.v1.UsageSample
-	0,  // 11: antimage.v1.Enrollment.Enroll:input_type -> antimage.v1.EnrollRequest
-	2,  // 12: antimage.v1.Control.Stream:input_type -> antimage.v1.AgentMessage
-	13, // 13: antimage.v1.Control.GetDesiredSnapshot:input_type -> antimage.v1.SnapshotRequest
-	1,  // 14: antimage.v1.Enrollment.Enroll:output_type -> antimage.v1.EnrollResponse
-	3,  // 15: antimage.v1.Control.Stream:output_type -> antimage.v1.PanelMessage
-	14, // 16: antimage.v1.Control.GetDesiredSnapshot:output_type -> antimage.v1.SnapshotResponse
-	14, // [14:17] is the sub-list for method output_type
-	11, // [11:14] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	9,  // 0: antimage.v1.AgentMessage.hello:type_name -> antimage.v1.Hello
+	11, // 1: antimage.v1.AgentMessage.heartbeat:type_name -> antimage.v1.Heartbeat
+	13, // 2: antimage.v1.AgentMessage.apply_report:type_name -> antimage.v1.ApplyReport
+	20, // 3: antimage.v1.AgentMessage.usage_report:type_name -> antimage.v1.UsageReport
+	6,  // 4: antimage.v1.AgentMessage.command_result:type_name -> antimage.v1.AgentCommandResult
+	15, // 5: antimage.v1.PanelMessage.revision_bump:type_name -> antimage.v1.RevisionBump
+	16, // 6: antimage.v1.PanelMessage.fetch_now:type_name -> antimage.v1.FetchNow
+	17, // 7: antimage.v1.PanelMessage.upgrade_required:type_name -> antimage.v1.UpgradeRequired
+	4,  // 8: antimage.v1.PanelMessage.command:type_name -> antimage.v1.AgentCommand
+	5,  // 9: antimage.v1.AgentCommand.restart_adapters:type_name -> antimage.v1.RestartAdapters
+	7,  // 10: antimage.v1.AgentCommandResult.restart_adapters:type_name -> antimage.v1.RestartAdaptersResult
+	8,  // 11: antimage.v1.RestartAdaptersResult.outcomes:type_name -> antimage.v1.AdapterRestartOutcome
+	10, // 12: antimage.v1.Hello.adapters:type_name -> antimage.v1.AdapterDescriptor
+	12, // 13: antimage.v1.Heartbeat.adapter_health:type_name -> antimage.v1.AdapterHealth
+	14, // 14: antimage.v1.ApplyReport.steps:type_name -> antimage.v1.StepResult
+	21, // 15: antimage.v1.UsageReport.samples:type_name -> antimage.v1.UsageSample
+	0,  // 16: antimage.v1.Enrollment.Enroll:input_type -> antimage.v1.EnrollRequest
+	2,  // 17: antimage.v1.Control.Stream:input_type -> antimage.v1.AgentMessage
+	18, // 18: antimage.v1.Control.GetDesiredSnapshot:input_type -> antimage.v1.SnapshotRequest
+	1,  // 19: antimage.v1.Enrollment.Enroll:output_type -> antimage.v1.EnrollResponse
+	3,  // 20: antimage.v1.Control.Stream:output_type -> antimage.v1.PanelMessage
+	19, // 21: antimage.v1.Control.GetDesiredSnapshot:output_type -> antimage.v1.SnapshotResponse
+	19, // [19:22] is the sub-list for method output_type
+	16, // [16:19] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_antimage_v1_control_proto_init() }
@@ -1392,11 +1776,19 @@ func file_antimage_v1_control_proto_init() {
 		(*AgentMessage_Heartbeat)(nil),
 		(*AgentMessage_ApplyReport)(nil),
 		(*AgentMessage_UsageReport)(nil),
+		(*AgentMessage_CommandResult)(nil),
 	}
 	file_antimage_v1_control_proto_msgTypes[3].OneofWrappers = []any{
 		(*PanelMessage_RevisionBump)(nil),
 		(*PanelMessage_FetchNow)(nil),
 		(*PanelMessage_UpgradeRequired)(nil),
+		(*PanelMessage_Command)(nil),
+	}
+	file_antimage_v1_control_proto_msgTypes[4].OneofWrappers = []any{
+		(*AgentCommand_RestartAdapters)(nil),
+	}
+	file_antimage_v1_control_proto_msgTypes[6].OneofWrappers = []any{
+		(*AgentCommandResult_RestartAdapters)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1404,7 +1796,7 @@ func file_antimage_v1_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_antimage_v1_control_proto_rawDesc), len(file_antimage_v1_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

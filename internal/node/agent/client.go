@@ -286,13 +286,27 @@ func (c *Client) runSession(
 					return errors.New("stream closed")
 				}
 			}
-			switch msg.Payload.(type) {
+			switch p := msg.Payload.(type) {
 			case *pb.PanelMessage_RevisionBump, *pb.PanelMessage_FetchNow:
 				if err := c.reconcileOnce(sessionCtx, client, stream); err != nil {
 					slog.ErrorContext(sessionCtx, "reconcile failed", "error", err)
 				}
 			case *pb.PanelMessage_UpgradeRequired:
 				return errors.New("panel requires an agent upgrade")
+			case *pb.PanelMessage_Command:
+				// Handled inline rather than in its own goroutine: a command
+				// this slow to answer (RestartAdapters bounding on a wedged
+				// systemctl, say) SHOULD stall the loop, because reconcile
+				// and heartbeat are the two things this agent has to keep
+				// doing regardless -- and both already tolerate a late tick,
+				// the same way a slow reconcile today delays the next
+				// heartbeat rather than running one concurrently with it.
+				result := c.handleCommand(sessionCtx, p.Command)
+				if err := stream.Send(&pb.AgentMessage{
+					Payload: &pb.AgentMessage_CommandResult{CommandResult: result},
+				}); err != nil {
+					return fmt.Errorf("send command result: %w", err)
+				}
 			}
 
 		case <-heartbeat:
@@ -307,6 +321,46 @@ func (c *Client) runSession(
 			}
 			reconcile = c.clk.After(jitter(ReconcileInterval))
 		}
+	}
+}
+
+// handleCommand executes an on-demand AgentCommand and always returns a
+// result carrying the same command_id -- never an error return, because the
+// caller (the stream loop) has nothing useful to do with a Go error here
+// beyond what it already does with a failed restart: report it back to the
+// panel. A malformed or unrecognised command body is reported the same way,
+// through the result, rather than by killing the stream over a message this
+// agent simply does not understand yet.
+func (c *Client) handleCommand(ctx context.Context, cmd *pb.AgentCommand) *pb.AgentCommandResult {
+	switch body := cmd.Body.(type) {
+	case *pb.AgentCommand_RestartAdapters:
+		outcomes := c.ads.RestartAll(ctx, body.RestartAdapters.Kinds)
+		wire := make([]*pb.AdapterRestartOutcome, 0, len(outcomes))
+		for _, o := range outcomes {
+			errText := ""
+			if o.Err != nil {
+				errText = o.Err.Error()
+			}
+			wire = append(wire, &pb.AdapterRestartOutcome{
+				Kind: string(o.Kind), Ok: o.OK, Error: errText,
+			})
+		}
+		return &pb.AgentCommandResult{
+			CommandId: cmd.CommandId,
+			Body: &pb.AgentCommandResult_RestartAdapters{
+				RestartAdapters: &pb.RestartAdaptersResult{Outcomes: wire},
+			},
+		}
+	default:
+		// Forward compatible: an agent build older than a newer command type
+		// tells the panel it does not understand rather than silently
+		// dropping the command the operator was waiting on. There is no
+		// dedicated "unknown command" wire shape -- an empty
+		// RestartAdaptersResult would lie about which command ran -- so this
+		// is deliberately the one place command_id round-trips with no body
+		// set at all, and the panel's Hub.SendCommand caller has to treat an
+		// empty Body as failure rather than as "nothing to report".
+		return &pb.AgentCommandResult{CommandId: cmd.CommandId}
 	}
 }
 

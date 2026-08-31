@@ -748,5 +748,8 @@
   "sub.delivery.uri": "Import URL",
   "subject.frozen": "Frozen",
   "node.syncDelivered": "Delivered to the connected agent",
-  "node.syncOffline": "Node is offline; will reconcile on its own next connection"
+  "node.syncOffline": "Node is offline; will reconcile on its own next connection",
+  "node.restartOffline": "Node is offline; nothing was restarted",
+  "node.restartNoAdapters": "The agent reported no adapters to restart",
+  "node.restartOK": "restarted"
 }

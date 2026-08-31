@@ -7,12 +7,31 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/amyrm/antimage/internal/panel/audit"
+	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/nodes"
 	"github.com/amyrm/antimage/internal/panel/rbac"
+	pb "github.com/amyrm/antimage/internal/shared/proto/antimage/v1"
 )
 
+// restartCommandTimeout bounds how long an HTTP request waits for a
+// connected agent's RestartAdapters result. Longer than a typical
+// systemctl restart (seconds) but short enough that an operator's browser
+// tab does not hang indefinitely on a node that received the command and
+// then wedged before replying.
+const restartCommandTimeout = 20 * time.Second
+
 // POST /api/v1/nodes/:id/restart
+//
+// This used to record an audit row and an event, then tell the caller
+// "restart request recorded, node will restart on next heartbeat" without
+// ever sending anything to the node -- there was no mechanism to. It now
+// goes through the same on-demand command channel Hub.SendCommand added for
+// exactly this: a real RestartAdapters command reaches a connected agent,
+// which calls Adapter.Restart on every adapter it runs and reports back
+// per-kind whether each one succeeded.
 func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -31,7 +50,6 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify node exists
 	var nodeName, status string
 	err = d.Store.Read().QueryRowContext(ctx,
 		`SELECT name, status FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName, &status)
@@ -44,42 +62,86 @@ func (d Deps) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Record restart request event
+	cmd := &pb.AgentCommand{
+		CommandId: uuid.NewString(),
+		Body: &pb.AgentCommand_RestartAdapters{
+			// Empty Kinds: every adapter this node runs. A future "restart
+			// just this protocol" control can populate it; nothing in the
+			// panel does yet.
+			RestartAdapters: &pb.RestartAdapters{},
+		},
+	}
+
+	var (
+		delivered bool
+		outcomes  []map[string]any
+		cmdErr    string
+	)
+	if d.Hub != nil {
+		result, err := d.Hub.SendCommand(ctx, nodeID, cmd, restartCommandTimeout)
+		switch {
+		case err == nil:
+			delivered = true
+			if restart, ok := result.Body.(*pb.AgentCommandResult_RestartAdapters); ok {
+				for _, o := range restart.RestartAdapters.Outcomes {
+					outcomes = append(outcomes, map[string]any{
+						"kind": o.Kind, "ok": o.Ok, "error": o.Error,
+					})
+				}
+			}
+		case errors.Is(err, control.ErrCommandNotDelivered):
+			// Not an error state: the node is offline, which the store
+			// already half-knows from its status column. Reported as
+			// delivered=false so the browser can say so honestly instead of
+			// claiming a restart that never reached anything.
+		case errors.Is(err, control.ErrCommandTimeout):
+			cmdErr = "the agent did not reply before the deadline"
+		default:
+			cmdErr = err.Error()
+		}
+	}
+
 	details := map[string]interface{}{
 		"action":      "restart",
 		"admin_id":    actor.AdminID,
 		"node_name":   nodeName,
 		"node_status": status,
+		"delivered":   delivered,
+		"outcomes":    outcomes,
 	}
-
 	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "restart_requested", "info", details, &actor.AdminID); err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to record event")
 		return
 	}
 
-	// Audit log
 	if err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
 			Action:     "node.restart",
 			TargetType: "node",
 			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
 			Result:     "ok",
-			After:      map[string]any{"node": nodeName, "status": status},
+			After:      map[string]any{"node": nodeName, "status": status, "delivered": delivered},
 		})
 	}); err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "audit failed")
 		return
 	}
 
-	response := map[string]interface{}{
+	message := "the node is offline; nothing was restarted"
+	if delivered {
+		message = "restart command delivered; see outcomes for per-adapter results"
+	}
+	if cmdErr != "" {
+		message = cmdErr
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"node_id":   nodeID,
 		"node_name": nodeName,
 		"action":    "restart",
-		"status":    "requested",
-		"message":   "restart request recorded, node will restart on next heartbeat",
-	}
-
-	WriteJSON(w, http.StatusOK, response)
+		"delivered": delivered,
+		"outcomes":  outcomes,
+		"message":   message,
+	})
 }
 
 // POST /api/v1/nodes/:id/sync

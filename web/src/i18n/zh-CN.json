@@ -748,5 +748,8 @@
   "sub.delivery.uri": "Import URL",
   "subject.frozen": "Frozen",
   "node.syncDelivered": "已传送到已连接的代理",
-  "node.syncOffline": "节点离线；将在下次连接时自行同步"
+  "node.syncOffline": "节点离线；将在下次连接时自行同步",
+  "node.restartOffline": "节点离线；未重启任何内容",
+  "node.restartNoAdapters": "代理未报告任何可重启的适配器",
+  "node.restartOK": "已重启"
 }
