@@ -2,6 +2,7 @@ package wireguard
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -227,6 +228,22 @@ func AllocatePeerIP(subnet string, subjectID int64) (string, error) {
 	}
 
 	return fmt.Sprintf("%s/32", ip.String()), nil
+}
+
+// GeneratePrivateKey creates a new WireGuard private key: 32 random bytes,
+// clamped exactly as `wg genkey` clamps them (clearing the low 3 bits of the
+// first byte and the high bit of the last, then setting bit 254), so the
+// result is a valid curve25519 scalar rather than merely 32 random bytes
+// that happen to decode.
+func GeneratePrivateKey() (string, error) {
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		return "", fmt.Errorf("generate private key: %w", err)
+	}
+	key[0] &= 248
+	key[31] &= 127
+	key[31] |= 64
+	return base64.StdEncoding.EncodeToString(key[:]), nil
 }
 
 // PublicKeyFromPrivate derives a WireGuard public key from a base64 private key.

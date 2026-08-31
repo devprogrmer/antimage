@@ -43,6 +43,13 @@ type Deps struct {
 	// but production wiring sets it so a fleet of operators opening the
 	// upgrade dialog does not multiply GitHub API calls.
 	CoreVersions *xrayCoreVersionCache
+	// WARPAPIBase overrides Cloudflare's client API base URL. Empty means
+	// the real warpAPIBase; tests point this at an httptest server so Proxy
+	// Hub's WARP registration never depends on reaching Cloudflare.
+	WARPAPIBase string
+	// NordVPNAPIBase overrides NordVPN's API base URL, the same reason and
+	// pattern as WARPAPIBase.
+	NordVPNAPIBase string
 }
 
 func (d Deps) now() time.Time {
@@ -275,6 +282,17 @@ func NewRouter(d Deps) http.Handler {
 			// addressable rows.
 			private.Get("/nodes/{nodeID}/dns", d.handleGetNodeDNS)
 			private.Put("/nodes/{nodeID}/dns", d.handleSetNodeDNS)
+
+			// Proxy Hub: third-party provider accounts (not node-scoped --
+			// see proxyhub.go) and per-provider registration/provisioning.
+			private.Get("/proxy-providers", d.handleListProxyProviderAccounts)
+			private.Delete("/proxy-providers/{accountID}", d.handleDeleteProxyProviderAccount)
+			private.Post("/proxy-providers/warp/register", d.handleRegisterWarpAccount)
+			private.Post("/proxy-providers/{accountID}/warp/outbound", d.handleProvisionWarpOutbound)
+			private.Get("/proxy-providers/nordvpn/countries", d.handleListNordVPNCountries)
+			private.Get("/proxy-providers/nordvpn/servers", d.handleListNordVPNServers)
+			private.Post("/proxy-providers/nordvpn/register", d.handleRegisterNordVPNAccount)
+			private.Post("/proxy-providers/{accountID}/nordvpn/outbound", d.handleProvisionNordVPNOutbound)
 
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)

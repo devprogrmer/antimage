@@ -19,6 +19,7 @@ import { Hosts } from "@/routes/Hosts";
 import { Settings } from "@/routes/Settings";
 import { Admins } from "@/routes/Admins";
 import { FleetManagement } from "@/routes/FleetManagement";
+import { ProxyHub } from "@/routes/ProxyHub";
 import { api } from "@/lib/api";
 import { can, useSession } from "@/lib/session";
 import type { Session } from "@/lib/session";
@@ -92,6 +93,14 @@ export default function App() {
           element={
             <RequirePermission session={session.data} permission="node:read">
               <FleetManagement />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="proxy-hub"
+          element={
+            <RequirePermission session={session.data} permission="outbound:read">
+              <ProxyHub />
             </RequirePermission>
           }
         />

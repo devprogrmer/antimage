@@ -15,6 +15,7 @@ import {
   Globe,
   Settings,
   Shield,
+  Waypoints,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -59,6 +60,7 @@ const NAV: NavItem[] = [
   // regardless. A tenant reaches their own account through Profile instead.
   { to: "/resellers", label: "nav.resellers", icon: Building2, permission: "reseller:read" },
   { to: "/hosts", label: "nav.hosts", icon: Globe, permission: "service:read" },
+  { to: "/proxy-hub", label: "nav.proxyHub", icon: Waypoints, permission: "outbound:read" },
   { to: "/observability", label: "observability.title", icon: Activity },
   { to: "/audit", label: "nav.audit", icon: ScrollText, permission: "audit:read" },
   { to: "/templates", label: "templates.title", icon: BookMarked },

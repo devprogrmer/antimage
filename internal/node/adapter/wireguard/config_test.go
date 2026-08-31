@@ -1,6 +1,7 @@
 package wireguard
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -147,6 +148,66 @@ func TestPublicKeyFromPrivate_Deterministic(t *testing.T) {
 	}
 	if first != second {
 		t.Errorf("PublicKeyFromPrivate() not deterministic: %q vs %q", first, second)
+	}
+}
+
+// TestGeneratePrivateKey_ProducesAValidCurve25519Scalar is the property that
+// actually matters: 32 random bytes decode fine as base64 regardless of
+// clamping, so the real proof is that PublicKeyFromPrivate -- which requires
+// exactly a curve25519 scalar -- accepts the result without error.
+func TestGeneratePrivateKey_ProducesAValidCurve25519Scalar(t *testing.T) {
+	priv, err := GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey() error = %v", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(priv)
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey() did not return valid base64: %v", err)
+	}
+	if len(raw) != 32 {
+		t.Fatalf("GeneratePrivateKey() decoded to %d bytes, want 32", len(raw))
+	}
+	if _, err := PublicKeyFromPrivate(priv); err != nil {
+		t.Errorf("PublicKeyFromPrivate(generated key) = %v, want a derivable public key", err)
+	}
+}
+
+// TestGeneratePrivateKey_ClampsPerWireGuardConvention checks the exact bits
+// `wg genkey` clamps, not just "it round-trips" -- an unclamped key can still
+// happen to decode and derive a public key, but would not match what a real
+// WireGuard peer generates.
+func TestGeneratePrivateKey_ClampsPerWireGuardConvention(t *testing.T) {
+	priv, err := GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey() error = %v", err)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(priv)
+	if raw[0]&0b0000_0111 != 0 {
+		t.Errorf("low 3 bits of first byte not cleared: %08b", raw[0])
+	}
+	if raw[31]&0b1000_0000 != 0 {
+		t.Errorf("high bit of last byte not cleared: %08b", raw[31])
+	}
+	if raw[31]&0b0100_0000 == 0 {
+		t.Errorf("bit 254 not set: %08b", raw[31])
+	}
+}
+
+// TestGeneratePrivateKey_NotDeterministic guards against a broken RNG path
+// silently producing the same "random" key every call, which would be a far
+// worse failure than a crash -- every WARP/NordVPN account provisioned from
+// it would share one private key.
+func TestGeneratePrivateKey_NotDeterministic(t *testing.T) {
+	first, err := GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey() error = %v", err)
+	}
+	second, err := GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey() error = %v", err)
+	}
+	if first == second {
+		t.Error("two calls to GeneratePrivateKey() returned the same key")
 	}
 }
 
