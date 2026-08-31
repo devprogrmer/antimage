@@ -133,6 +133,10 @@ func BuildDesiredSnapshot(
 	if err != nil {
 		return nil, err
 	}
+	dns, err := buildDNS(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
 
 	doc := Document{
 		Revision:  revision,
@@ -141,6 +145,7 @@ func BuildDesiredSnapshot(
 		Subjects:  subjects,
 		Outbounds: outbounds,
 		Routing:   routing,
+		DNS:       dns,
 	}
 	sortOutbounds(doc.Outbounds)
 	if doc.Routing != nil {

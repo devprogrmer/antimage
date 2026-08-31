@@ -22,12 +22,13 @@ import "encoding/json"
 // v1: Initial schema (SP1-SP2)
 // v2: Added enforcement policies to Subject (User Management Enhancements)
 // v3: Added Outbounds and Routing
+// v4: Added DNS
 //
 // The version a given document CARRIES is not this constant: see
 // effectiveSchemaVersion. A document declares the lowest version that fully
 // describes it, so a fleet using no v3 feature keeps emitting v2 and its
 // hashes do not move.
-const DocumentSchemaVersion = 3
+const DocumentSchemaVersion = 4
 
 // schemaVersionEnforcement is the version that introduced Subject enforcement
 // policies, and the floor for every document this panel emits. Nothing older
@@ -36,6 +37,9 @@ const schemaVersionEnforcement = 2
 
 // schemaVersionEgress is the version that introduced Outbounds and Routing.
 const schemaVersionEgress = 3
+
+// schemaVersionDNS is the version that introduced DNS.
+const schemaVersionDNS = 4
 
 type Credential struct {
 	Kind  string `json:"kind"`
@@ -117,6 +121,35 @@ type Routing struct {
 	DefaultOutboundTag string `json:"default_outbound_tag,omitempty"`
 }
 
+// DNSServer is one resolver the node may query. Domains scopes it to a
+// subset of lookups (split DNS) -- empty means it may answer any query.
+type DNSServer struct {
+	Address      string   `json:"address"`
+	Domains      []string `json:"domains,omitempty"`
+	SkipFallback bool     `json:"skip_fallback,omitempty"`
+}
+
+// FakeDNSPool is one address range the node hands out instead of resolving a
+// domain for real, deferring the real lookup until the connection's
+// destination is actually dialed. An IPv4 and an IPv6 pool are two separate
+// entries because Xray keys pools by address family.
+type FakeDNSPool struct {
+	IPPool   string `json:"ip_pool"`
+	PoolSize int    `json:"pool_size"`
+}
+
+// DNSConfig is the node's DNS resolution behavior: which servers to query,
+// static overrides that skip resolution entirely, and fake-IP pools that
+// defer resolution until a connection's real destination is known.
+type DNSConfig struct {
+	Servers []DNSServer `json:"servers,omitempty"`
+	// Hosts maps a domain to the IP address(es) it always resolves to.
+	Hosts         map[string][]string `json:"hosts,omitempty"`
+	FakeDNS       []FakeDNSPool       `json:"fakedns,omitempty"`
+	QueryStrategy string              `json:"query_strategy,omitempty"`
+	DisableCache  bool                `json:"disable_cache,omitempty"`
+}
+
 // Document is what an agent converges against.
 //
 // Fields present since v1 carry no omitempty: absent means an explicit null,
@@ -135,6 +168,9 @@ type Document struct {
 	// Egress (schema v3+).
 	Outbounds []Outbound `json:"outbounds,omitempty"`
 	Routing   *Routing   `json:"routing,omitempty"`
+
+	// DNS (schema v4+).
+	DNS *DNSConfig `json:"dns,omitempty"`
 }
 
 // effectiveSchemaVersion reports the lowest version that fully describes doc.
@@ -150,6 +186,9 @@ type Document struct {
 // no egress configuration, and correctly refuses the document that first gives
 // it some.
 func effectiveSchemaVersion(doc Document) int {
+	if doc.DNS != nil {
+		return schemaVersionDNS
+	}
 	if len(doc.Outbounds) > 0 || doc.Routing != nil {
 		return schemaVersionEgress
 	}

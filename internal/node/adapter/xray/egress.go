@@ -3,6 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
@@ -226,7 +227,100 @@ func renderRule(r adapter.RoutingRule, known map[string]bool, serviceIDs []int64
 	return rule, nil
 }
 
-// GenerateEgressConfig renders outbounds and routing as one Xray document.
+// renderDNS turns the document's DNS config into Xray's dns object.
+//
+// A server with no Domains and no SkipFallback renders as a bare address
+// string rather than an object -- the plain form Xray's own examples use,
+// and indistinguishable in effect from the object form with both fields
+// empty, so there is no reason to make every config carry the more verbose
+// shape just because the struct always could.
+func renderDNS(d *adapter.DNSConfig) (map[string]any, error) {
+	if d == nil {
+		return nil, nil
+	}
+
+	out := map[string]any{}
+
+	if len(d.Servers) > 0 {
+		servers := make([]any, 0, len(d.Servers))
+		for i, s := range d.Servers {
+			if strings.TrimSpace(s.Address) == "" {
+				return nil, fmt.Errorf("dns server %d has no address", i)
+			}
+			if len(s.Domains) == 0 && !s.SkipFallback {
+				servers = append(servers, s.Address)
+				continue
+			}
+			obj := map[string]any{"address": s.Address}
+			if len(s.Domains) > 0 {
+				obj["domains"] = toAny(s.Domains)
+			}
+			if s.SkipFallback {
+				obj["skipFallback"] = true
+			}
+			servers = append(servers, obj)
+		}
+		out["servers"] = servers
+	}
+
+	if len(d.Hosts) > 0 {
+		hosts := map[string]any{}
+		// Sorted so the rendered document is byte-identical across builds --
+		// Go map iteration order is random, and this file's checksum is what
+		// planEgress diffs against to decide whether anything changed.
+		domains := make([]string, 0, len(d.Hosts))
+		for domain := range d.Hosts {
+			domains = append(domains, domain)
+		}
+		sort.Strings(domains)
+		for _, domain := range domains {
+			ips := d.Hosts[domain]
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("dns host %q has no addresses", domain)
+			}
+			if len(ips) == 1 {
+				hosts[domain] = ips[0]
+			} else {
+				hosts[domain] = toAny(ips)
+			}
+		}
+		out["hosts"] = hosts
+	}
+
+	if len(d.FakeDNS) > 0 {
+		pools := make([]any, 0, len(d.FakeDNS))
+		for i, p := range d.FakeDNS {
+			if _, _, err := net.ParseCIDR(p.IPPool); err != nil {
+				return nil, fmt.Errorf("fakedns pool %d: %q is not a valid CIDR: %w", i, p.IPPool, err)
+			}
+			if p.PoolSize <= 0 {
+				return nil, fmt.Errorf("fakedns pool %d (%s): pool_size must be positive", i, p.IPPool)
+			}
+			pools = append(pools, map[string]any{"ipPool": p.IPPool, "poolSize": p.PoolSize})
+		}
+		out["fakedns"] = pools
+	}
+
+	switch d.QueryStrategy {
+	case "", "UseIP", "UseIPv4", "UseIPv6":
+	default:
+		return nil, fmt.Errorf("dns query_strategy %q is not one of UseIP, UseIPv4, UseIPv6", d.QueryStrategy)
+	}
+	if d.QueryStrategy != "" {
+		out["queryStrategy"] = d.QueryStrategy
+	}
+	if d.DisableCache {
+		out["disableCache"] = true
+	}
+
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// GenerateEgressConfig renders outbounds, routing, and DNS as one Xray
+// document.
 //
 // Returns nil when there is nothing to write, which the caller treats as
 // "remove the file" rather than "write an empty document": an empty routing
@@ -234,8 +328,9 @@ func renderRule(r adapter.RoutingRule, known map[string]bool, serviceIDs []int64
 // reason about than no file.
 func GenerateEgressConfig(
 	outbounds []adapter.Outbound, routing *adapter.Routing, serviceIDs []int64,
+	dns *adapter.DNSConfig,
 ) ([]byte, error) {
-	if len(outbounds) == 0 && routing == nil {
+	if len(outbounds) == 0 && routing == nil && dns == nil {
 		return nil, nil
 	}
 
@@ -317,6 +412,14 @@ func GenerateEgressConfig(
 	}
 
 	doc["routing"] = map[string]any{"rules": rules}
+
+	dnsObj, err := renderDNS(dns)
+	if err != nil {
+		return nil, err
+	}
+	if dnsObj != nil {
+		doc["dns"] = dnsObj
+	}
 
 	// MarshalIndent for an operator reading this during an incident;
 	// encoding/json sorts map keys, which is what keeps it deterministic.

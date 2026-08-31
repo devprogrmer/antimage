@@ -169,6 +169,10 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			// whatever it matched.
 			OutboundKinds:       OutboundKinds,
 			BuiltinOutboundTags: []string{tagDirect},
+			// Xray's dns object -- servers, static hosts, fakedns pools -- is
+			// this adapter's own concept; nothing else in this codebase drives
+			// a proxy with DNS resolution distinct from the OS's own.
+			SupportsDNS: true,
 			// Declared from the runtime's actual capability, not hardcoded.
 			// The panel records this at Hello so the UI can tell an operator
 			// BEFORE they click whether adding a user drops sessions.
@@ -598,13 +602,13 @@ func (a *Adapter) Plan(
 	return plan, nil
 }
 
-// planEgress diffs the node's outbound and routing document.
+// planEgress diffs the node's outbound, routing, and DNS document.
 //
 // Every outcome is restart-class. Xray reads its confdir once at startup and
-// exposes no runtime API for outbounds or routing, so a change here is only
-// live after the process restarts. Reporting anything cheaper would tell the
-// panel a routing change had taken effect while traffic still followed the old
-// table.
+// exposes no runtime API for outbounds, routing, or DNS, so a change here is
+// only live after the process restarts. Reporting anything cheaper would tell
+// the panel a routing change had taken effect while traffic still followed
+// the old table.
 func (a *Adapter) planEgress(
 	desired adapter.Desired, observed adapter.Observed, seq int,
 ) (*adapter.Step, error) {
@@ -619,7 +623,7 @@ func (a *Adapter) planEgress(
 		}
 	}
 
-	rendered, err := GenerateEgressConfig(desired.Outbounds, desired.Routing, serviceIDs)
+	rendered, err := GenerateEgressConfig(desired.Outbounds, desired.Routing, serviceIDs, desired.DNS)
 	if err != nil {
 		return nil, fmt.Errorf("generate egress config: %w", err)
 	}

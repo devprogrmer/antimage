@@ -260,6 +260,13 @@ func NewRouter(d Deps) http.Handler {
 			// exactly one per node and setting it twice is the same as setting
 			// it once.
 			private.Put("/nodes/{nodeID}/routing/default", d.handleSetDefaultOutbound)
+
+			// DNS. Whole-object like routing/default: exactly one config per
+			// node, read and replaced together rather than as independently
+			// addressable rows.
+			private.Get("/nodes/{nodeID}/dns", d.handleGetNodeDNS)
+			private.Put("/nodes/{nodeID}/dns", d.handleSetNodeDNS)
+
 			private.Put("/services/{serviceID}", d.handleUpdateService)
 			private.Delete("/services/{serviceID}", d.handleDeleteService)
 
