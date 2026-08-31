@@ -19,6 +19,7 @@ interface EgressCapabilities {
   adapter_kind?: string;
   outbound_kinds: string[];
   builtin_tags: string[];
+  supports_balancer: boolean;
   reason?: string;
 }
 
@@ -43,8 +44,38 @@ interface RoutingRule {
   inbound_tags: string[] | null;
   subject_ids: number[] | null;
   network: string;
+  // Exactly one of the two is ever non-empty: outbound_tag selects a fixed
+  // outbound, balancer_tag selects a named pool the adapter picks among.
   outbound_tag: string;
+  balancer_tag: string;
   enabled: boolean;
+}
+
+interface Balancer {
+  id: number;
+  node_id: number;
+  tag: string;
+  selector: string[];
+  strategy: string;
+  enabled: boolean;
+}
+
+// Every target picker's option value is prefixed with which kind of thing
+// it names, since an outbound tag and a balancer tag share one namespace of
+// strings a rule can select between -- targetToRequest reverses this on
+// submit.
+const TARGET_PREFIX_OUTBOUND = "outbound:";
+const TARGET_PREFIX_BALANCER = "balancer:";
+
+function targetToRequest(raw: string): { outbound_tag: string; balancer_tag: string } {
+  if (raw.startsWith(TARGET_PREFIX_BALANCER)) {
+    return { outbound_tag: "", balancer_tag: raw.slice(TARGET_PREFIX_BALANCER.length) };
+  }
+  return { outbound_tag: raw.slice(TARGET_PREFIX_OUTBOUND.length), balancer_tag: "" };
+}
+
+function targetOf(r: { outbound_tag: string; balancer_tag: string }): string {
+  return r.balancer_tag ? TARGET_PREFIX_BALANCER + r.balancer_tag : TARGET_PREFIX_OUTBOUND + r.outbound_tag;
 }
 
 /** splitList turns a comma-separated field into the array the API expects,
@@ -89,6 +120,14 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
     queryKey: ["egress", nodeId, "routing"],
     queryFn: () => api.get<{ rules: RoutingRule[] }>(`/api/v1/nodes/${nodeId}/routing`),
     enabled: caps.data?.supported === true,
+  });
+  // Balancers are a distinct capability from routing: a node can route
+  // without being able to balance among outbounds, so this checks
+  // supports_balancer specifically rather than reusing caps.data.supported.
+  const balancers = useQuery({
+    queryKey: ["egress", nodeId, "balancers"],
+    queryFn: () => api.get<{ balancers: Balancer[] }>(`/api/v1/nodes/${nodeId}/balancers`),
+    enabled: caps.data?.supported === true && caps.data?.supports_balancer === true,
   });
 
   const invalidate = () => {
@@ -162,6 +201,56 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
   // Which outbound is being removed. Named in the dialog, because a rule that
   // still selects it is the failure this asks about.
   const [pendingOutbound, setPendingOutbound] = useState<Outbound | null>(null);
+
+  const [balancerTag, setBalancerTag] = useState("");
+  const [balancerSelector, setBalancerSelector] = useState("");
+  const [balancerStrategy, setBalancerStrategy] = useState("random");
+
+  const createBalancer = useMutation({
+    mutationFn: () =>
+      api.post(`/api/v1/nodes/${nodeId}/balancers`, {
+        tag: balancerTag,
+        selector: splitList(balancerSelector),
+        strategy: balancerStrategy,
+      }),
+    onSuccess: () => {
+      setBalancerTag("");
+      setBalancerSelector("");
+      setBalancerStrategy("random");
+      invalidate();
+    },
+  });
+
+  const deleteBalancer = useMutation({
+    mutationFn: (id: number) => api.del(`/api/v1/nodes/${nodeId}/balancers/${id}`),
+    onSuccess: invalidate,
+  });
+
+  const [editingBalancer, setEditingBalancer] = useState<Balancer | null>(null);
+  const [editBalancerTag, setEditBalancerTag] = useState("");
+  const [editBalancerSelector, setEditBalancerSelector] = useState("");
+  const [editBalancerStrategy, setEditBalancerStrategy] = useState("random");
+
+  function startEditBalancer(b: Balancer) {
+    setEditingBalancer(b);
+    setEditBalancerTag(b.tag);
+    setEditBalancerSelector(b.selector.join(", "));
+    setEditBalancerStrategy(b.strategy);
+  }
+
+  const updateBalancer = useMutation({
+    mutationFn: () =>
+      api.put(`/api/v1/nodes/${nodeId}/balancers/${editingBalancer!.id}`, {
+        tag: editBalancerTag,
+        selector: splitList(editBalancerSelector),
+        strategy: editBalancerStrategy,
+      }),
+    onSuccess: () => {
+      setEditingBalancer(null);
+      invalidate();
+    },
+  });
+
   const [ruleTarget, setRuleTarget] = useState("");
   const [ruleDomains, setRuleDomains] = useState("");
   const [ruleCIDRs, setRuleCIDRs] = useState("");
@@ -175,12 +264,13 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
         domains: splitList(ruleDomains),
         ip_cidrs: splitList(ruleCIDRs),
         ports: splitList(rulePorts),
-        outbound_tag: ruleTarget,
+        ...targetToRequest(ruleTarget),
       }),
     onSuccess: () => {
       setRuleDomains("");
       setRuleCIDRs("");
       setRulePorts("");
+      setRuleTarget("");
       invalidate();
     },
   });
@@ -202,7 +292,7 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
 
   function startEditRule(r: RoutingRule) {
     setEditingRule(r);
-    setEditRuleTarget(r.outbound_tag);
+    setEditRuleTarget(targetOf(r));
     setEditRuleDomains((r.domains ?? []).join(", "));
     setEditRuleCIDRs((r.ip_cidrs ?? []).join(", "));
     setEditRulePorts((r.ports ?? []).join(", "));
@@ -216,7 +306,7 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
         domains: splitList(editRuleDomains),
         ip_cidrs: splitList(editRuleCIDRs),
         ports: splitList(editRulePorts),
-        outbound_tag: editRuleTarget,
+        ...targetToRequest(editRuleTarget),
       }),
     onSuccess: () => {
       setEditingRule(null);
@@ -243,13 +333,43 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
     );
   }
 
-  // Every tag a rule may legally name: what the operator configured, plus what
-  // the adapter supplies on its own. Mirrors the server's own resolution, so
-  // the picker cannot offer a target the API would then refuse.
-  const selectableTags = [
+  // Every outbound tag a rule may legally name: what the operator
+  // configured, plus what the adapter supplies on its own. Mirrors the
+  // server's own resolution, so the picker cannot offer a target the API
+  // would then refuse.
+  const selectableOutboundTags = [
     ...(caps.data.builtin_tags ?? []),
     ...(outbounds.data?.outbounds ?? []).filter((o) => o.enabled).map((o) => o.tag),
   ];
+  const selectableBalancerTags = (balancers.data?.balancers ?? [])
+    .filter((b) => b.enabled)
+    .map((b) => b.tag);
+
+  // The rule target picker's option list: outbounds first (the common
+  // case), balancers grouped separately and only when this node can even
+  // apply one -- rendering an empty optgroup would be worse than omitting
+  // it, not better.
+  const targetOptions = (
+    <>
+      <option value="">{t("egress.chooseTarget")}</option>
+      <optgroup label={t("egress.outbounds")}>
+        {selectableOutboundTags.map((tagName) => (
+          <option key={TARGET_PREFIX_OUTBOUND + tagName} value={TARGET_PREFIX_OUTBOUND + tagName}>
+            {tagName}
+          </option>
+        ))}
+      </optgroup>
+      {caps.data.supports_balancer && selectableBalancerTags.length > 0 && (
+        <optgroup label={t("balancer.title")}>
+          {selectableBalancerTags.map((tagName) => (
+            <option key={TARGET_PREFIX_BALANCER + tagName} value={TARGET_PREFIX_BALANCER + tagName}>
+              {tagName}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
 
   return (
     <section className="space-y-4">
@@ -452,7 +572,9 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
                       ...(r.ports ?? []),
                     ].join(", ")}
                   </td>
-                  <td className="pe-3">{r.outbound_tag}</td>
+                  <td className="pe-3">
+                    {r.balancer_tag ? `${t("balancer.title")}: ${r.balancer_tag}` : r.outbound_tag}
+                  </td>
                   <td className="space-x-2 rtl:space-x-reverse">
                     <button
                       type="button"
@@ -520,12 +642,7 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
               onChange={(e) => setRuleTarget(e.target.value)}
               className="border border-input bg-card px-2 py-1 font-mono text-xs"
             >
-              <option value="">{t("egress.chooseTarget")}</option>
-              {selectableTags.map((tagName) => (
-                <option key={tagName} value={tagName}>
-                  {tagName}
-                </option>
-              ))}
+              {targetOptions}
             </select>
           </label>
           <button
@@ -588,11 +705,7 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
                   onChange={(e) => setEditRuleTarget(e.target.value)}
                   className="border border-input bg-card px-2 py-1 font-mono text-xs"
                 >
-                  {selectableTags.map((tagName) => (
-                    <option key={tagName} value={tagName}>
-                      {tagName}
-                    </option>
-                  ))}
+                  {targetOptions}
                 </select>
               </label>
               <button
@@ -626,7 +739,7 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
           className="border border-input bg-card px-2 py-1 font-mono text-xs"
         >
           <option value="">{t("egress.defaultNone")}</option>
-          {selectableTags.map((tagName) => (
+          {selectableOutboundTags.map((tagName) => (
             <option key={tagName} value={tagName}>
               {tagName}
             </option>
@@ -634,6 +747,154 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
         </select>
         <MutationError error={setDefault.error} />
       </div>
+
+      {/* Balancers -- only on a node whose adapter has a balancer concept
+          at all. A rule selects one via the target picker above, the same
+          way it selects an outbound. */}
+      {caps.data.supports_balancer && (
+        <div>
+          <h4 className="mb-1 text-xs text-muted-foreground">{t("balancer.title")}</h4>
+          <p className="mb-1 text-[11px] text-muted-foreground">{t("balancer.hint")}</p>
+          {(balancers.data?.balancers ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("balancer.none")}</p>
+          ) : (
+            <table className="w-full border-collapse font-mono text-xs">
+              <thead>
+                <tr className="border-b border-border text-start text-muted-foreground">
+                  <th className="py-1 pe-3 text-start">{t("egress.tag")}</th>
+                  <th className="pe-3 text-start">{t("balancer.selector")}</th>
+                  <th className="pe-3 text-start">{t("balancer.strategy")}</th>
+                  <th className="pe-3 text-start">{t("subject.status")}</th>
+                  <th className="text-start">{t("actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(balancers.data?.balancers ?? []).map((b) => (
+                  <tr key={b.id} className="border-b border-border">
+                    <td className="py-1 pe-3">{b.tag}</td>
+                    <td className="pe-3 text-muted-foreground">{b.selector.join(", ")}</td>
+                    <td className="pe-3 text-muted-foreground">{b.strategy}</td>
+                    <td className="pe-3 text-muted-foreground">
+                      {b.enabled ? t("subject.enabled") : t("subject.disabled")}
+                    </td>
+                    <td className="space-x-2 rtl:space-x-reverse">
+                      <button
+                        type="button"
+                        onClick={() => startEditBalancer(b)}
+                        className="text-primary hover:underline"
+                      >
+                        {t("egress.edit")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteBalancer.mutate(b.id)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        {t("delete")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <MutationError error={deleteBalancer.error} />
+
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">{t("egress.tag")}</span>
+              <input
+                value={balancerTag}
+                onChange={(e) => setBalancerTag(e.target.value)}
+                className="w-32 border border-input bg-card px-2 py-1 font-mono text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">{t("balancer.selector")}</span>
+              <input
+                value={balancerSelector}
+                onChange={(e) => setBalancerSelector(e.target.value)}
+                placeholder={t("egress.commaSeparated")}
+                className="w-48 border border-input bg-card px-2 py-1 font-mono text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">{t("balancer.strategy")}</span>
+              <select
+                value={balancerStrategy}
+                onChange={(e) => setBalancerStrategy(e.target.value)}
+                className="border border-input bg-card px-2 py-1 font-mono text-xs"
+              >
+                <option value="random">random</option>
+                <option value="least_ping">least_ping</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={balancerTag.trim() === "" || balancerSelector.trim() === "" || createBalancer.isPending}
+              onClick={() => createBalancer.mutate()}
+              className="border border-input px-3 py-1 text-xs hover:bg-accent disabled:opacity-40"
+            >
+              {createBalancer.isPending ? t("egress.saving") : t("create")}
+            </button>
+          </div>
+          <MutationError error={createBalancer.error} />
+
+          {editingBalancer && (
+            <div className="mt-3 border border-primary/40 bg-primary/5 p-3">
+              <p className="mb-2 text-[11px] text-muted-foreground">
+                {t("egress.editing")}: <span className="font-mono">{editingBalancer.tag}</span>
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">{t("egress.tag")}</span>
+                  <input
+                    value={editBalancerTag}
+                    onChange={(e) => setEditBalancerTag(e.target.value)}
+                    className="w-32 border border-input bg-card px-2 py-1 font-mono text-xs"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">{t("balancer.selector")}</span>
+                  <input
+                    value={editBalancerSelector}
+                    onChange={(e) => setEditBalancerSelector(e.target.value)}
+                    placeholder={t("egress.commaSeparated")}
+                    className="w-48 border border-input bg-card px-2 py-1 font-mono text-xs"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-muted-foreground">{t("balancer.strategy")}</span>
+                  <select
+                    value={editBalancerStrategy}
+                    onChange={(e) => setEditBalancerStrategy(e.target.value)}
+                    className="border border-input bg-card px-2 py-1 font-mono text-xs"
+                  >
+                    <option value="random">random</option>
+                    <option value="least_ping">least_ping</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={editBalancerTag.trim() === "" || updateBalancer.isPending}
+                  onClick={() => updateBalancer.mutate()}
+                  className="border border-input px-3 py-1 text-xs hover:bg-accent disabled:opacity-40"
+                >
+                  {updateBalancer.isPending ? t("egress.saving") : t("subject.update")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingBalancer(null)}
+                  className="border border-input px-3 py-1 text-xs hover:bg-accent"
+                >
+                  {t("cancel")}
+                </button>
+              </div>
+              <MutationError error={updateBalancer.error} />
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

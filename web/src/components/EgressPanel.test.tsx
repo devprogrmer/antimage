@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,6 +52,7 @@ const caps = {
   adapter_kind: "xray",
   outbound_kinds: ["freedom", "socks"],
   builtin_tags: ["direct", "block"],
+  supports_balancer: true,
 };
 
 const outbound = {
@@ -76,6 +77,7 @@ const rule = {
   subject_ids: null,
   network: "tcp",
   outbound_tag: "upstream-a",
+  balancer_tag: "",
   enabled: true,
 };
 
@@ -83,6 +85,7 @@ function seed() {
   routes["/api/v1/nodes/1/egress/capabilities"] = { body: caps };
   routes["/api/v1/nodes/1/outbounds"] = { body: { outbounds: [outbound] } };
   routes["/api/v1/nodes/1/routing"] = { body: { rules: [rule] } };
+  routes["/api/v1/nodes/1/balancers"] = { body: { balancers: [] } };
 }
 
 beforeEach(() => {
@@ -140,5 +143,102 @@ describe("EgressPanel editing", () => {
       expect(sent).toBeTruthy();
       expect((sent!.body as { priority: number }).priority).toBe(20);
     });
+  });
+});
+
+describe("EgressPanel balancers", () => {
+  it("hides the balancers section on a node whose adapter has no balancer concept", async () => {
+    routes["/api/v1/nodes/1/egress/capabilities"] = {
+      body: { ...caps, supports_balancer: false },
+    };
+    routes["/api/v1/nodes/1/outbounds"] = { body: { outbounds: [] } };
+    routes["/api/v1/nodes/1/routing"] = { body: { rules: [] } };
+    renderPanel(<EgressPanel nodeId={1} />);
+
+    // Wait for real data before asserting an absence, or the assertion
+    // could pass for the wrong reason -- nothing rendered yet, not because
+    // the balancers section was deliberately omitted.
+    await screen.findByText("Outbounds");
+    expect(screen.queryByText("Balancers")).not.toBeInTheDocument();
+    // And the balancers endpoint must not even be called -- there is no
+    // reason to ask a node that cannot answer.
+    expect(calls.some((c) => c.path === "/api/v1/nodes/1/balancers")).toBe(false);
+  });
+
+  it("creates a balancer and posts the exact request body", async () => {
+    seed();
+    routes["POST /api/v1/nodes/1/balancers"] = {
+      status: 201,
+      body: { id: 3, node_id: 1, tag: "b1", selector: ["warp-"], strategy: "least_ping", enabled: true },
+    };
+    const user = userEvent.setup({ delay: null });
+    renderPanel(<EgressPanel nodeId={1} />);
+
+    const heading = await screen.findByText("Balancers");
+    // "Tag" is ambiguous page-wide -- the outbounds form has its own -- but
+    // unambiguous within this section, the same way a sighted operator
+    // reads it under the "Balancers" heading rather than by label alone.
+    const section = within(heading.closest("div")!);
+    await user.type(section.getByLabelText("Tag"), "b1");
+    await user.type(section.getByLabelText("Selector"), "warp-");
+    await user.selectOptions(section.getByLabelText("Strategy"), "least_ping");
+    await user.click(section.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "POST" && c.path === "/api/v1/nodes/1/balancers");
+      expect(sent).toBeTruthy();
+      expect(sent!.body).toMatchObject({ tag: "b1", selector: ["warp-"], strategy: "least_ping" });
+    });
+  });
+
+  it("offers a created balancer as a routing rule target alongside outbounds", async () => {
+    routes["/api/v1/nodes/1/egress/capabilities"] = { body: caps };
+    routes["/api/v1/nodes/1/outbounds"] = { body: { outbounds: [outbound] } };
+    routes["/api/v1/nodes/1/routing"] = { body: { rules: [] } };
+    routes["/api/v1/nodes/1/balancers"] = {
+      body: { balancers: [{ id: 3, node_id: 1, tag: "b1", selector: ["warp-"], strategy: "random", enabled: true }] },
+    };
+    routes["POST /api/v1/nodes/1/routing"] = {
+      status: 201,
+      body: { id: 10, node_id: 1, priority: 0, domains: ["x.com"], outbound_tag: "", balancer_tag: "b1", enabled: true },
+    };
+    const user = userEvent.setup({ delay: null });
+    renderPanel(<EgressPanel nodeId={1} />);
+
+    // Confirms the balancer actually loaded into the picker's data, not
+    // just that some element somewhere says "b1" -- the option and the
+    // balancer table row both would, once balancers load.
+    await screen.findByRole("option", { name: "b1" });
+    await user.type(screen.getByLabelText("Domains"), "x.com");
+    // "Send to" picker: the balancer option must be selectable, prefixed to
+    // disambiguate it from an outbound sharing the same tag namespace.
+    await user.selectOptions(screen.getByLabelText("Send to"), "balancer:b1");
+    // Three "Create" buttons render (outbound, rule, balancer forms); the
+    // rule form's is the second in document order.
+    await user.click(screen.getAllByRole("button", { name: "Create" })[1]);
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "POST" && c.path === "/api/v1/nodes/1/routing");
+      expect(sent).toBeTruthy();
+      expect(sent!.body).toMatchObject({ outbound_tag: "", balancer_tag: "b1" });
+    });
+  });
+
+  it("shows a balancer-targeting rule's target distinctly from an outbound-targeting one", async () => {
+    routes["/api/v1/nodes/1/egress/capabilities"] = { body: caps };
+    routes["/api/v1/nodes/1/outbounds"] = { body: { outbounds: [outbound] } };
+    routes["/api/v1/nodes/1/routing"] = {
+      body: {
+        rules: [
+          { ...rule, id: 11, outbound_tag: "", balancer_tag: "b1" },
+        ],
+      },
+    };
+    routes["/api/v1/nodes/1/balancers"] = {
+      body: { balancers: [{ id: 3, node_id: 1, tag: "b1", selector: ["warp-"], strategy: "random", enabled: true }] },
+    };
+    renderPanel(<EgressPanel nodeId={1} />);
+
+    expect(await screen.findByText("Balancers: b1")).toBeInTheDocument();
   });
 });

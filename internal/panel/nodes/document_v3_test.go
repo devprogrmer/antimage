@@ -189,8 +189,8 @@ func TestEgressOrderingIsDeterministic(t *testing.T) {
 // understands, every node refuses its document -- which is safe, but it is a
 // fleet-wide outage, so the two constants moving together is worth pinning.
 func TestPanelCeilingMatchesTheNewestSchemaVersion(t *testing.T) {
-	if DocumentSchemaVersion != schemaVersionDNS {
+	if DocumentSchemaVersion != schemaVersionBalancer {
 		t.Errorf("DocumentSchemaVersion = %d but the newest schema is v%d",
-			DocumentSchemaVersion, schemaVersionDNS)
+			DocumentSchemaVersion, schemaVersionBalancer)
 	}
 }

@@ -233,7 +233,7 @@
   "egress.priority": "优先级",
   "egress.match": "匹配条件",
   "egress.target": "发送至",
-  "egress.chooseTarget": "选择一个出站连接",
+  "egress.chooseTarget": "选择一个目标",
   "egress.domains": "域名",
   "egress.ipCidrs": "IP 范围",
   "egress.ports": "端口",
@@ -781,5 +781,10 @@
   "dns.addPool": "添加地址池",
   "dns.queryStrategy": "查询策略",
   "dns.queryStrategyAny": "任意",
-  "dns.disableCache": "禁用缓存"
+  "dns.disableCache": "禁用缓存",
+  "balancer.title": "负载均衡器",
+  "balancer.hint": "规则可以选择的命名出站连接池,用来代替单一固定出站连接。",
+  "balancer.none": "暂无负载均衡器",
+  "balancer.selector": "选择器",
+  "balancer.strategy": "策略"
 }

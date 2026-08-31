@@ -113,6 +113,12 @@ type Caps struct {
 	// pools. Fail closed like SupportsOutbounds: only Xray owns a DNS
 	// resolution concept distinct from the OS's own in this codebase today.
 	SupportsDNS bool `json:"supports_dns"`
+
+	// SupportsBalancer declares whether this adapter can apply schema v5's
+	// balancers: named pools of outbounds a routing rule can select instead
+	// of one fixed outbound. Fail closed, and implies SupportsRouting --
+	// a balancer is meaningless without a rule engine to select it.
+	SupportsBalancer bool `json:"supports_balancer"`
 }
 
 type Descriptor struct {
@@ -154,7 +160,7 @@ type Service struct {
 // about. For egress that would mean an operator configuring an outbound, the
 // panel reporting convergence, and the node routing traffic somewhere else
 // entirely. Refusing is the only safe reading of "I do not understand this".
-const MaxSchemaVersion = 4
+const MaxSchemaVersion = 5
 
 // Outbound mirrors the panel's Outbound. Schema v3+.
 type Outbound struct {
@@ -165,6 +171,12 @@ type Outbound struct {
 }
 
 // RoutingRule mirrors the panel's RoutingRule. Schema v3+.
+//
+// Exactly one of OutboundTag and BalancerTag selects where matched traffic
+// goes (schema v5+ adds BalancerTag as the second option). OutboundTag lost
+// its v3 omitempty-free requirement here for that reason: a v5 rule that
+// picks a balancer legitimately carries no outbound tag at all, and a v3
+// rule always carried a non-empty one, so no existing document's bytes move.
 type RoutingRule struct {
 	ID          int64    `json:"id"`
 	Priority    int      `json:"priority"`
@@ -176,13 +188,33 @@ type RoutingRule struct {
 	Network     string   `json:"network,omitempty"`
 	InboundTags []string `json:"inbound_tags,omitempty"`
 	SubjectIDs  []int64  `json:"subject_ids,omitempty"`
-	OutboundTag string   `json:"outbound_tag"`
+	OutboundTag string   `json:"outbound_tag,omitempty"`
+	// BalancerTag mirrors the panel's RoutingRule.BalancerTag. Schema v5+.
+	BalancerTag string `json:"balancer_tag,omitempty"`
+}
+
+// Balancer mirrors the panel's Balancer. Schema v5+.
+//
+// Selector names outbound tag PREFIXES this balancer picks among -- Xray's
+// own matching is prefix-based, not exact, so an operator listing a tag's
+// full name still matches it (a full tag is trivially its own prefix).
+type Balancer struct {
+	ID       int64    `json:"id"`
+	Tag      string   `json:"tag"`
+	Selector []string `json:"selector"`
+	// Strategy is "random" (the default, applied when empty) or
+	// "least_ping". least_ping requires live latency data, which is why
+	// choosing it is what causes the adapter to emit an observatory block
+	// at all -- see xray/balancer.go.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 // Routing mirrors the panel's Routing. Schema v3+.
 type Routing struct {
 	Rules              []RoutingRule `json:"rules"`
 	DefaultOutboundTag string        `json:"default_outbound_tag,omitempty"`
+	// Balancers (schema v5+).
+	Balancers []Balancer `json:"balancers,omitempty"`
 }
 
 // DNSServer mirrors the panel's DNSServer. Schema v4+.

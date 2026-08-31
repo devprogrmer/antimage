@@ -425,6 +425,10 @@ type egressCapabilitiesDTO struct {
 	// reference although no row exists for them. The UI lists them alongside
 	// the configured outbounds when choosing a rule's target.
 	BuiltinTags []string `json:"builtin_tags"`
+	// SupportsBalancer tells the UI whether to offer balancers at all --
+	// distinct from Supported, which is about outbounds/routing: a node can
+	// route without being able to balance among outbounds.
+	SupportsBalancer bool `json:"supports_balancer"`
 	// Reason explains an unsupported node, so the UI can say why rather than
 	// simply hiding the feature with no account of itself.
 	Reason string `json:"reason,omitempty"`
@@ -464,10 +468,11 @@ func (d Deps) handleGetEgressCapabilities(w http.ResponseWriter, r *http.Request
 
 	caps := nodes.KnownAdapters()[adapterKind].Caps
 	out := egressCapabilitiesDTO{
-		Supported:     true,
-		AdapterKind:   adapterKind,
-		OutboundKinds: caps.OutboundKinds,
-		BuiltinTags:   caps.BuiltinOutboundTags,
+		Supported:        true,
+		AdapterKind:      adapterKind,
+		OutboundKinds:    caps.OutboundKinds,
+		BuiltinTags:      caps.BuiltinOutboundTags,
+		SupportsBalancer: caps.SupportsBalancer,
 	}
 	// Never nil: the UI iterates these, and a null would need a guard at every
 	// call site.

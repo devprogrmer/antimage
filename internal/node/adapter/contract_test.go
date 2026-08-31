@@ -134,6 +134,11 @@ func TestEgressCapabilitiesAreHonest(t *testing.T) {
 					"a routing rule selects an outbound by tag, so there would be " +
 					"nothing for a rule to name")
 			}
+			if caps.SupportsBalancer && !caps.SupportsRouting {
+				t.Error("declares SupportsBalancer without SupportsRouting; " +
+					"a balancer is selected by a routing rule, so there would be " +
+					"no rule engine to select it")
+			}
 		})
 	}
 }

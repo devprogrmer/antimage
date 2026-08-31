@@ -233,7 +233,7 @@
   "egress.priority": "Приоритет",
   "egress.match": "Совпадения",
   "egress.target": "Отправлять в",
-  "egress.chooseTarget": "Выберите исходящий",
+  "egress.chooseTarget": "Выберите цель",
   "egress.domains": "Домены",
   "egress.ipCidrs": "Диапазоны IP",
   "egress.ports": "Порты",
@@ -781,5 +781,10 @@
   "dns.addPool": "Добавить пул",
   "dns.queryStrategy": "Стратегия запроса",
   "dns.queryStrategyAny": "Любая",
-  "dns.disableCache": "Отключить кэш"
+  "dns.disableCache": "Отключить кэш",
+  "balancer.title": "Балансировщики",
+  "balancer.hint": "Именованные пулы исходящих соединений, которые правило может выбрать вместо одного фиксированного исходящего.",
+  "balancer.none": "Балансировщиков пока нет",
+  "balancer.selector": "Селектор",
+  "balancer.strategy": "Стратегия"
 }

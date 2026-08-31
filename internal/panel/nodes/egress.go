@@ -60,11 +60,13 @@ func buildOutbounds(ctx context.Context, tx *sql.Tx, nodeID int64, unsealer Unse
 	return out, nil
 }
 
-// buildRouting assembles the node's rule table and its default.
+// buildRouting assembles the node's rule table, its balancers, and its
+// default.
 //
-// Returns nil when the node has neither, which is what keeps the document at
-// schema v2 and its hash unmoved. A node with rules OR a default gets a
-// non-nil Routing and therefore v3; see effectiveSchemaVersion.
+// Returns nil when the node has none of the three, which is what keeps the
+// document at schema v2 and its hash unmoved. A node with any one of them
+// gets a non-nil Routing; see effectiveSchemaVersion for which version that
+// then declares.
 func buildRouting(ctx context.Context, tx *sql.Tx, nodeID int64) (*Routing, error) {
 	var defaultTag string
 	if err := tx.QueryRowContext(ctx,
@@ -74,7 +76,7 @@ func buildRouting(ctx context.Context, tx *sql.Tx, nodeID int64) (*Routing, erro
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id, priority, domains, ip_cidrs, geoip, geosite, ports,
-		        inbound_tags, subject_ids, network, outbound_tag
+		        inbound_tags, subject_ids, network, outbound_tag, balancer_tag
 		   FROM routing_rules
 		  WHERE node_id = ? AND enabled = 1
 		  ORDER BY priority, id`, nodeID)
@@ -89,7 +91,7 @@ func buildRouting(ctx context.Context, tx *sql.Tx, nodeID int64) (*Routing, erro
 		var domains, ipCIDRs, geoIP, geoSite, ports, inboundTags, subjectIDs string
 		if err := rows.Scan(
 			&r.ID, &r.Priority, &domains, &ipCIDRs, &geoIP, &geoSite, &ports,
-			&inboundTags, &subjectIDs, &r.Network, &r.OutboundTag,
+			&inboundTags, &subjectIDs, &r.Network, &r.OutboundTag, &r.BalancerTag,
 		); err != nil {
 			return nil, fmt.Errorf("scan routing rule: %w", err)
 		}
@@ -121,8 +123,50 @@ func buildRouting(ctx context.Context, tx *sql.Tx, nodeID int64) (*Routing, erro
 		return nil, fmt.Errorf("iterate routing rules: %w", err)
 	}
 
-	if len(rules) == 0 && defaultTag == "" {
+	balancers, err := buildBalancers(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rules) == 0 && defaultTag == "" && len(balancers) == 0 {
 		return nil, nil
 	}
-	return &Routing{Rules: rules, DefaultOutboundTag: defaultTag}, nil
+	return &Routing{Rules: rules, DefaultOutboundTag: defaultTag, Balancers: balancers}, nil
+}
+
+// buildBalancers assembles the node's named outbound pools.
+//
+// Ordered by id so the canonical document is byte-identical across builds,
+// the same reasoning buildOutbounds already documents.
+func buildBalancers(ctx context.Context, tx *sql.Tx, nodeID int64) ([]Balancer, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, tag, selector, strategy
+		   FROM balancers
+		  WHERE node_id = ? AND enabled = 1
+		  ORDER BY id`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("read balancers for node %d: %w", nodeID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Balancer
+	for rows.Next() {
+		var b Balancer
+		var selector string
+		if err := rows.Scan(&b.ID, &b.Tag, &selector, &b.Strategy); err != nil {
+			return nil, fmt.Errorf("scan balancer: %w", err)
+		}
+		if err := json.Unmarshal([]byte(selector), &b.Selector); err != nil {
+			// Refused rather than skipped, the same reasoning a routing
+			// rule's matchers use: a selector that fails to decode would
+			// silently make the balancer pick among zero outbounds instead
+			// of the ones the operator configured.
+			return nil, fmt.Errorf("balancer %d: decode selector: %w", b.ID, err)
+		}
+		out = append(out, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate balancers: %w", err)
+	}
+	return out, nil
 }
