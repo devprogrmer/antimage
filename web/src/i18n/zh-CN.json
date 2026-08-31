@@ -219,6 +219,8 @@
   "dashboard.alerts": "告警",
   "dashboard.frozen": "已冻结",
   "egress.title": "出站",
+  "egress.edit": "编辑",
+  "egress.editing": "编辑中",
   "egress.outbounds": "出站连接",
   "egress.rules": "路由规则",
   "egress.noOutbounds": "尚未配置出站连接。",
@@ -744,5 +746,7 @@
   "sub.delivery.manual": "Manual setup",
   "sub.delivery.file": "Config file",
   "sub.delivery.uri": "Import URL",
-  "subject.frozen": "Frozen"
+  "subject.frozen": "Frozen",
+  "node.syncDelivered": "已传送到已连接的代理",
+  "node.syncOffline": "节点离线；将在下次连接时自行同步"
 }

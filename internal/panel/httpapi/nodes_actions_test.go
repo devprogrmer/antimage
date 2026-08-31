@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/amyrm/antimage/internal/panel/control"
 	"github.com/amyrm/antimage/internal/panel/rbac"
 	"github.com/amyrm/antimage/internal/panel/store"
 	"github.com/amyrm/antimage/internal/testutil/storetest"
@@ -241,6 +242,64 @@ func TestHandleSyncNode_Success(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("event count = %d, want 1", count)
+	}
+
+	// No agent is registered on the hub for this node, so delivery must be
+	// reported honestly as false -- not as the "requested" success the
+	// previous implementation always returned regardless of whether
+	// anything was actually listening.
+	if response["delivered"] != false {
+		t.Errorf("delivered = %v, want false (no agent connected)", response["delivered"])
+	}
+}
+
+// TestHandleSyncNode_DeliversToConnectedAgent is the fix itself: the handler
+// used to record an audit row and tell the operator "sync request recorded,
+// node will apply latest configuration" without ever calling Hub.Notify, so
+// a connected agent never actually received anything. This proves the
+// revision now reaches the hub's channel for a node that IS connected.
+func TestHandleSyncNode_DeliversToConnectedAgent(t *testing.T) {
+	deps, s, actor := setupTestDeps(t)
+	deps.Hub = control.NewHub()
+	nodeID := int64(102)
+	createTestNode(t, s, nodeID, "connected-node", "online")
+	if err := s.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE nodes SET desired_revision = 7 WHERE id = ?`, nodeID)
+		return err
+	}); err != nil {
+		t.Fatalf("seed desired_revision: %v", err)
+	}
+
+	bumps, release := deps.Hub.Register(nodeID)
+	defer release()
+
+	req := httptest.NewRequest("POST", "/api/v1/nodes/102/sync", nil)
+	req = req.WithContext(withActor(req.Context(), actor))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("nodeID", "102")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	deps.handleSyncNode(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if response["delivered"] != true {
+		t.Errorf("delivered = %v, want true (agent registered on hub)", response["delivered"])
+	}
+
+	select {
+	case rev := <-bumps:
+		if rev != 7 {
+			t.Errorf("bumped revision = %d, want 7 (the node's desired_revision)", rev)
+		}
+	default:
+		t.Fatal("handler reported delivered=true but nothing arrived on the hub channel")
 	}
 }
 

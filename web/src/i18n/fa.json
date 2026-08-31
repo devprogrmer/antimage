@@ -219,6 +219,8 @@
   "dashboard.alerts": "هشدارها",
   "dashboard.frozen": "مسدود",
   "egress.title": "خروجی",
+  "egress.edit": "ویرایش",
+  "egress.editing": "در حال ویرایش",
   "egress.outbounds": "مسیرهای خروجی",
   "egress.rules": "قواعد مسیریابی",
   "egress.noOutbounds": "هیچ مسیر خروجی تنظیم نشده است.",
@@ -744,5 +746,7 @@
   "sub.delivery.manual": "Manual setup",
   "sub.delivery.file": "Config file",
   "sub.delivery.uri": "Import URL",
-  "subject.frozen": "Frozen"
+  "subject.frozen": "Frozen",
+  "node.syncDelivered": "به عامل متصل ارسال شد",
+  "node.syncOffline": "گره آفلاین است؛ در اتصال بعدی خودش را همگام می‌کند"
 }

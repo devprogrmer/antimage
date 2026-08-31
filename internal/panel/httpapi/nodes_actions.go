@@ -101,10 +101,19 @@ func (d Deps) handleSyncNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify node exists
+	// Verify node exists, and read the revision to push. Without the
+	// revision this handler could only record that a sync was ASKED for,
+	// which is exactly the bug being fixed here: the previous version wrote
+	// an audit row and told the operator the node "will apply latest
+	// configuration" without ever reaching the node. Hub.Notify is the one
+	// path that actually wakes an agent's blocked Stream.Recv and makes it
+	// re-fetch -- the same call CommitNodeChange makes after every desired-
+	// state write.
 	var nodeName string
+	var desiredRevision int64
 	err = d.Store.Read().QueryRowContext(ctx,
-		`SELECT name FROM nodes WHERE id = ?`, nodeID).Scan(&nodeName)
+		`SELECT name, desired_revision FROM nodes WHERE id = ?`, nodeID).
+		Scan(&nodeName, &desiredRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "not_found", "node not found")
 		return
@@ -114,41 +123,51 @@ func (d Deps) handleSyncNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Record sync request event
+	// Reports whether the node was actually reachable. A disconnected node
+	// is not an error -- desired state lives in the database and it
+	// reconciles on its own next connect -- but the operator asked for a
+	// sync NOW, and "requested" would be a second false claim of immediacy
+	// if the hub had nothing to deliver it to.
+	delivered := false
+	if d.Hub != nil {
+		delivered = d.Hub.Notify(nodeID, desiredRevision)
+	}
+
 	details := map[string]interface{}{
 		"action":    "sync",
 		"admin_id":  actor.AdminID,
 		"node_name": nodeName,
+		"delivered": delivered,
 	}
-
 	if err := nodes.RecordNodeEvent(ctx, d.Store, nodeID, "sync_requested", "info", details, &actor.AdminID); err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "failed to record event")
 		return
 	}
 
-	// Audit log
 	if err := d.Store.Write(ctx, func(tx *sql.Tx) error {
 		return audit.InTx(ctx, tx, RequestID(ctx), d.actorAudit(actor, r), audit.Record{
 			Action:     "node.sync",
 			TargetType: "node",
 			TargetID:   sql.NullInt64{Int64: nodeID, Valid: true},
 			Result:     "ok",
-			After:      map[string]any{"node": nodeName},
+			After:      map[string]any{"node": nodeName, "delivered": delivered},
 		})
 	}); err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "audit failed")
 		return
 	}
 
-	response := map[string]interface{}{
+	message := "the node is offline; it will reconcile on its own next connection"
+	if delivered {
+		message = "sync delivered to the connected agent"
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"node_id":   nodeID,
 		"node_name": nodeName,
 		"action":    "sync",
-		"status":    "requested",
-		"message":   "sync request recorded, node will apply latest configuration",
-	}
-
-	WriteJSON(w, http.StatusOK, response)
+		"delivered": delivered,
+		"message":   message,
+	})
 }
 
 // POST /api/v1/nodes/:id/maintenance

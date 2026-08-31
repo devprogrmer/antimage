@@ -50,6 +50,11 @@ export function NodeActions({ node }: { node: NodeSummary }) {
   const inMaintenance = node.status === "maintenance";
   const disabled = node.status === "disabled";
 
+  // Set only by "sync": whether the panel actually reached a connected
+  // agent, versus the node being offline and reconciling on its own next
+  // connect. Both are legitimate outcomes; only the first means "now".
+  const [syncDelivered, setSyncDelivered] = useState<boolean | null>(null);
+
   const run = useMutation({
     mutationFn: (action: Action) => {
       switch (action) {
@@ -65,13 +70,18 @@ export function NodeActions({ node }: { node: NodeSummary }) {
           return api.post(`/api/v1/nodes/${node.id}/disable`, {
             reason: reason || undefined,
           });
+        case "sync":
+          return api.post<{ delivered: boolean }>(`/api/v1/nodes/${node.id}/sync`, {});
         default:
           return api.post(`/api/v1/nodes/${node.id}/${action}`, {});
       }
     },
-    onSuccess: () => {
+    onSuccess: (data, action) => {
       setPending(null);
       setReason("");
+      if (action === "sync") {
+        setSyncDelivered((data as { delivered: boolean } | undefined)?.delivered ?? false);
+      }
       queryClient.invalidateQueries({ queryKey: ["nodes"] });
       queryClient.invalidateQueries({ queryKey: ["node", node.id] });
     },
@@ -111,11 +121,24 @@ export function NodeActions({ node }: { node: NodeSummary }) {
       <Button
         size="sm"
         variant="outline"
-        onClick={() => invoke("sync")}
+        onClick={() => {
+          setSyncDelivered(null);
+          invoke("sync");
+        }}
         disabled={run.isPending}
       >
         {t("node.sync")}
       </Button>
+      {syncDelivered !== null && (
+        <span
+          className={
+            syncDelivered ? "text-xs text-success" : "text-xs text-muted-foreground"
+          }
+          role="status"
+        >
+          {syncDelivered ? t("node.syncDelivered") : t("node.syncOffline")}
+        </span>
+      )}
 
       <Button
         size="sm"
