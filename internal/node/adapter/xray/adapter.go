@@ -173,6 +173,11 @@ func (a *Adapter) Descriptor() adapter.Descriptor {
 			// this adapter's own concept; nothing else in this codebase drives
 			// a proxy with DNS resolution distinct from the OS's own.
 			SupportsDNS: true,
+			// Xray's routing.balancers, likewise: sing-box's egress.go has no
+			// balancer rendering yet, so a rule naming one there would fail
+			// that adapter's own Plan in isolation rather than being silently
+			// accepted and dropped.
+			SupportsBalancer: true,
 			// Declared from the runtime's actual capability, not hardcoded.
 			// The panel records this at Hello so the UI can tell an operator
 			// BEFORE they click whether adding a user drops sessions.

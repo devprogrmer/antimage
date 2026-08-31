@@ -261,6 +261,15 @@ func NewRouter(d Deps) http.Handler {
 			// it once.
 			private.Put("/nodes/{nodeID}/routing/default", d.handleSetDefaultOutbound)
 
+			// Balancers: named pools of outbounds a routing rule can select
+			// (balancer_tag) instead of one fixed outbound (outbound_tag).
+			// Independently addressable rows like outbounds, not a
+			// whole-object setting like DNS.
+			private.Get("/nodes/{nodeID}/balancers", d.handleListBalancers)
+			private.Post("/nodes/{nodeID}/balancers", d.handleCreateBalancer)
+			private.Put("/nodes/{nodeID}/balancers/{balancerID}", d.handleUpdateBalancer)
+			private.Delete("/nodes/{nodeID}/balancers/{balancerID}", d.handleDeleteBalancer)
+
 			// DNS. Whole-object like routing/default: exactly one config per
 			// node, read and replaced together rather than as independently
 			// addressable rows.

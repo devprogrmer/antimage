@@ -233,7 +233,7 @@
   "egress.priority": "Priority",
   "egress.match": "Matches",
   "egress.target": "Send to",
-  "egress.chooseTarget": "Choose an outbound",
+  "egress.chooseTarget": "Choose a target",
   "egress.domains": "Domains",
   "egress.ipCidrs": "IP ranges",
   "egress.ports": "Ports",
@@ -781,5 +781,10 @@
   "dns.addPool": "Add pool",
   "dns.queryStrategy": "Query strategy",
   "dns.queryStrategyAny": "Any",
-  "dns.disableCache": "Disable cache"
+  "dns.disableCache": "Disable cache",
+  "balancer.title": "Balancers",
+  "balancer.hint": "Named pools of outbounds a rule can select instead of one fixed outbound.",
+  "balancer.none": "No balancers yet",
+  "balancer.selector": "Selector",
+  "balancer.strategy": "Strategy"
 }
