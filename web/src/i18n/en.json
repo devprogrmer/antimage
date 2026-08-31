@@ -219,6 +219,8 @@
   "dashboard.alerts": "Alerts",
   "dashboard.frozen": "frozen",
   "egress.title": "Egress",
+  "egress.edit": "Edit",
+  "egress.editing": "Editing",
   "egress.outbounds": "Outbounds",
   "egress.rules": "Routing rules",
   "egress.noOutbounds": "No outbounds configured.",
@@ -744,5 +746,10 @@
   "sub.delivery.manual": "Manual setup",
   "sub.delivery.file": "Config file",
   "sub.delivery.uri": "Import URL",
-  "subject.frozen": "Frozen"
+  "subject.frozen": "Frozen",
+  "node.syncDelivered": "Delivered to the connected agent",
+  "node.syncOffline": "Node is offline; will reconcile on its own next connection",
+  "node.restartOffline": "Node is offline; nothing was restarted",
+  "node.restartNoAdapters": "The agent reported no adapters to restart",
+  "node.restartOK": "restarted"
 }

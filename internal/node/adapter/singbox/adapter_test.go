@@ -586,3 +586,15 @@ func TestFailedRestartDoesNotLookLikeConvergence(t *testing.T) {
 		t.Errorf("did not settle after recovery: %+v", final.Steps)
 	}
 }
+
+func TestRestart_ForwardsToRuntime(t *testing.T) {
+	rt := newFakeRuntime()
+	a := New(t.TempDir(), rt)
+
+	if err := a.Restart(context.Background()); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if rt.count() != 1 {
+		t.Errorf("restarts = %d, want 1", rt.count())
+	}
+}

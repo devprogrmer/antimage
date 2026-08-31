@@ -307,3 +307,9 @@ func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
 	}
 	return adapter.Health{OK: true, Detail: "stub adapter ready"}, nil
 }
+
+// Restart is unsupported: this adapter manages plain files directly, with
+// no daemon or unit behind them to bounce.
+func (a *Adapter) Restart(ctx context.Context) error {
+	return adapter.ErrRestartUnsupported
+}

@@ -841,3 +841,17 @@ func TestRevocationDoesNotConvergeUntilTheRestartSucceeds(t *testing.T) {
 		}
 	}
 }
+
+// Restart is a direct forward to the runtime: xray runs as one process
+// multiplexing every inbound, so there is exactly one thing to bounce.
+func TestRestart_ForwardsToRuntime(t *testing.T) {
+	rt := newFakeRuntime()
+	a := New(t.TempDir(), rt, false)
+
+	if err := a.Restart(context.Background()); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if restarts, _, _, _ := rt.counts(); restarts != 1 {
+		t.Errorf("restarts = %d, want 1", restarts)
+	}
+}

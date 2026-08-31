@@ -14,6 +14,7 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -319,7 +320,26 @@ type Adapter interface {
 
 	// Probe is a cheap liveness check run on the health cadence.
 	Probe(ctx context.Context) (Health, error)
+
+	// Restart bounces the service ON DEMAND, outside the desired-state
+	// reconciliation loop. It exists because "sync" (converge toward the
+	// desired document) and "restart" (bounce the running process even
+	// though nothing changed) are different operator intents: an operator
+	// investigating a wedged process wants the second even when the first
+	// would be a no-op.
+	//
+	// An adapter with no restartable daemon -- nothing today, but the
+	// interface has to say what "no" looks like for the ones that might
+	// arrive later -- returns ErrRestartUnsupported rather than nil, so a
+	// caller cannot mistake "there was nothing to restart" for "the restart
+	// happened."
+	Restart(ctx context.Context) error
 }
+
+// ErrRestartUnsupported is what Adapter.Restart returns for an adapter with
+// no restartable daemon of its own. Checked with errors.Is, not a type
+// assertion, because a future adapter is free to wrap it with more detail.
+var ErrRestartUnsupported = errors.New("restart not supported by this adapter")
 
 // UsageSample is one subject's traffic delta since the last report. SP3
 // design decision 1: the agent computes deltas; the panel never sees raw

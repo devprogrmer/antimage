@@ -44,6 +44,7 @@ message AgentMessage {
     Heartbeat heartbeat = 2;
     ApplyReport apply_report = 3;
     UsageReport usage_report = 4;
+    AgentCommandResult command_result = 5;
   }
 }
 
@@ -52,7 +53,62 @@ message PanelMessage {
     RevisionBump revision_bump = 1;
     FetchNow fetch_now = 2;
     UpgradeRequired upgrade_required = 3;
+    AgentCommand command = 4;
   }
+}
+
+// AgentCommand is the panel asking the agent to do something ON DEMAND,
+// outside the desired-state reconciliation loop -- restarting a service the
+// operator clicked, or (later) pulling a fresh geo database, reporting an
+// installed core version precisely, or opening a log tail. It exists
+// separately from RevisionBump/FetchNow because those two both mean
+// "converge toward the desired document", and an on-demand action is not a
+// convergence request: a restart with no config change has nothing to
+// converge, and this command is what asks for it anyway.
+//
+// command_id correlates this to its AgentCommandResult. It is a string
+// rather than reusing the desired_revision or any DB primary key, because a
+// command is not a row anywhere -- the panel's Hub only needs to remember it
+// long enough to wake whichever HTTP request is waiting, and does not
+// persist it. A UUID generated per HTTP request satisfies that with no
+// coordination against any other id space.
+message AgentCommand {
+  string command_id = 1;
+  oneof body {
+    RestartAdapters restart_adapters = 2;
+  }
+}
+
+// RestartAdapters names which adapter kinds to restart. Empty means every
+// adapter this node currently runs -- explicit rather than a sentinel value,
+// so a caller who really does mean "just xray" is not one typo away from
+// restarting everything.
+message RestartAdapters {
+  repeated string kinds = 1;
+}
+
+message AgentCommandResult {
+  string command_id = 1;
+  oneof body {
+    RestartAdaptersResult restart_adapters = 2;
+  }
+}
+
+message RestartAdaptersResult {
+  repeated AdapterRestartOutcome outcomes = 1;
+}
+
+// AdapterRestartOutcome is per adapter kind, because a node running xray and
+// wireguard together can have one restart and the other refuse -- wireguard
+// has no restartable daemon in the systemd sense, and reporting that
+// truthfully as unsupported is the whole point of doing this per-kind rather
+// than collapsing to one ok/error for the node.
+message AdapterRestartOutcome {
+  string kind = 1;
+  bool ok = 2;
+  // Empty when ok. "unsupported: <reason>" when the adapter kind has no
+  // restart concept, never silently ok.
+  string error = 3;
 }
 
 message Hello {

@@ -128,6 +128,63 @@ func TestApplyReportPreservesStepKindAndDisruption(t *testing.T) {
 	}
 }
 
+// handleCommand's result must always carry the command's own id back,
+// regardless of outcome -- it is what lets the panel's Hub correlate the
+// reply to whichever HTTP request is waiting, and a reply with the wrong id
+// wakes the wrong caller (or none at all). The stub adapter's Restart
+// returns ErrRestartUnsupported (it manages plain files, no daemon), which
+// this also uses to prove a failing adapter's reason reaches the wire result
+// rather than being swallowed.
+func TestHandleCommand_RestartAdapters_EchoesCommandID(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{
+		CommandId: "cmd-42",
+		Body:      &pb.AgentCommand_RestartAdapters{RestartAdapters: &pb.RestartAdapters{}},
+	})
+
+	if result.CommandId != "cmd-42" {
+		t.Errorf("result command id = %q, want cmd-42", result.CommandId)
+	}
+	restart, ok := result.Body.(*pb.AgentCommandResult_RestartAdapters)
+	if !ok {
+		t.Fatalf("result body = %T, want *AgentCommandResult_RestartAdapters", result.Body)
+	}
+	if len(restart.RestartAdapters.Outcomes) != 1 {
+		t.Fatalf("got %d outcomes, want 1 (the stub adapter)", len(restart.RestartAdapters.Outcomes))
+	}
+	outcome := restart.RestartAdapters.Outcomes[0]
+	if outcome.Kind != "stub" {
+		t.Errorf("outcome kind = %q, want stub", outcome.Kind)
+	}
+	if outcome.Ok {
+		t.Error("stub adapter reported Ok=true; it has no daemon to restart")
+	}
+	if outcome.Error == "" {
+		t.Error("failing outcome carries no error text")
+	}
+}
+
+// An unrecognised command body must not crash the agent or drop the
+// command silently -- it echoes the id with no body set, which the panel
+// side treats as a failure (see the SendCommand contract) rather than as
+// success with nothing to report.
+func TestHandleCommand_UnknownBody_StillEchoesCommandID(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{PanelURL: "panel.example:8443", CAFingerprint: "dead", StateDir: dir, NodeID: 7}
+	c := NewClient(cfg, MustRegistry(stub.New(filepath.Join(dir, "services"))), SystemClock{}, tls.Certificate{}, nil)
+
+	result := c.handleCommand(context.Background(), &pb.AgentCommand{CommandId: "cmd-99"})
+	if result.CommandId != "cmd-99" {
+		t.Errorf("result command id = %q, want cmd-99", result.CommandId)
+	}
+	if result.Body != nil {
+		t.Errorf("body = %v, want nil for an unrecognised command", result.Body)
+	}
+}
+
 // The receive goroutine parks on the incoming channel whenever the session
 // loop is not reading it, and the loop stops reading the moment it returns.
 // A session that ends for any reason other than cancellation or a recv error

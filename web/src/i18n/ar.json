@@ -219,6 +219,8 @@
   "dashboard.alerts": "التنبيهات",
   "dashboard.frozen": "مجمّد",
   "egress.title": "الصادر",
+  "egress.edit": "تعديل",
+  "egress.editing": "جارٍ التعديل",
   "egress.outbounds": "المخارج",
   "egress.rules": "قواعد التوجيه",
   "egress.noOutbounds": "لم يتم إعداد أي مخارج.",
@@ -744,5 +746,10 @@
   "sub.delivery.manual": "Manual setup",
   "sub.delivery.file": "Config file",
   "sub.delivery.uri": "Import URL",
-  "subject.frozen": "Frozen"
+  "subject.frozen": "Frozen",
+  "node.syncDelivered": "تم التسليم إلى العامل المتصل",
+  "node.syncOffline": "العقدة غير متصلة؛ ستتزامن تلقائيًا عند الاتصال التالي",
+  "node.restartOffline": "العقدة غير متصلة؛ لم يُعَد تشغيل أي شيء",
+  "node.restartNoAdapters": "لم يُبلغ العامل عن أي محولات لإعادة التشغيل",
+  "node.restartOK": "أُعيد التشغيل"
 }

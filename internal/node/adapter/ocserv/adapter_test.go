@@ -3,6 +3,7 @@ package ocserv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -545,5 +546,32 @@ func TestProbeDistinguishesUnconfiguredFromDown(t *testing.T) {
 	}
 	if h.OK {
 		t.Error("a configured ocserv that is not running reports healthy")
+	}
+}
+
+// Restart on a node with no ocserv service configured must not silently
+// succeed: nothing is running, and reporting ok=true would tell an operator
+// their restart worked when there was nothing to restart.
+func TestRestart_UnconfiguredReturnsUnsupported(t *testing.T) {
+	a, _ := newTestAdapter(t)
+	err := a.Restart(context.Background())
+	if !errors.Is(err, adapter.ErrRestartUnsupported) {
+		t.Errorf("Restart on an unconfigured node = %v, want ErrRestartUnsupported", err)
+	}
+}
+
+// Restart on a configured node must reach the real systemctl restart call,
+// not a reload or a start -- restart is the one that actually bounces the
+// process even when the config has not changed.
+func TestRestart_ConfiguredCallsRuntimeRestart(t *testing.T) {
+	a, rt := newTestAdapter(t)
+	converge(t, a, desiredWith(goodParams, 1))
+	rt.calls = nil
+
+	if err := a.Restart(context.Background()); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if len(rt.calls) != 1 || rt.calls[0] != "restart" {
+		t.Errorf("calls = %v, want exactly [restart]", rt.calls)
 	}
 }

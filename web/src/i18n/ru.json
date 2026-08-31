@@ -219,6 +219,8 @@
   "dashboard.alerts": "Оповещения",
   "dashboard.frozen": "заморожено",
   "egress.title": "Исходящий трафик",
+  "egress.edit": "Изменить",
+  "egress.editing": "Редактирование",
   "egress.outbounds": "Исходящие",
   "egress.rules": "Правила маршрутизации",
   "egress.noOutbounds": "Исходящие не настроены.",
@@ -744,5 +746,10 @@
   "sub.delivery.manual": "Manual setup",
   "sub.delivery.file": "Config file",
   "sub.delivery.uri": "Import URL",
-  "subject.frozen": "Frozen"
+  "subject.frozen": "Frozen",
+  "node.syncDelivered": "Доставлено подключённому агенту",
+  "node.syncOffline": "Узел офлайн; синхронизируется при следующем подключении",
+  "node.restartOffline": "Узел офлайн; ничего не было перезапущено",
+  "node.restartNoAdapters": "Агент не сообщил об адаптерах для перезапуска",
+  "node.restartOK": "перезапущено"
 }

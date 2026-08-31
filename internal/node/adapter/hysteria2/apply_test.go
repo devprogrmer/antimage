@@ -572,3 +572,53 @@ func TestForeignServicesDoNotAffectRemoval(t *testing.T) {
 		t.Fatalf("want a single remove step, got %+v", plan.Steps)
 	}
 }
+
+// A node with no Hysteria2 services configured has nothing to restart. This
+// must not silently succeed: reporting ok=true here would tell an operator
+// their restart worked when nothing was running to begin with.
+func TestRestart_NoServicesReturnsUnsupported(t *testing.T) {
+	e := newApplyEnv(t)
+	err := e.a.Restart(context.Background())
+	if !errors.Is(err, adapter.ErrRestartUnsupported) {
+		t.Errorf("Restart with nothing configured = %v, want ErrRestartUnsupported", err)
+	}
+}
+
+// Restart bounces every configured unit -- this adapter runs one systemd
+// unit PER service rather than one process multiplexing every inbound (see
+// the Restart doc comment), so a node running two Hysteria2 services must
+// see two ServerRestart calls, not one.
+func TestRestart_BouncesEveryConfiguredService(t *testing.T) {
+	e := newApplyEnv(t)
+	d := desiredWith(t, 1)
+	d.Services = append(d.Services, adapter.Service{
+		ID: 11, Kind: "hysteria2", Enabled: true, Params: json.RawMessage(testParams),
+	})
+
+	for _, svc := range d.Services {
+		p := payloadFor(t, e.a, adapter.Desired{Services: []adapter.Service{svc}, Subjects: d.Subjects})
+		if _, err := e.a.Apply(context.Background(), adapter.Step{
+			Seq: 1, Kind: "install", ServiceID: svc.ID,
+			Disruption: adapter.DisruptRestart, Payload: mustJSON(t, p),
+		}); err != nil {
+			t.Fatalf("install service %d: %v", svc.ID, err)
+		}
+	}
+	e.rt.mu.Lock()
+	e.rt.calls = nil
+	e.rt.mu.Unlock()
+
+	if err := e.a.Restart(context.Background()); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	calls := e.rt.Calls()
+	restarts := 0
+	for _, c := range calls {
+		if c == "restart" {
+			restarts++
+		}
+	}
+	if restarts != 2 {
+		t.Errorf("restart calls = %d (calls=%v), want 2 -- one per configured service", restarts, calls)
+	}
+}

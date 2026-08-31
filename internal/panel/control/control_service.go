@@ -65,7 +65,7 @@ func (s *ControlService) Stream(srv pb.Control_StreamServer) error {
 		return status.Error(codes.Unauthenticated, "not enrolled")
 	}
 
-	bumps, release := s.deps.Hub.Register(nodeID)
+	bumps, cmds, release := s.deps.Hub.Register(nodeID)
 	defer release()
 
 	// Receive loop feeds messages to the select below.
@@ -103,6 +103,17 @@ func (s *ControlService) Stream(srv pb.Control_StreamServer) error {
 				Payload: &pb.PanelMessage_RevisionBump{
 					RevisionBump: &pb.RevisionBump{Revision: revision},
 				},
+			}); err != nil {
+				return err
+			}
+
+		case cmd, ok := <-cmds:
+			if !ok {
+				// Same as the bumps channel: a superseded stream closes both.
+				return status.Error(codes.Aborted, "stream superseded")
+			}
+			if err := srv.Send(&pb.PanelMessage{
+				Payload: &pb.PanelMessage_Command{Command: cmd},
 			}); err != nil {
 				return err
 			}
@@ -150,6 +161,15 @@ func (s *ControlService) handle(
 
 	case *pb.AgentMessage_UsageReport:
 		return s.onUsageReport(ctx, nodeID, p.UsageReport)
+
+	case *pb.AgentMessage_CommandResult:
+		// Not a store write and not tied to nodeID's stream lifetime: the
+		// HTTP request that issued the command is what is actually waiting,
+		// and it may already have timed out. DeliverResult finds it if it
+		// is still listening and is a no-op if not -- either way this never
+		// blocks the stream loop.
+		s.deps.Hub.DeliverResult(p.CommandResult)
+		return nil
 
 	default:
 		return nil // forward compatible: ignore unknown payloads

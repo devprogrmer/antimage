@@ -124,6 +124,41 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
     },
   });
 
+  // Editing an existing outbound. The backend already supported this
+  // (PUT /outbounds/{id}); this panel just never called it, so the only way
+  // to change a wrong port or a rotated key was delete-and-recreate under a
+  // new id -- which also orphans any routing rule that named the old tag.
+  const [editingOutbound, setEditingOutbound] = useState<Outbound | null>(null);
+  const [editTag, setEditTag] = useState("");
+  const [editKind, setEditKind] = useState("");
+  const [editParams, setEditParams] = useState("");
+  const [editEnabled, setEditEnabled] = useState(true);
+
+  function startEditOutbound(o: Outbound) {
+    setEditingOutbound(o);
+    setEditTag(o.tag);
+    setEditKind(o.kind);
+    // Re-serialized from what the server already redacted; a credential
+    // field here is the "__redacted__" sentinel the backend restores on
+    // submit as long as this field is left untouched.
+    setEditParams(JSON.stringify(o.params, null, 2));
+    setEditEnabled(o.enabled);
+  }
+
+  const updateOutbound = useMutation({
+    mutationFn: () =>
+      api.put(`/api/v1/nodes/${nodeId}/outbounds/${editingOutbound!.id}`, {
+        tag: editTag,
+        kind: editKind,
+        params: editParams.trim() === "" ? {} : JSON.parse(editParams),
+        enabled: editEnabled,
+      }),
+    onSuccess: () => {
+      setEditingOutbound(null);
+      invalidate();
+    },
+  });
+
   // Which outbound is being removed. Named in the dialog, because a rule that
   // still selects it is the failure this asks about.
   const [pendingOutbound, setPendingOutbound] = useState<Outbound | null>(null);
@@ -153,6 +188,40 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
   const deleteRule = useMutation({
     mutationFn: (id: number) => api.del(`/api/v1/nodes/${nodeId}/routing/${id}`),
     onSuccess: invalidate,
+  });
+
+  // Editing a rule: same backend gap as outbounds -- PUT existed, nothing
+  // called it, so re-prioritizing or widening a match meant delete-and-lose
+  // its position in the ordering.
+  const [editingRule, setEditingRule] = useState<RoutingRule | null>(null);
+  const [editRuleTarget, setEditRuleTarget] = useState("");
+  const [editRuleDomains, setEditRuleDomains] = useState("");
+  const [editRuleCIDRs, setEditRuleCIDRs] = useState("");
+  const [editRulePorts, setEditRulePorts] = useState("");
+  const [editRulePriority, setEditRulePriority] = useState("0");
+
+  function startEditRule(r: RoutingRule) {
+    setEditingRule(r);
+    setEditRuleTarget(r.outbound_tag);
+    setEditRuleDomains((r.domains ?? []).join(", "));
+    setEditRuleCIDRs((r.ip_cidrs ?? []).join(", "));
+    setEditRulePorts((r.ports ?? []).join(", "));
+    setEditRulePriority(String(r.priority));
+  }
+
+  const updateRule = useMutation({
+    mutationFn: () =>
+      api.put(`/api/v1/nodes/${nodeId}/routing/${editingRule!.id}`, {
+        priority: Number(editRulePriority) || 0,
+        domains: splitList(editRuleDomains),
+        ip_cidrs: splitList(editRuleCIDRs),
+        ports: splitList(editRulePorts),
+        outbound_tag: editRuleTarget,
+      }),
+    onSuccess: () => {
+      setEditingRule(null);
+      invalidate();
+    },
   });
 
   const setDefault = useMutation({
@@ -212,7 +281,14 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
                   <td className="pe-3 text-muted-foreground">
                     {o.enabled ? t("subject.enabled") : t("subject.disabled")}
                   </td>
-                  <td>
+                  <td className="space-x-2 rtl:space-x-reverse">
+                    <button
+                      type="button"
+                      onClick={() => startEditOutbound(o)}
+                      className="text-primary hover:underline"
+                    >
+                      {t("egress.edit")}
+                    </button>
                     <button
                       type="button"
                       // Removing an outbound a rule still names would make the
@@ -283,6 +359,68 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
           </button>
         </div>
         <MutationError error={createOutbound.error} />
+
+        {editingOutbound && (
+          <div className="mt-3 border border-primary/40 bg-primary/5 p-3">
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              {t("egress.editing")}: <span className="font-mono">{editingOutbound.tag}</span>
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{t("egress.tag")}</span>
+                <input
+                  value={editTag}
+                  onChange={(e) => setEditTag(e.target.value)}
+                  className="w-32 border border-input bg-card px-2 py-1 font-mono text-xs"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{t("egress.kind")}</span>
+                {/* Kind is fixed on edit: an outbound whose kind changes needs
+                    a different params shape entirely, and the adapter treats
+                    that as a new outbound rather than a mutation. */}
+                <input
+                  value={editKind}
+                  disabled
+                  className="w-28 border border-input bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
+                />
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{t("egress.params")}</span>
+                <textarea
+                  value={editParams}
+                  onChange={(e) => setEditParams(e.target.value)}
+                  rows={4}
+                  className="w-full border border-input bg-card px-2 py-1 font-mono text-xs"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={editEnabled}
+                  onChange={(e) => setEditEnabled(e.target.checked)}
+                />
+                {t("subject.enabled")}
+              </label>
+              <button
+                type="button"
+                disabled={editTag.trim() === "" || updateOutbound.isPending}
+                onClick={() => updateOutbound.mutate()}
+                className="border border-input px-3 py-1 text-xs hover:bg-accent disabled:opacity-40"
+              >
+                {updateOutbound.isPending ? t("egress.saving") : t("subject.update")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingOutbound(null)}
+                className="border border-input px-3 py-1 text-xs hover:bg-accent"
+              >
+                {t("cancel")}
+              </button>
+            </div>
+            <MutationError error={updateOutbound.error} />
+          </div>
+        )}
       </div>
 
       {/* Routing rules */}
@@ -315,7 +453,14 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
                     ].join(", ")}
                   </td>
                   <td className="pe-3">{r.outbound_tag}</td>
-                  <td>
+                  <td className="space-x-2 rtl:space-x-reverse">
+                    <button
+                      type="button"
+                      onClick={() => startEditRule(r)}
+                      className="text-primary hover:underline"
+                    >
+                      {t("egress.edit")}
+                    </button>
                     <button
                       type="button"
                       onClick={() => deleteRule.mutate(r.id)}
@@ -393,6 +538,82 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
           </button>
         </div>
         <MutationError error={createRule.error} />
+
+        {editingRule && (
+          <div className="mt-3 border border-primary/40 bg-primary/5 p-3">
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              {t("egress.editing")}: {t("egress.priority")} {formatNumber(editingRule.priority)}
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{t("egress.priority")}</span>
+                <input
+                  value={editRulePriority}
+                  onChange={(e) => setEditRulePriority(e.target.value)}
+                  inputMode="numeric"
+                  className="w-16 border border-input bg-card px-2 py-1 font-mono text-xs"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{t("egress.domains")}</span>
+                <input
+                  value={editRuleDomains}
+                  onChange={(e) => setEditRuleDomains(e.target.value)}
+                  placeholder={t("egress.commaSeparated")}
+                  className="w-44 border border-input bg-card px-2 py-1 font-mono text-xs"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{t("egress.ipCidrs")}</span>
+                <input
+                  value={editRuleCIDRs}
+                  onChange={(e) => setEditRuleCIDRs(e.target.value)}
+                  placeholder={t("egress.commaSeparated")}
+                  className="w-36 border border-input bg-card px-2 py-1 font-mono text-xs"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{t("egress.ports")}</span>
+                <input
+                  value={editRulePorts}
+                  onChange={(e) => setEditRulePorts(e.target.value)}
+                  placeholder={t("egress.portsPlaceholder")}
+                  className="w-24 border border-input bg-card px-2 py-1 font-mono text-xs"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">{t("egress.target")}</span>
+                <select
+                  value={editRuleTarget}
+                  onChange={(e) => setEditRuleTarget(e.target.value)}
+                  className="border border-input bg-card px-2 py-1 font-mono text-xs"
+                >
+                  {selectableTags.map((tagName) => (
+                    <option key={tagName} value={tagName}>
+                      {tagName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={editRuleTarget === "" || updateRule.isPending}
+                onClick={() => updateRule.mutate()}
+                className="border border-input px-3 py-1 text-xs hover:bg-accent disabled:opacity-40"
+              >
+                {updateRule.isPending ? t("egress.saving") : t("subject.update")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingRule(null)}
+                className="border border-input px-3 py-1 text-xs hover:bg-accent"
+              >
+                {t("cancel")}
+              </button>
+            </div>
+            <MutationError error={updateRule.error} />
+          </div>
+        )}
       </div>
 
       {/* Default outbound */}

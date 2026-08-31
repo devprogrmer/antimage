@@ -571,6 +571,13 @@ func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
 	return adapter.Health{OK: ok, Detail: detail}, nil
 }
 
+// Restart bounces the running process on demand. See xray.Adapter.Restart
+// for why this is separate from the reconciliation loop's own DisruptRestart
+// steps.
+func (a *Adapter) Restart(ctx context.Context) error {
+	return a.rt.Restart(ctx)
+}
+
 var _ adapter.Adapter = (*Adapter)(nil)
 
 // egressPath is the node-scoped outbound and routing document.

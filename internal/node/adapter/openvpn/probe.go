@@ -2,6 +2,7 @@ package openvpn
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -30,4 +31,12 @@ func (a *Adapter) Probe(ctx context.Context) (adapter.Health, error) {
 		return adapter.Health{OK: false, Detail: "openvpn is configured but not running"}, nil
 	}
 	return adapter.Health{OK: true, Detail: "openvpn running"}, nil
+}
+
+// Restart bounces the openvpn unit on demand.
+func (a *Adapter) Restart(ctx context.Context) error {
+	if _, err := os.Stat(filepath.Join(a.dir, confName)); err != nil {
+		return fmt.Errorf("%w: no openvpn service configured", adapter.ErrRestartUnsupported)
+	}
+	return a.rt.Restart(ctx)
 }
