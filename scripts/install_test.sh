@@ -77,21 +77,43 @@ else
 fi
 
 # install.sh writes the node unit from an inline heredoc, so packaging/ holds a
-# second copy for operators who install by hand. Same drift risk as above.
+# second copy for operators who install by hand. Same drift risk as above for
+# everything that must not differ -- but ExecStart and ReadWritePaths ARE
+# allowed to: "Option 2: Manual Installation" in README.md installs the
+# binary to /usr/local/bin, not install.sh's own /opt/antimage, and the two
+# genuinely different paths are the whole reason packaging/ is a second file
+# rather than a symlink. What must not happen is packaging/antimage-node.service
+# shipping the ${VAR} placeholders themselves -- systemd does not expand
+# ${...} in a unit file, so a copy-pasted ${BINARY_PATH} is not a stale path,
+# it is a unit that cannot start at all.
 UNIT="$(dirname "$0")/../packaging/antimage-node.service"
 extracted="$(mktemp)"
 trap 'rm -f "$extracted"' EXIT
 awk '/^cat > \/etc\/systemd\/system\/antimage-node\.service <</ {flag=1; next}
      flag && /^EOF$/ {flag=0}
      flag' "$SCRIPT" > "$extracted"
+
 if [ ! -s "$extracted" ]; then
   fail "could not find the antimage-node.service heredoc in install.sh"
 elif [ ! -f "$UNIT" ]; then
   fail "the packaging copy $UNIT is missing"
-elif cmp -s "$extracted" "$UNIT"; then
-  echo "ok: packaging/antimage-node.service matches the unit install.sh writes"
 else
-  fail "packaging/antimage-node.service has drifted from the unit install.sh writes"
+  if grep -v '^#' "$UNIT" | grep -q '\${'; then
+    fail "packaging/antimage-node.service still has an unexpanded \${VAR} placeholder -- systemd cannot start this unit"
+  fi
+  # Structural lines -- everything but ExecStart/ReadWritePaths and comments,
+  # which are the two lines install.sh's own INSTALL_DIR-based paths would
+  # never match, and comments, which the heredoc carries none of -- must
+  # still agree line for line: the hardening flags, Restart policy, and
+  # everything else here is not install-method-specific.
+  structural() {
+    grep -v -E '^(#|ExecStart=|ReadWritePaths=)' "$1"
+  }
+  if diff -q <(structural "$extracted") <(structural "$UNIT") >/dev/null; then
+    echo "ok: packaging/antimage-node.service matches the unit install.sh writes"
+  else
+    fail "packaging/antimage-node.service has drifted from the unit install.sh writes"
+  fi
 fi
 
 if [ "$fails" -eq 0 ]; then
