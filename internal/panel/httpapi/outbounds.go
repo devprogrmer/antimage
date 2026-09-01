@@ -432,6 +432,13 @@ type egressCapabilitiesDTO struct {
 	// Reason explains an unsupported node, so the UI can say why rather than
 	// simply hiding the feature with no account of itself.
 	Reason string `json:"reason,omitempty"`
+	// OutboundSchema is the adapter's JSON Schema for Outbound.Params, verbatim
+	// -- what handleCreateOutbound/handleUpdateOutbound validate against, and
+	// what an editor builds a form from, exactly as service-schemas already
+	// does for inbounds. One schema per adapter, not per outbound kind: an
+	// adapter with several kinds (direct/block/socks/http/wireguard) validates
+	// all of them against this same document.
+	OutboundSchema json.RawMessage `json:"outbound_schema,omitempty"`
 }
 
 func (d Deps) handleGetEgressCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -473,6 +480,7 @@ func (d Deps) handleGetEgressCapabilities(w http.ResponseWriter, r *http.Request
 		OutboundKinds:    caps.OutboundKinds,
 		BuiltinTags:      caps.BuiltinOutboundTags,
 		SupportsBalancer: caps.SupportsBalancer,
+		OutboundSchema:   caps.OutboundSchema,
 	}
 	// Never nil: the UI iterates these, and a null would need a guard at every
 	// call site.

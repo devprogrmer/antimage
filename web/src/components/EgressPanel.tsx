@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import { formatNumber, t } from "../i18n";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { SchemaForm } from "./SchemaForm";
+import type { JSONSchema, Params } from "./SchemaForm";
 
 /** Egress: the outbounds a node may send traffic through and the rules that
  *  select between them.
@@ -21,6 +23,10 @@ interface EgressCapabilities {
   builtin_tags: string[];
   supports_balancer: boolean;
   reason?: string;
+  // What handleCreateOutbound/handleUpdateOutbound actually validate params
+  // against -- one schema per adapter, not per outbound kind, since Xray's
+  // direct/block/socks/http/wireguard kinds all share one params shape.
+  outbound_schema?: JSONSchema;
 }
 
 interface Outbound {
@@ -139,21 +145,58 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
 
   const [tag, setTag] = useState("");
   const [kind, setKind] = useState("");
-  const [params, setParams] = useState("");
+  const [params, setParams] = useState<Params>({});
+  const [paramsJsonMode, setParamsJsonMode] = useState(false);
+  const [paramsJsonText, setParamsJsonText] = useState("{}");
+  const [paramsJsonError, setParamsJsonError] = useState("");
+
+  function createParamsToJSON() {
+    setParamsJsonText(JSON.stringify(params, null, 2));
+    setParamsJsonError("");
+    setParamsJsonMode(true);
+  }
+  function createParamsToForm() {
+    try {
+      setParams(JSON.parse(paramsJsonText) as Params);
+      setParamsJsonError("");
+      setParamsJsonMode(false);
+    } catch (err) {
+      setParamsJsonError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   const createOutbound = useMutation({
-    mutationFn: () =>
+    mutationFn: (body: Params) =>
       api.post(`/api/v1/nodes/${nodeId}/outbounds`, {
         tag,
         kind: kind || caps.data?.outbound_kinds[0],
-        params: params.trim() === "" ? {} : JSON.parse(params),
+        params: body,
       }),
     onSuccess: () => {
       setTag("");
-      setParams("");
+      setParams({});
+      setParamsJsonText("{}");
+      setParamsJsonMode(false);
       invalidate();
     },
   });
+
+  function submitCreateOutbound() {
+    let body = params;
+    if (paramsJsonMode || !caps.data?.outbound_schema) {
+      try {
+        body = JSON.parse(paramsJsonText) as Params;
+      } catch (err) {
+        // A syntax check only. Whether the document satisfies the schema is
+        // the panel's own answer, from the same schema this form was built
+        // from -- a second validator here could only drift from it.
+        setParamsJsonError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
+    setParamsJsonError("");
+    createOutbound.mutate(body);
+  }
 
   const deleteOutbound = useMutation({
     mutationFn: (id: number) => api.del(`/api/v1/nodes/${nodeId}/outbounds/${id}`),
@@ -170,7 +213,10 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
   const [editingOutbound, setEditingOutbound] = useState<Outbound | null>(null);
   const [editTag, setEditTag] = useState("");
   const [editKind, setEditKind] = useState("");
-  const [editParams, setEditParams] = useState("");
+  const [editParams, setEditParams] = useState<Params>({});
+  const [editParamsJsonMode, setEditParamsJsonMode] = useState(false);
+  const [editParamsJsonText, setEditParamsJsonText] = useState("{}");
+  const [editParamsJsonError, setEditParamsJsonError] = useState("");
   const [editEnabled, setEditEnabled] = useState(true);
 
   function startEditOutbound(o: Outbound) {
@@ -180,16 +226,34 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
     // Re-serialized from what the server already redacted; a credential
     // field here is the "__redacted__" sentinel the backend restores on
     // submit as long as this field is left untouched.
-    setEditParams(JSON.stringify(o.params, null, 2));
+    setEditParams(o.params);
+    setEditParamsJsonText(JSON.stringify(o.params, null, 2));
+    setEditParamsJsonMode(false);
+    setEditParamsJsonError("");
     setEditEnabled(o.enabled);
   }
 
+  function editParamsToJSON() {
+    setEditParamsJsonText(JSON.stringify(editParams, null, 2));
+    setEditParamsJsonError("");
+    setEditParamsJsonMode(true);
+  }
+  function editParamsToForm() {
+    try {
+      setEditParams(JSON.parse(editParamsJsonText) as Params);
+      setEditParamsJsonError("");
+      setEditParamsJsonMode(false);
+    } catch (err) {
+      setEditParamsJsonError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   const updateOutbound = useMutation({
-    mutationFn: () =>
+    mutationFn: (body: Params) =>
       api.put(`/api/v1/nodes/${nodeId}/outbounds/${editingOutbound!.id}`, {
         tag: editTag,
         kind: editKind,
-        params: editParams.trim() === "" ? {} : JSON.parse(editParams),
+        params: body,
         enabled: editEnabled,
       }),
     onSuccess: () => {
@@ -197,6 +261,20 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
       invalidate();
     },
   });
+
+  function submitUpdateOutbound() {
+    let body = editParams;
+    if (editParamsJsonMode || !caps.data?.outbound_schema) {
+      try {
+        body = JSON.parse(editParamsJsonText) as Params;
+      } catch (err) {
+        setEditParamsJsonError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
+    setEditParamsJsonError("");
+    updateOutbound.mutate(body);
+  }
 
   // Which outbound is being removed. Named in the dialog, because a rule that
   // still selects it is the failure this asks about.
@@ -436,43 +514,73 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
         />
         <MutationError error={deleteOutbound.error} />
 
-        <div className="mt-2 flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted-foreground">{t("egress.tag")}</span>
-            <input
-              value={tag}
-              onChange={(e) => setTag(e.target.value)}
-              className="w-32 border border-input bg-card px-2 py-1 font-mono text-xs"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted-foreground">{t("egress.kind")}</span>
-            {/* The adapter's list, never the frontend's. */}
-            <select
-              value={kind}
-              onChange={(e) => setKind(e.target.value)}
-              className="border border-input bg-card px-2 py-1 font-mono text-xs"
-            >
-              {caps.data.outbound_kinds.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-1 flex-col gap-1">
-            <span className="text-[11px] text-muted-foreground">{t("egress.params")}</span>
-            <input
-              value={params}
-              onChange={(e) => setParams(e.target.value)}
-              placeholder={t("egress.paramsPlaceholder")}
-              className="w-full border border-input bg-card px-2 py-1 font-mono text-xs"
-            />
-          </label>
+        <div className="mt-2 space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">{t("egress.tag")}</span>
+              <input
+                value={tag}
+                onChange={(e) => setTag(e.target.value)}
+                className="w-32 border border-input bg-card px-2 py-1 font-mono text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">{t("egress.kind")}</span>
+              {/* The adapter's list, never the frontend's. */}
+              <select
+                value={kind}
+                onChange={(e) => setKind(e.target.value)}
+                className="border border-input bg-card px-2 py-1 font-mono text-xs"
+              >
+                {caps.data.outbound_kinds.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {caps.data.outbound_schema && (
+              <button
+                type="button"
+                onClick={() => (paramsJsonMode ? createParamsToForm() : createParamsToJSON())}
+                className="ms-auto text-xs text-muted-foreground hover:text-foreground"
+              >
+                {paramsJsonMode ? t("studio.switchToForm") : t("studio.switchToJson")}
+              </button>
+            )}
+          </div>
+
+          {/* Falls back to raw JSON when the node reported no outbound schema
+              (unsupported nodes never reach this form at all, so in practice
+              this is only a node whose adapter predates schema reporting) --
+              nothing to build a typed form from, but editing must still work. */}
+          {paramsJsonMode || !caps.data.outbound_schema ? (
+            <div>
+              <label className="block text-[11px] text-muted-foreground" htmlFor="egress-params-json">
+                {t("egress.params")}
+              </label>
+              <textarea
+                id="egress-params-json"
+                value={paramsJsonText}
+                onChange={(e) => setParamsJsonText(e.target.value)}
+                rows={8}
+                spellCheck={false}
+                className="w-full border border-input bg-card px-2 py-1 font-mono text-xs"
+              />
+              {paramsJsonError !== "" && (
+                <p className="mt-1 text-xs text-destructive" role="alert">
+                  {paramsJsonError}
+                </p>
+              )}
+            </div>
+          ) : (
+            <SchemaForm schema={caps.data.outbound_schema} value={params} onChange={setParams} />
+          )}
+
           <button
             type="button"
             disabled={tag.trim() === "" || createOutbound.isPending}
-            onClick={() => createOutbound.mutate()}
+            onClick={submitCreateOutbound}
             className="border border-input px-3 py-1 text-xs hover:bg-accent disabled:opacity-40"
           >
             {createOutbound.isPending ? t("egress.saving") : t("create")}
@@ -505,15 +613,6 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
                   className="w-28 border border-input bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
                 />
               </label>
-              <label className="flex flex-1 flex-col gap-1">
-                <span className="text-[11px] text-muted-foreground">{t("egress.params")}</span>
-                <textarea
-                  value={editParams}
-                  onChange={(e) => setEditParams(e.target.value)}
-                  rows={4}
-                  className="w-full border border-input bg-card px-2 py-1 font-mono text-xs"
-                />
-              </label>
               <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <input
                   type="checkbox"
@@ -522,10 +621,47 @@ export function EgressPanel({ nodeId }: { nodeId: number }) {
                 />
                 {t("subject.enabled")}
               </label>
+              {caps.data.outbound_schema && (
+                <button
+                  type="button"
+                  onClick={() => (editParamsJsonMode ? editParamsToForm() : editParamsToJSON())}
+                  className="ms-auto text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {editParamsJsonMode ? t("studio.switchToForm") : t("studio.switchToJson")}
+                </button>
+              )}
+            </div>
+
+            <div className="mt-3">
+              {editParamsJsonMode || !caps.data.outbound_schema ? (
+                <div>
+                  <label className="block text-[11px] text-muted-foreground" htmlFor="egress-edit-params-json">
+                    {t("egress.params")}
+                  </label>
+                  <textarea
+                    id="egress-edit-params-json"
+                    value={editParamsJsonText}
+                    onChange={(e) => setEditParamsJsonText(e.target.value)}
+                    rows={8}
+                    spellCheck={false}
+                    className="w-full border border-input bg-card px-2 py-1 font-mono text-xs"
+                  />
+                  {editParamsJsonError !== "" && (
+                    <p className="mt-1 text-xs text-destructive" role="alert">
+                      {editParamsJsonError}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <SchemaForm schema={caps.data.outbound_schema} value={editParams} onChange={setEditParams} />
+              )}
+            </div>
+
+            <div className="mt-3 flex gap-2">
               <button
                 type="button"
                 disabled={editTag.trim() === "" || updateOutbound.isPending}
-                onClick={() => updateOutbound.mutate()}
+                onClick={submitUpdateOutbound}
                 className="border border-input px-3 py-1 text-xs hover:bg-accent disabled:opacity-40"
               >
                 {updateOutbound.isPending ? t("egress.saving") : t("subject.update")}

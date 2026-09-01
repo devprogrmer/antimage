@@ -146,6 +146,85 @@ describe("EgressPanel editing", () => {
   });
 });
 
+describe("EgressPanel outbound params", () => {
+  const schemaCaps = {
+    ...caps,
+    outbound_schema: {
+      type: "object",
+      properties: {
+        address: { type: "string" },
+        port: { type: "integer" },
+      },
+      required: ["address"],
+    },
+  };
+
+  it("creates an outbound through the schema-driven form when the node reports one", async () => {
+    routes["/api/v1/nodes/1/egress/capabilities"] = { body: schemaCaps };
+    routes["/api/v1/nodes/1/outbounds"] = { body: { outbounds: [] } };
+    routes["/api/v1/nodes/1/routing"] = { body: { rules: [] } };
+    routes["/api/v1/nodes/1/balancers"] = { body: { balancers: [] } };
+    routes["POST /api/v1/nodes/1/outbounds"] = {
+      status: 201,
+      body: { id: 1, node_id: 1, tag: "up", kind: "freedom", params: {}, enabled: true },
+    };
+    const user = userEvent.setup({ delay: null });
+    renderPanel(<EgressPanel nodeId={1} />);
+
+    // "Tag" also labels the balancer form's field; the outbound form's is
+    // first in document order, same convention the balancer test below uses.
+    const tagInputs = await screen.findAllByLabelText("Tag");
+    // Waited for real data first, or this could pass for the wrong reason --
+    // nothing rendered yet, not because JSON mode was deliberately not the
+    // default.
+    expect(screen.queryByLabelText("Parameters")).not.toBeInTheDocument();
+    await user.type(tagInputs[0], "up");
+    // A required field's label also carries a "required" marker span, so its
+    // accessible text is "addressrequired" rather than "address" alone.
+    await user.type(screen.getByLabelText("address", { exact: false }), "10.0.0.9");
+    await user.type(screen.getByLabelText("port"), "1080");
+    await user.click(screen.getAllByRole("button", { name: "Create" })[0]);
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "POST" && c.path === "/api/v1/nodes/1/outbounds");
+      expect(sent).toBeTruthy();
+      expect(sent!.body).toMatchObject({
+        tag: "up",
+        params: { address: "10.0.0.9", port: 1080 },
+      });
+    });
+  });
+
+  it("falls back to a JSON textarea when the node reports no outbound schema", async () => {
+    // The fixture used throughout this file (`caps`) carries no
+    // outbound_schema -- exactly a node whose adapter predates schema
+    // reporting. There is nothing to build a typed form from, but creating
+    // an outbound must still work.
+    seed();
+    routes["POST /api/v1/nodes/1/outbounds"] = {
+      status: 201,
+      body: { id: 2, node_id: 1, tag: "raw", kind: "freedom", params: {}, enabled: true },
+    };
+    const user = userEvent.setup({ delay: null });
+    renderPanel(<EgressPanel nodeId={1} />);
+
+    const tagInputs = await screen.findAllByLabelText("Tag");
+    await user.type(tagInputs[0], "raw");
+    const jsonField = await screen.findByLabelText("Parameters");
+    await user.clear(jsonField);
+    // userEvent.type reads { as its own escape syntax ({{ types one literal
+    // brace); a closing } needs no such escaping.
+    await user.type(jsonField, '{{"server":"10.0.0.2"}');
+    await user.click(screen.getAllByRole("button", { name: "Create" })[0]);
+
+    await waitFor(() => {
+      const sent = calls.find((c) => c.method === "POST" && c.path === "/api/v1/nodes/1/outbounds");
+      expect(sent).toBeTruthy();
+      expect(sent!.body).toMatchObject({ tag: "raw", params: { server: "10.0.0.2" } });
+    });
+  });
+});
+
 describe("EgressPanel balancers", () => {
   it("hides the balancers section on a node whose adapter has no balancer concept", async () => {
     routes["/api/v1/nodes/1/egress/capabilities"] = {

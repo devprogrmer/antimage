@@ -381,10 +381,11 @@ func TestEgressCapabilitiesComeFromTheAdapter(t *testing.T) {
 		t.Fatalf("capabilities = %d: %s", res.Code, res.Body)
 	}
 	var got struct {
-		Supported     bool     `json:"supported"`
-		AdapterKind   string   `json:"adapter_kind"`
-		OutboundKinds []string `json:"outbound_kinds"`
-		BuiltinTags   []string `json:"builtin_tags"`
+		Supported      bool            `json:"supported"`
+		AdapterKind    string          `json:"adapter_kind"`
+		OutboundKinds  []string        `json:"outbound_kinds"`
+		BuiltinTags    []string        `json:"builtin_tags"`
+		OutboundSchema json.RawMessage `json:"outbound_schema"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -394,6 +395,17 @@ func TestEgressCapabilitiesComeFromTheAdapter(t *testing.T) {
 	}
 	if len(got.OutboundKinds) == 0 {
 		t.Error("no outbound kinds reported; the UI would have nothing to offer")
+	}
+	// The editor is built from this: an empty schema would mean an outbound
+	// creation form with no fields at all.
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(got.OutboundSchema, &schema); err != nil {
+		t.Fatalf("outbound_schema does not decode as a JSON Schema: %v (%s)", err, got.OutboundSchema)
+	}
+	if len(schema.Properties) == 0 {
+		t.Error("outbound_schema has no properties; the UI would have nothing to render")
 	}
 	// direct is supplied by Xray's own accounting configuration, so a rule may
 	// target it although no outbound row exists. The UI needs it in the picker.
