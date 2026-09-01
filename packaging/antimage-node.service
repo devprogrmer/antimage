@@ -7,7 +7,10 @@ Wants=network-online.target
 Type=simple
 User=antimage
 Group=antimage
-ExecStart=${BINARY_PATH} start
+# Literal paths, not shell variables: systemd does not expand ${...} in a
+# unit file, so this must match wherever "Option 2: Manual Installation" in
+# README.md actually installs the binary and writes node.yaml.
+ExecStart=/usr/local/bin/antimage-node --config /etc/antimage/node.yaml
 Restart=on-failure
 RestartSec=5s
 LimitNOFILE=65536
@@ -17,7 +20,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${INSTALL_DIR}
+ReadWritePaths=/etc/antimage /var/lib/antimage
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 
 [Install]

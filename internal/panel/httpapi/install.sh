@@ -12,6 +12,13 @@ CHECKSUM_URL="${PANEL_URL}/download/antimage-node.sha256"
 INSTALL_DIR="/opt/antimage"
 BINARY_PATH="${INSTALL_DIR}/antimage-node"
 SERVICE_NAME="antimage-node"
+# Where antimage-node itself looks, by default (cmd/antimage-node/main.go's
+# -config flag) and what every README's manual-install fallback already
+# documents -- state_dir here is not a free choice, it is what makes that
+# fallback and this script agree.
+CONFIG_DIR="/etc/antimage"
+CONFIG_PATH="${CONFIG_DIR}/node.yaml"
+STATE_DIR="/var/lib/antimage"
 
 # Color output
 RED='\033[0;31m'
@@ -40,6 +47,7 @@ log_error() {
 # wrong panel, which is discovered much later and by somebody else.
 ENROLLMENT_TOKEN=""
 PANEL_FLAG=""
+CA_FINGERPRINT=""
 EXPLICIT_FLAGS=0
 
 while [[ $# -gt 0 ]]; do
@@ -54,9 +62,18 @@ while [[ $# -gt 0 ]]; do
             ENROLLMENT_TOKEN="${2:-}"
             shift 2 || true
             ;;
+        --ca-fingerprint)
+            # Optional. The panel already knows this and passes it (both the
+            # plain enroll-token command and the SSH-bootstrap command include
+            # it), which saves the extra round trip below. It stays optional
+            # so the hand-typed form this --help text advertises keeps working
+            # without the operator hunting the value down first.
+            CA_FINGERPRINT="${2:-}"
+            shift 2 || true
+            ;;
         --help|-h)
             echo "Usage: curl -fsSL ${PANEL_URL}/install.sh | bash -s -- TOKEN"
-            echo "   or: install.sh --panel https://panel.example.com --token TOKEN"
+            echo "   or: install.sh --panel https://panel.example.com --token TOKEN [--ca-fingerprint SHA256]"
             exit 0
             ;;
         -*)
@@ -185,6 +202,42 @@ fi
 chown root:root antimage-node
 chown antimage:antimage "${INSTALL_DIR}"
 
+# Fetch the panel's CA fingerprint if the caller did not already supply one.
+# node.yaml pins against it so a hijacked DNS record cannot impersonate the
+# panel; refusing to start without it is agent.LoadConfig's own rule, not a
+# choice this script is adding.
+if [[ -z "${CA_FINGERPRINT}" ]]; then
+    log_info "Fetching panel CA fingerprint..."
+    if ! CA_FINGERPRINT="$(curl -fsSL --max-time 30 "${PANEL_URL}/api/v1/ca-fingerprint")"; then
+        log_error "Failed to fetch panel CA fingerprint"
+        exit 1
+    fi
+    if [[ -z "${CA_FINGERPRINT}" ]]; then
+        log_error "Panel returned an empty CA fingerprint"
+        exit 1
+    fi
+fi
+
+# Write node configuration. There is no "antimage-node enroll" command --
+# enrollment happens automatically, inside the long-running process, the
+# first time it starts and finds no certificate yet in state_dir (see
+# loadOrEnroll in cmd/antimage-node/main.go). node.yaml is the only input
+# that step takes, which is why it is written before the service ever starts.
+log_info "Writing node configuration..."
+mkdir -p "${CONFIG_DIR}"
+chmod 700 "${CONFIG_DIR}"
+mkdir -p "${STATE_DIR}"
+chown antimage:antimage "${STATE_DIR}"
+chmod 700 "${STATE_DIR}"
+cat > "${CONFIG_PATH}" <<EOF
+panel_url: "${PANEL_URL}"
+token: "${ENROLLMENT_TOKEN}"
+ca_fingerprint: "${CA_FINGERPRINT}"
+state_dir: "${STATE_DIR}"
+EOF
+chown antimage:antimage "${CONFIG_DIR}" "${CONFIG_PATH}"
+chmod 600 "${CONFIG_PATH}"
+
 # Create systemd service
 log_info "Creating systemd service..."
 cat > /etc/systemd/system/antimage-node.service <<EOF
@@ -197,7 +250,7 @@ Wants=network-online.target
 Type=simple
 User=antimage
 Group=antimage
-ExecStart=${BINARY_PATH} start
+ExecStart=${BINARY_PATH} --config ${CONFIG_PATH}
 Restart=on-failure
 RestartSec=5s
 LimitNOFILE=65536
@@ -207,7 +260,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${INSTALL_DIR}
+ReadWritePaths=${INSTALL_DIR} ${CONFIG_DIR} ${STATE_DIR}
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 
 [Install]
@@ -217,27 +270,31 @@ EOF
 # Reload systemd
 systemctl daemon-reload
 
-# Enroll with panel
-log_info "Enrolling with panel..."
-if ! sudo -u antimage ./antimage-node enroll --token="${ENROLLMENT_TOKEN}" --panel="${PANEL_URL}"; then
-    log_error "Enrollment failed"
-    exit 1
-fi
-
 # Enable and start service
 log_info "Enabling and starting service..."
 systemctl enable ${SERVICE_NAME}
 systemctl start ${SERVICE_NAME}
 
-# Wait for service to stabilize
-sleep 2
+# Wait for enrollment to complete. The service enrolls automatically on its
+# first start, so node.crt appearing in state_dir -- not merely the process
+# staying up -- is the actual proof it worked; a bad token or an unreachable
+# panel exits the process too, and systemd restarting it on a 5s backoff can
+# look "active" in between attempts even though enrollment never succeeded.
+log_info "Waiting for enrollment..."
+ENROLLED=0
+for _ in $(seq 1 30); do
+    if [[ -f "${STATE_DIR}/node.crt" ]]; then
+        ENROLLED=1
+        break
+    fi
+    sleep 1
+done
 
-# Check service status
-if systemctl is-active --quiet ${SERVICE_NAME}; then
-    log_info "Installation complete. Node is running."
+if [[ "${ENROLLED}" -eq 1 ]] && systemctl is-active --quiet ${SERVICE_NAME}; then
+    log_info "Installation complete. Node is enrolled and running."
     log_info "Check status with: systemctl status ${SERVICE_NAME}"
     log_info "View logs with: journalctl -u ${SERVICE_NAME} -f"
 else
-    log_error "Service failed to start. Check logs with: journalctl -u ${SERVICE_NAME}"
+    log_error "Enrollment did not complete. Check logs with: journalctl -u ${SERVICE_NAME}"
     exit 1
 fi

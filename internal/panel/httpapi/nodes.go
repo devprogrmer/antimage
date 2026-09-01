@@ -310,6 +310,15 @@ func (d Deps) handleIssueEnrollToken(w http.ResponseWriter, r *http.Request) {
 	command := fmt.Sprintf(
 		"curl -fsSL %s://%s/install.sh | sudo bash -s -- --panel %s://%s --token %s",
 		scheme, r.Host, scheme, r.Host, token)
+	// The panel already knows its own CA fingerprint; passing it saves
+	// install.sh a round trip to GET /ca-fingerprint. Appended only when a CA
+	// is actually loaded (nil before cmd/antimage-panel builds one, which in
+	// production is always by the time this handler runs) -- install.sh
+	// falls back to fetching it itself when the flag is omitted, so this is
+	// an optimization, not a requirement.
+	if d.CA != nil {
+		command += " --ca-fingerprint " + d.CA.FingerprintSHA256()
+	}
 
 	// Returned once and never retrievable again: only the hash is stored.
 	WriteJSON(w, http.StatusCreated, map[string]any{
